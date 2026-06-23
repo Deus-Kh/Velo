@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "456990940119",
+    "project_id": "velo-deus",
+    "storage_bucket": "velo-deus.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:456990940119:android:30e3e5a595ebd070724992",
+        "android_client_info": {
+          "package_name": "com.velo"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDfSOGrFIpHUJQTrRHv8F2beHavDL5G3a0"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

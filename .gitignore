@@ -1,0 +1,101 @@
+node_modules
+
+git-backup
+1.png
+architecture.md
+chat-backend.pem
+logo.png
+my-release-key.keystore
+ROADMAP.md
+SESSION_ESTABLISHMENT_POLICY.md
+UI_INTERFACE_ROADMAP.md
+UI_realization.md
+UserFlow.md
+UX.md
+V2_STABILIZATION_CHECKLIST.md
+
+/package-lock.json
+/package.json
+
+
+#client
+chats-client/node_modules
+
+chats-client/build/
+chats-client/*.pbxuser
+chats-client/!default.pbxuser
+chats-client/*.mode1v3
+chats-client/!default.mode1v3
+chats-client/*.mode2v3
+chats-client/!default.mode2v3
+chats-client/*.perspectivev3
+chats-client/!default.perspectivev3
+chats-client/xcuserdata
+chats-client/*.xccheckout
+chats-client/*.moved-aside
+chats-client/DerivedData
+chats-client/*.hmap
+chats-client/*.ipa
+chats-client/*.xcuserstate
+chats-client/**/.xcode.env.local
+
+
+# Android/IntelliJ
+#
+chats-client/build/
+chats-client/.idea
+chats-client/.gradle
+chats-client/local.properties
+chats-client/*.iml
+chats-client/*.hprof
+chats-client/.cxx/
+chats-client/*.keystore
+chats-client!debug.keystore
+chats-client/.kotlin/
+
+
+# node.js
+#
+chats-client/node_modules/
+npm-debug.log
+yarn-error.log
+
+# fastlane
+#
+# It is recommended to not store the screenshots in the git repo. Instead, use fastlane to re-generate the
+# screenshots whenever they are needed.
+# For more information about the recommended setup visit:
+# https://docs.fastlane.tools/best-practices/source-control/
+
+chats-client/**/fastlane/report.xml
+chats-client/**/fastlane/Preview.html
+chats-client/**/fastlane/screenshots
+chats-client/**/fastlane/test_output
+
+# Bundle artifact
+*.jsbundle
+
+# Ruby / CocoaPods
+chats-client/**/Pods/
+chats-client/vendor/bundle/
+
+# Temporary files created by Metro to check the health of the file watcher
+chats-client/.metro-health-check*
+
+# testing
+chats-client/coverage
+
+# Yarn
+chats-client/.yarn/*
+chats-client!.yarn/patches
+chats-client!.yarn/plugins
+chats-client!.yarn/releases
+chats-client!.yarn/sdks
+chats-client!.yarn/versions
+
+
+
+#server
+chats-server/node_modules/
+chats-server/src/config.ts
+chats-server/velo-deus-firebase-adminsdk-fbsvc-d6096986a9
