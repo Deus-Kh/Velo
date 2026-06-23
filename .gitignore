@@ -20,7 +20,7 @@ V2_STABILIZATION_CHECKLIST.md
 
 #client
 chats-client/node_modules
-
+chats-client\android\google-services.json
 chats-client/build/
 chats-client/*.pbxuser
 chats-client/!default.pbxuser
