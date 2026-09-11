@@ -1,18 +1,8 @@
 node_modules
 
 git-backup
-1.png
-architecture.md
 chat-backend.pem
-logo.png
 my-release-key.keystore
-ROADMAP.md
-SESSION_ESTABLISHMENT_POLICY.md
-UI_INTERFACE_ROADMAP.md
-UI_realization.md
-UserFlow.md
-UX.md
-V2_STABILIZATION_CHECKLIST.md
 
 /package-lock.json
 /package.json

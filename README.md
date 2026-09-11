@@ -358,11 +358,11 @@ npm run lint
 
 ## 📚 Documentation
 
-- [Architecture Documentation](./architecture.md) - Detailed system architecture
-- [User Flow Documentation](./UserFlow.md) - User interaction flows
-- [UI/UX Documentation](./UX.md) - Interface design specifications
-- [Session Establishment Policy](./SESSION_ESTABLISHMENT_POLICY.md) - Encryption session setup
-- [UI Realization](./UI_realization.md) - UI component implementation guide
+- [Architecture Documentation](./docs/design/architecture.md) - Detailed system architecture
+- [User Flow Documentation](./docs/design/UserFlow.md) - User interaction flows
+- [UI/UX Documentation](./docs/design/UX.md) - Interface design specifications
+- [Session Establishment Policy](./docs/protocol/SESSION_ESTABLISHMENT_POLICY.md) - Encryption session setup
+- [UI Realization](./docs/design/UI_realization.md) - UI component implementation guide
 
 ---
 
@@ -373,7 +373,7 @@ npm run lint
 - Group messaging coming in v2
 - End-to-end video/audio calls planned for future releases
 
-See [V2_STABILIZATION_CHECKLIST.md](./V2_STABILIZATION_CHECKLIST.md) for the development roadmap.
+See [V2_STABILIZATION_CHECKLIST.md](./docs/protocol/V2_STABILIZATION_CHECKLIST.md) for the development roadmap.
 
 ---
 
@@ -423,13 +423,13 @@ This project is licensed under the ISC License - see the LICENSE file for detail
 For questions, issues, or feature requests:
 - Open an issue on GitHub
 - Check existing documentation
-- Review [ROADMAP.md](./ROADMAP.md) for planned features
+- Review [ROADMAP.md](./docs/PROJECT_ROADMAP.md) for planned features
 
 ---
 
 ## 🗺️ Roadmap
 
-See [ROADMAP.md](./ROADMAP.md) for detailed feature roadmap and future plans.
+See [ROADMAP.md](./docs/PROJECT_ROADMAP.md) for detailed feature roadmap and future plans.
 
 Current focus areas:
 - ✅ Core messaging functionality
