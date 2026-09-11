@@ -1,6 +1,7 @@
 
 
 import { create } from 'zustand';
+import { AppState, type AppStateStatus } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 // import { decodeBase64 } from 'tweetnacl-util';
 
@@ -20,7 +21,7 @@ import { sharedSecretCache } from '../shared/crypto/sharedSecretCache';
 
 import { keysApi } from '../shared/api/keys.api';
 import { ensureIdentityKeyPairForUser } from '../shared/crypto/identityKeys';
-import { ensurePreKeysForUser } from '../shared/crypto/prekeys';
+import { ensurePreKeysForUser, topUpOneTimePreKeysIfNeeded } from '../shared/crypto/prekeys';
 import { getOrCreateHistoryMasterKey } from '../shared/crypto/historyMasterKey';
 import {
   getNotificationPreferencesForUser,
@@ -46,6 +47,23 @@ interface AuthState {
 
 let socketDrainCleanup: (() => void) | null = null;
 let pushTokenRefreshCleanup: (() => void) | null = null;
+let foregroundTopUpCleanup: (() => void) | null = null;
+
+/**
+ * Re-checks the one-time prekey pool whenever the app returns to the
+ * foreground (throttled inside topUpOneTimePreKeysIfNeeded), so a user who
+ * receives many new conversations between logins does not run dry.
+ */
+function startForegroundPreKeyTopUp(userId: string): () => void {
+  const onChange = (state: AppStateStatus) => {
+    if (state !== 'active') return;
+    topUpOneTimePreKeysIfNeeded(userId).catch((e) =>
+      console.warn('[prekeys] foreground top-up failed:', (e as Error)?.message ?? e),
+    );
+  };
+  const subscription = AppState.addEventListener('change', onChange);
+  return () => subscription.remove();
+}
 
 async function persistCredentials(userId: string, accessToken: string): Promise<void> {
   await AsyncStorage.multiSet([
@@ -94,6 +112,8 @@ async function bootstrapAfterAuth(userId: string, token: string) {
   } catch (e) {
     console.warn('Prekeys setup failed:', e);
   }
+  foregroundTopUpCleanup?.();
+  foregroundTopUpCleanup = startForegroundPreKeyTopUp(userId);
 
   // 3) Socket
   const socket = initSocket(token);
@@ -200,6 +220,8 @@ export const useAuthStore = create<AuthState>((set) => ({
     socketDrainCleanup = null;
     pushTokenRefreshCleanup?.();
     pushTokenRefreshCleanup = null;
+    foregroundTopUpCleanup?.();
+    foregroundTopUpCleanup = null;
     disconnectSocket();
 
     await AsyncStorage.multiRemove(['accessToken', 'userId']);

@@ -260,12 +260,50 @@ Point a domain at the server; run Caddy with `reverse_proxy localhost:9999`; ver
 
 ---
 
-## T1.4 — Prekey bundle rate limiting and issue cache
-**Tier** CORE · **Fixes** P0-4 · **Est** 2d · **Depends** T1.5
+## T1.4 — Prekey bundle issue budgets and pool hygiene
+**Tier** CORE · **Fixes** P0-4 · **Est** 2d · **Depends** T1.5 · **Status:** done 2026-09-11
 
-`PreKeyBundleIssue` model `{requesterId, targetId, oneTimePreKeyId, issuedBundle, expiresAt}` with a unique `(requesterId,targetId)` index and a TTL index; handler: reject self-request (400); return the cached bundle if unexpired (no OPK consumed); `bundleLimiter` 20 distinct targets/hour/requester; consume atomically as today; add `remainingOneTimePreKeys` to the response; `logger.warn` under 10, `logger.error` at 0; upsert the ledger with `findOneAndUpdate({upsert:true})`. Client: `topUpPreKeysIfNeeded()` on foreground and whenever a fetched bundle reports `remaining < MIN_UNUSED`. Server: cap total unused OPKs per user at 500 (reject uploads beyond), delete used OPKs older than 30 days and SPKs older than the grace window (T2.10).
+> **Design change (2026-09-11).** Spec 2.0 prescribed a 24 h per-(requester, target) bundle *cache*
+> so repeat requests would not consume one-time keys. That was wrong: the responder deletes a
+> one-time prekey secret the first time it is used (`x3dh.ts` → `deleteOneTimePreKeySecret`), so a
+> requester who resets or reinstalls within the cache window would be handed a bundle whose
+> one-time key the peer no longer holds, and every handshake would fail until the cache expired.
+> Drain protection therefore uses issue *budgets* (what Signal does), never re-served bundles.
 
-**Acceptance:** two requests for one target consume one OPK; 21st distinct target in an hour → 429; own bundle → 400; 100 sequential requests from one requester consume ≤ 1 OPK; depletion logs at <10 and 0.
+### Server
+- **Budgets on every fresh issue**, charged before any lookup so probing unknown ids costs too:
+  `bundlePairLimiter` 5 issues per (requester, target) per hour and `bundleIssueLimiter` 30 issues
+  per requester per hour (`lib/services.ts`, on the KeyValueStore, so Redis-backed in production).
+  `bundleLimiter` (express-rate-limit) stays as a coarse 120 requests/h/user cap.
+- `GET /keys/bundle/:userId`: 400 `BAD_ID` / `SELF_BUNDLE`; 429 `BUNDLE_PAIR_LIMITED` /
+  `BUNDLE_LIMITED` with `Retry-After`; consume atomically as before; `remainingOneTimePreKeys` in
+  the response; `console.warn` below 10 remaining, `console.error` at 0.
+- `PreKeyBundleIssue` is a **ledger** `{requesterId, targetId, signedPreKeyId, oneTimePreKeyId,
+  issuedAt}` with a 30-day TTL — depletion forensics and T2.13 diagnostics, never a cache.
+- `POST /keys/prekeys`: per-item validation (`BAD_PREKEY_ITEM`), total unused pool capped at 500
+  (`409 PREKEY_POOL_FULL`). Consumed keys expire 30 days after `usedAt` (TTL index).
+- `src/app.ts` exports `createApp()` (no listen, no connect) so routes are testable with supertest
+  against `mongodb-memory-server`; `index.ts` wires databases, services, sockets.
+
+### Client
+- `crypto/prekeyPolicy.ts` (pure): `computeTopUpCount`, `isTopUpCheckDue`, constants
+  (min 30, target 100, batch ≤ 200, check interval 5 min).
+- `topUpOneTimePreKeysIfNeeded(userId, {force})` in `prekeys.ts`: single in-flight promise,
+  throttled unless forced, never throws. Called with `force` at login/hydrate and on every
+  `AppState` → `active` (subscription owned by `auth.store.ts`, removed on logout).
+- `PreKeyBundleResponse.remainingOneTimePreKeys?` (informational; 0 ⇒ handshake had no one-time key).
+
+### Acceptance (all verified by `test/keys.bundle.test.ts`)
+- [x] own bundle → 400; malformed id → 400; target without keys → 404, nothing consumed
+- [x] each issue consumes exactly one key and writes one ledger row; a second request issues a **fresh** key
+- [x] 6th issue for one pair within an hour → 429 `BUNDLE_PAIR_LIMITED`; 31st distinct target → 429 `BUNDLE_LIMITED`
+- [x] 100 sequential requests from one requester consume ≤ 5 keys of one target
+- [x] warn at `remaining < 10`, error at 0; an empty pool still issues a bundle with `oneTimePreKey: null`
+- [x] upload of malformed items → 400; unused pool > 500 → 409
+
+### Still open (later tasks)
+- Silent no-OPK fallback is unchanged on the client (typed handling in T2.x).
+- SPK grace-window cleanup belongs to T2.10.
 
 ---
 

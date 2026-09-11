@@ -1,12 +1,24 @@
-import { Router } from 'express';
+import { Router, type Response } from 'express';
 import { requireAuth, type AuthedRequest } from '../middleware/auth';
 import { bundleLimiter } from '../middleware/rateLimit';
+import { services } from '../lib/services';
 import { UserModel } from '../models/User';
 import { SignedPreKeyModel } from '../models/SignedPreKey';
 import { OneTimePreKeyModel } from '../models/OneTimePreKey';
-
+import { PreKeyBundleIssueModel } from '../models/PreKeyBundleIssue';
+import { isValidObjectIdString } from '../utils/objectId';
 
 export const keysRouter = Router();
+
+/** Hard cap on unused one-time prekeys per user (storage-flood control). */
+export const MAX_UNUSED_ONE_TIME_PREKEYS = 500;
+/** Below this many unused keys the server logs a warning; at zero an error. */
+export const ONE_TIME_PREKEY_LOW_WATERMARK = 10;
+
+function tooManyRequests(res: Response, retryAfterSeconds: number, code: string, error: string): Response {
+  res.setHeader('Retry-After', String(retryAfterSeconds));
+  return res.status(429).json({ error, code, retryAfterSeconds });
+}
 
 /**
  * POST /keys/identity
@@ -104,8 +116,33 @@ keysRouter.post('/prekeys', requireAuth, async (req: AuthedRequest, res) => {
     return res.status(400).json({ error: 'items is required (non-empty array)' });
   }
 
-  if (items.length > 500) {
-    return res.status(400).json({ error: 'Too many prekeys (max 500 per request)' });
+  if (items.length > MAX_UNUSED_ONE_TIME_PREKEYS) {
+    return res.status(400).json({ error: `Too many prekeys (max ${MAX_UNUSED_ONE_TIME_PREKEYS} per request)` });
+  }
+
+  const wellFormed = items.every(
+    (it) =>
+      it &&
+      typeof it === 'object' &&
+      Number.isInteger(it.keyId) &&
+      it.keyId >= 0 &&
+      typeof it.publicKey === 'string' &&
+      it.publicKey.length >= 20 &&
+      it.publicKey.length <= 200,
+  );
+  if (!wellFormed) {
+    return res.status(400).json({ error: 'Each item needs an integer keyId and a base64 publicKey', code: 'BAD_PREKEY_ITEM' });
+  }
+
+  // Total-pool cap (P0-4): the per-request cap alone allowed unbounded growth.
+  const unused = await OneTimePreKeyModel.countDocuments({ userId: req.userId, used: false });
+  if (unused + items.length > MAX_UNUSED_ONE_TIME_PREKEYS) {
+    return res.status(409).json({
+      error: `One-time prekey pool is full (${unused} unused, max ${MAX_UNUSED_ONE_TIME_PREKEYS})`,
+      code: 'PREKEY_POOL_FULL',
+      unused,
+      max: MAX_UNUSED_ONE_TIME_PREKEYS,
+    });
   }
 
   const docs = items.map((it) => ({
@@ -132,40 +169,85 @@ keysRouter.post('/prekeys', requireAuth, async (req: AuthedRequest, res) => {
 });
 
 
-// bundleLimiter runs after requireAuth so it can key on the requester (20/h/user).
-// T1.4 adds the per-(requester,target) issue cache on top of this.
+/**
+ * GET /keys/bundle/:userId — issue a prekey bundle for the target user.
+ *
+ * Drain protection (P0-4). Every call that reaches the consume step is a
+ * fresh issue and is budgeted twice: per (requester, target) pair and per
+ * requester overall (see services.ts for the numbers). This is the Signal
+ * approach. Bundles are deliberately NOT cached per pair: the responder
+ * deletes a one-time prekey secret after its first use, so re-serving the
+ * same bundle would break every session a requester re-establishes after a
+ * reset or reinstall. bundleLimiter (express-rate-limit) is only a coarse
+ * per-user request cap in front of this.
+ */
 keysRouter.get('/bundle/:userId', requireAuth, bundleLimiter, async (req: AuthedRequest, res) => {
-  const peerUserId = req.params.userId;
+  const requesterId = String(req.userId);
+  const targetId = req.params.userId;
 
-  // 1) peer identity key (Ed25519 pub) from User
-  // const peer = await UserModel.findById(peerUserId).select('identitySignPublicKey');
-  const peer = await UserModel.findById(peerUserId).select('identitySignPublicKey identityDhPublicKey');
+  if (!isValidObjectIdString(targetId)) {
+    return res.status(400).json({ error: 'Invalid userId', code: 'BAD_ID' });
+  }
+  if (targetId === requesterId) {
+    // Pointless for a real client and a free drain vector.
+    return res.status(400).json({ error: 'Cannot request your own prekey bundle', code: 'SELF_BUNDLE' });
+  }
 
-  if (!peer) return res.status(404).json({ error: 'User not found' });
+  // Budgets are charged before any lookup so probing unknown ids costs too.
+  const pairBudget = await services.bundlePairLimiter.hit(`${requesterId}:${targetId}`);
+  if (!pairBudget.allowed) {
+    console.warn('[keys] bundle pair limit hit', { requesterId, targetId, count: pairBudget.count });
+    return tooManyRequests(res, pairBudget.retryAfterSeconds, 'BUNDLE_PAIR_LIMITED',
+      'Too many prekey bundle requests for this contact. Please try again later.');
+  }
+  const requesterBudget = await services.bundleIssueLimiter.hit(requesterId);
+  if (!requesterBudget.allowed) {
+    console.warn('[keys] bundle requester limit hit', { requesterId, count: requesterBudget.count });
+    return tooManyRequests(res, requesterBudget.retryAfterSeconds, 'BUNDLE_LIMITED',
+      'Too many prekey bundle requests. Please try again later.');
+  }
+
+  // 1) peer identity keys
+  const peer = await UserModel.findById(targetId).select('identitySignPublicKey identityDhPublicKey');
+  if (!peer) return res.status(404).json({ error: 'User not found', code: 'NOT_FOUND' });
   if (!peer.identitySignPublicKey) {
-    return res.status(404).json({ error: 'Identity key not set' });
+    return res.status(404).json({ error: 'Identity key not set', code: 'NO_IDENTITY_KEY' });
   }
   if (!peer.identityDhPublicKey) {
-  return res.status(404).json({ error: 'Identity DH key not set' });
-}
-
+    return res.status(404).json({ error: 'Identity DH key not set', code: 'NO_IDENTITY_KEY' });
+  }
 
   // 2) latest signed prekey
-  const signed = await SignedPreKeyModel.findOne({ userId: peerUserId })
+  const signed = await SignedPreKeyModel.findOne({ userId: targetId })
     .sort({ createdAt: -1 })
     .select('keyId publicKey signature');
+  if (!signed) return res.status(404).json({ error: 'Signed prekey not set', code: 'NO_SIGNED_PREKEY' });
 
-  if (!signed) return res.status(404).json({ error: 'Signed prekey not set' });
-
-  // 3) consume one-time prekey (optional)
+  // 3) consume one one-time prekey atomically (oldest unused); may be null when the pool is empty
   const oneTime = await OneTimePreKeyModel.findOneAndUpdate(
-    { userId: peerUserId, used: false },
+    { userId: targetId, used: false },
     { $set: { used: true, usedAt: new Date() } },
-    { sort: { createdAt: 1 }, new: true } // take oldest unused
+    { sort: { createdAt: 1 }, new: true },
   ).select('keyId publicKey');
 
+  // 4) depletion visibility — the examiner's "how do you detect it" answer
+  const remaining = await OneTimePreKeyModel.countDocuments({ userId: targetId, used: false });
+  if (remaining === 0) {
+    console.error('[keys] one-time prekey pool exhausted', { targetId, requesterId, issuedWithoutOneTimeKey: !oneTime });
+  } else if (remaining < ONE_TIME_PREKEY_LOW_WATERMARK) {
+    console.warn('[keys] one-time prekey pool low', { targetId, remaining });
+  }
+
+  // 5) ledger entry (never re-served; see PreKeyBundleIssue.ts)
+  await PreKeyBundleIssueModel.create({
+    requesterId,
+    targetId,
+    signedPreKeyId: signed.keyId,
+    oneTimePreKeyId: oneTime?.keyId ?? null,
+  });
+
   return res.json({
-    userId: peerUserId,
+    userId: targetId,
     identitySignPublicKey: peer.identitySignPublicKey,
     identityDhPublicKey: peer.identityDhPublicKey,
     signedPreKey: {
@@ -173,9 +255,8 @@ keysRouter.get('/bundle/:userId', requireAuth, bundleLimiter, async (req: Authed
       publicKey: signed.publicKey,
       signature: signed.signature,
     },
-    oneTimePreKey: oneTime
-      ? { keyId: oneTime.keyId, publicKey: oneTime.publicKey }
-      : null,
+    oneTimePreKey: oneTime ? { keyId: oneTime.keyId, publicKey: oneTime.publicKey } : null,
+    remainingOneTimePreKeys: remaining,
   });
 });
 

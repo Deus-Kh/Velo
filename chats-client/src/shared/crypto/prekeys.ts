@@ -5,6 +5,7 @@ import { encodeBase64,decodeBase64 } from 'tweetnacl-util';
 import { keysApi } from '../api/keys.api';
 import { getIdentitySecretKeyBytesForUser } from './identityKeys';
 import { storeOneTimePreKeySecret } from '../storage/oneTimePreKeys';
+import { computeTopUpCount, isTopUpCheckDue } from './prekeyPolicy';
 
 
 type StoredSignedPreKey = {
@@ -97,37 +98,50 @@ export async function uploadOneTimePreKeysBatch(params: {
   await keysApi.uploadOneTimePreKeys(items);
 }
 
+let topUpInFlight: Promise<void> | null = null;
+let lastTopUpCheckAt = 0;
+
 /**
- * Simple strategy for now:
- * - ensure signed prekey
- * - upload N one-time prekeys each login (duplicates are ignored server-side)
+ * Asks the server how many unused one-time prekeys remain and uploads a fresh
+ * batch when the pool is below the minimum (see prekeyPolicy.ts).
  *
- * Later we’ll optimize: check remaining unused on server and top-up.
+ * Safe to call often: concurrent callers share one in-flight request, and
+ * without `force` a check runs at most once per TOP_UP_CHECK_INTERVAL_MS.
+ * Network failures are logged, never thrown — a top-up must not block login
+ * or chat.
+ */
+export async function topUpOneTimePreKeysIfNeeded(
+  myUserId: string,
+  opts: { force?: boolean } = {},
+): Promise<void> {
+  if (topUpInFlight) return topUpInFlight;
+  if (!opts.force && !isTopUpCheckDue(lastTopUpCheckAt, Date.now())) return;
+
+  topUpInFlight = (async () => {
+    try {
+      const res = await keysApi.getUnusedOneTimePreKeysCount();
+      lastTopUpCheckAt = Date.now();
+      const need = computeTopUpCount(res.data.unused);
+      if (need > 0) {
+        await uploadOneTimePreKeysBatch({ myUserId, count: need });
+      }
+    } catch (e) {
+      console.warn('[prekeys] top-up failed:', (e as Error)?.message ?? e);
+    } finally {
+      topUpInFlight = null;
+    }
+  })();
+
+  return topUpInFlight;
+}
+
+/**
+ * Login/hydrate bootstrap: ensure the signed prekey exists and is uploaded,
+ * then top up the one-time pool unconditionally.
  */
 export async function ensurePreKeysForUser(myUserId: string): Promise<void> {
   await ensureSignedPreKeyForUser(myUserId);
-
-    const MIN_UNUSED = 30;
-    const TARGET_UNUSED = 100;
-
-   let unused = 0;
-  try {
-    const res = await keysApi.getUnusedOneTimePreKeysCount();
-    unused = res.data.unused;
-  } catch (e) {
-    // если сервер недоступен — не блокируем логин/чат
-    console.warn('Failed to fetch unused prekeys count:', e);
-    return;
-  }
-
-  if (unused >= MIN_UNUSED) {
-    return; // запас нормальный
-  }
-
-  const need = Math.min(TARGET_UNUSED - unused, 200); // safety cap
-  if (need <= 0) return;
-
-  await uploadOneTimePreKeysBatch({ myUserId, count: need });
+  await topUpOneTimePreKeysIfNeeded(myUserId, { force: true });
 }
 
 

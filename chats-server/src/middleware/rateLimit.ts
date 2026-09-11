@@ -11,7 +11,11 @@ import type { AuthedRequest } from './auth';
  * |----------------|--------|--------------|---------------------------------|------------|
  * | globalLimiter  | 15 min | 1000 / IP    | every route                     | fail open  |
  * | authLimiter    | 15 min | 10 / IP      | /auth/login, /auth/register     | fail CLOSED|
- * | bundleLimiter  | 1 h    | 20 / user    | /keys/bundle/:userId            | fail open  |
+ * | bundleLimiter  | 1 h    | 120 / user   | /keys/bundle/:userId (coarse)   | fail open  |
+ *
+ * bundleLimiter is only a coarse request cap; the drain-relevant budgets
+ * (5 issues per pair per hour, 30 per requester per hour) live in the route
+ * handler on top of the KeyValueStore — see lib/services.ts.
  *
  * The limiters are created at boot (after the Redis probe) via
  * configureRateLimiters(); the exported handlers delegate to whatever is
@@ -29,7 +33,7 @@ export class RateLimitBackendUnavailableError extends Error {
 export const RATE_LIMITS = {
   global: { windowMs: 15 * 60 * 1000, limit: 1000 },
   auth: { windowMs: 15 * 60 * 1000, limit: 10 },
-  bundle: { windowMs: 60 * 60 * 1000, limit: 20 },
+  bundle: { windowMs: 60 * 60 * 1000, limit: 120 },
 } as const;
 
 function rateLimitedResponse(req: Request, res: Response): void {

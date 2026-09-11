@@ -19,6 +19,12 @@ export interface PreKeyBundleResponse {
     keyId: number;
     publicKey: string; // base64 (X25519 pub)
   };
+  /**
+   * How many unused one-time prekeys the peer still has AFTER this issue.
+   * Informational: 0 means this bundle was issued without a one-time key
+   * (weaker forward secrecy for this handshake).
+   */
+  remainingOneTimePreKeys?: number;
 }
 
 export interface UnusedPreKeysCountResponse {

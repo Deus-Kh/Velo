@@ -206,7 +206,9 @@ Fix: a separate Keychain-held session master key; `secretbox` the serialized ses
 
 **P0-4 · One-time prekey pool drainable by any authenticated user** `[CORE]`
 `keys.routes.ts:134-177` consumes an OPK per call, unthrottled, no relationship check; fallback to no-OPK is silent.
-Fix: per-requester issue cache (24h), 20 distinct targets/hour, remaining-count in the response, client refill on threshold, depletion logging. → T1.4
+Fix: budget every fresh issue per (requester, target) pair and per requester, keep an issue ledger, report the remaining count, refill on the client on a threshold and on foreground, log depletion. → T1.4
+**Design change 2026-09-11:** the v2.0 spec's 24 h per-pair bundle *cache* was dropped before implementation. The responder deletes a one-time prekey secret after first use, so re-serving a cached bundle would break every session a requester re-establishes after a reset or reinstall (the v1 spec's "same OPK for one requester" argument was wrong). Replaced by Signal-style issue budgets: 5 issues per pair per hour, 30 per requester per hour, on top of a coarse 120 requests/h/user cap.
+**Status 2026-09-11:** resolved by T1.4. Also: unused pool capped at 500 keys per user, consumed keys expire after 30 days, per-item validation on upload, client tops up at login and on every return to the foreground (throttled to once per 5 min). Verified by route tests against an in-memory MongoDB: 6th request per pair → 429, 31st distinct target → 429, 100 sequential requests consume ≤ 5 keys, warn at <10 and error at 0, own bundle → 400.
 
 **P0-5 · No rate limiting anywhere** `[CORE]` → T1.5
 **Status 2026-09-11:** resolved by T1.5. Global 1000/15 min/IP, auth 10/15 min/IP, bundle 20/h/user, per-account login backoff min(2^n, 300) s, socket 60 messages/min/user and a 64 KiB ciphertext cap. Redis-backed when `REDIS_URL` is set (required in production); in-memory in development. Verified live: 11th login → 429; backoff 2 s → 4 s; 61st socket send → `RATE_LIMITED`.
