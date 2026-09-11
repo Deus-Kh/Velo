@@ -193,10 +193,12 @@ Every entry cites [AUDIT_2026-09-07.md](AUDIT_2026-09-07.md). Fix P0 first, then
 **P0-1 · Live secrets as hardcoded config fallbacks; no `.env`** `[CORE]`
 `chats-server/src/config.ts:7-8` falls back to a real Atlas connection string and a dictionary-word JWT secret. The file is gitignored and **was never committed** (git history is empty for it), but no `.env` exists, so the fallbacks are the running values. Anyone who guesses the JWT secret mints a token for any user.
 Fix: rotate both secrets; replace fallbacks with hard failure on missing env; require a 32+ byte JWT secret; **add the sanitized `config.ts` to git** so a clean clone compiles; `.env.example` in the repo. **No history rewrite is needed for this file.** → T1.1
+**Status 2026-09-11:** code resolved by T1.1 (`8a83696`). Still open for the human: rotate the Atlas password and put it in `chats-server/.env`.
 
 **P0-2 · All traffic is cleartext HTTP; iOS cannot connect** `[CORE]`
 `http.ts:6`, `socket.ts:5` hardcode `http://` to a bare IP; `AndroidManifest.xml:15` permits cleartext; iOS ATS blocks it entirely. Bearer tokens and prekey bundles cross the network in the clear; with P0-9 that is full impersonation for an on-path attacker.
 Fix: domain + TLS (Caddy), env-driven URLs via `react-native-dotenv` (currently not even registered in Babel), cleartext off, iOS ATS satisfied, pinning in Phase 4'. → T1.2, T1.16
+**Status 2026-09-11:** client side resolved by T1.2 (`90c27ee`): URLs from `.env`, release builds refuse `http://`, Android cleartext off (debug builds allow it for localhost and the current dev server only). Still open: domain + certificate + Caddy (human), then remove the dev-server entry from the debug network config; iOS Firebase config (T1.16).
 
 **P0-3 · Ratchet private state, OPK secrets, pending plaintext, trust pins unencrypted at rest** `[CORE]`
 `sessionStore.ts:27-30`, `oneTimePreKeys.ts:12`, `pendingMessageStore.ts:41`, `trustedIdentities.ts:19`. The chain keys derive every future message key, so the encrypted message-key archive protects nothing.
@@ -207,6 +209,7 @@ Fix: a separate Keychain-held session master key; `secretbox` the serialized ses
 Fix: per-requester issue cache (24h), 20 distinct targets/hour, remaining-count in the response, client refill on threshold, depletion logging. → T1.4
 
 **P0-5 · No rate limiting anywhere** `[CORE]` → T1.5
+**Status 2026-09-11:** resolved by T1.5. Global 1000/15 min/IP, auth 10/15 min/IP, bundle 20/h/user, per-account login backoff min(2^n, 300) s, socket 60 messages/min/user and a 64 KiB ciphertext cap. Redis-backed when `REDIS_URL` is set (required in production); in-memory in development. Verified live: 11th login → 429; backoff 2 s → 4 s; 61st socket send → `RATE_LIMITED`.
 
 **P0-6 · User directory dump with emails, and ReDoS in search** `[CORE]`
 `users.routes.ts:173-199`: empty `q` returns every account with email; raw `$regex`. Emails also in `GET /conversations`.
@@ -225,10 +228,12 @@ Fix: identity binding signature (Ed25519 over the X25519 identity key), pinned i
 **P0-10 · Release-keystore password tracked in a public repository** `[CORE]` *(new)*
 `chats-client/android/gradle.properties:49-52`, tracked since the first commit, consumed by `build.gradle:98-100`. The keystore binary itself is gitignored.
 Fix: rotate the upload key (Play Console upload-key reset if the app was ever uploaded with it; otherwise generate a new keystore), move credentials to `~/.gradle/gradle.properties` or CI secrets, gitignore the file, and purge history (this, not P0-1, is what justifies decision D4). → T1.13
+**Status 2026-09-11:** code resolved by T1.13 (`e880c5e`): credentials removed from the tracked file, release builds fail loudly without external properties, debug builds unaffected. Still open for the human: rotate the upload key; decide D4 (the old password remains in history until then).
 
 **P0-11 · A wrong password blanks the app** `[CORE]` *(new)*
 `auth.store.ts:130-132` and `155-157` await the API call outside the try/finally; `Navigation.tsx:58` renders `null` while loading. Login requires 8 chars, register 6.
 Fix: try/catch/finally, error surfaced in the form, one shared password rule. → T1.0
+**Status 2026-09-11:** resolved by T1.0 (`ba7edb2`). Client type-check is green again (P2-12 client part).
 
 **P0-12 · Logout leaves every session, key, and plaintext pending message on disk** `[CORE]` *(new)*
 `auth.store.ts:199` removes two AsyncStorage keys. The next account on the device inherits the previous user's decryptable material. `deleteAllSessionsForUser` exists and is never called.
@@ -285,6 +290,7 @@ Fix: after T2.0, an inbound `initPacket` whose identity matches the pin but whos
 - **P2-10 · Presence/typing subscribable by anyone; no privacy toggles** `[PARITY]` *(new)* — relationship check; toggles for read receipts, typing, last-seen; consider dropping "online" broadcast entirely (Signal has none). → T1.7, Phase 7'
 - **P2-11 · 69 dependency advisories, 7 critical** `[CORE]` *(new)* → T1.12
 - **P2-12 · Stack traces returned to clients; no error middleware; `NODE_ENV` unset** `[CORE]` *(new)* → T1.9
+  **Status 2026-09-11:** error middleware landed with T1.5 (404/400/413/503/500 as `{error, code}`, no stack); `@ts-ignore`s removed in T1.1. Remaining for T1.9: `NODE_ENV=production` in the start script and socket acks that echo `e.message`.
 - **P2-13 · Server can be tricked into synthesising `initPacket`s** `[CORE]` *(new)* — remove `setupSocket.ts:481-495`; the client bootstraps from the stored first message or a dedicated fetch. → T2.13
 
 ### 3.4 P3 — Hygiene

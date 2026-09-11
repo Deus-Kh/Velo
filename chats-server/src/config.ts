@@ -59,7 +59,12 @@ export const config = {
 
   BCRYPT_ROUNDS: optionalNumber('BCRYPT_ROUNDS', 12),
 
-  REDIS_URL: optionalString('REDIS_URL', 'redis://127.0.0.1:6379'),
+  /**
+   * Redis backs rate limits and login backoff. Empty in development means
+   * in-memory stores (single process, reset on restart). Required in
+   * production — enforced in redis.ts at boot.
+   */
+  REDIS_URL: optionalString('REDIS_URL', ''),
 
   /**
    * Path to the Firebase service-account JSON. Required so that push can never

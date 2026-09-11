@@ -4,6 +4,8 @@ import jwt, { type SignOptions } from "jsonwebtoken";
 import { UserModel } from "../models/User";
 import { config } from "../config";
 import { requireAuth, type AuthedRequest } from "../middleware/auth";
+import { authLimiter } from "../middleware/rateLimit";
+import { services } from "../lib/services";
 
 export const authRouter = Router();
 
@@ -16,7 +18,7 @@ function signAccessToken(userId: string): string {
   return jwt.sign({ userId }, config.JWT_SECRET, accessTokenSignOptions);
 }
 
-authRouter.post("/register", async (req, res) => {
+authRouter.post("/register", authLimiter, async (req, res) => {
   const { email, username, password } = req.body as {
     email?: string;
     username?: string;
@@ -44,19 +46,34 @@ authRouter.post("/register", async (req, res) => {
   return res.json({ accessToken, userId: String(user._id) });
 });
 
-authRouter.post("/login", async (req, res) => {
-  const { email, password } = req.body as { email?: string; password?: string };
+authRouter.post("/login", authLimiter, async (req, res) => {
+  const { email, password } = req.body as { email?: unknown; password?: unknown };
 
-  if (!email || !password) {
+  if (typeof email !== "string" || typeof password !== "string" || !email || !password) {
     return res.status(400).json({ error: "email and password are required" });
   }
 
+  // Per-account progressive backoff (P0-5). Checked before the database
+  // lookup so unknown accounts are throttled exactly like real ones.
+  const throttle = await services.loginThrottle.check(email);
+  if (throttle.blocked) {
+    res.setHeader("Retry-After", String(throttle.retryAfterSeconds));
+    return res.status(429).json({
+      error: `Too many failed attempts. Try again in ${throttle.retryAfterSeconds}s.`,
+      code: "LOGIN_THROTTLED",
+      retryAfterSeconds: throttle.retryAfterSeconds,
+    });
+  }
+
   const user = await UserModel.findOne({ email: email.toLowerCase() });
-  if (!user) return res.status(401).json({ error: "Invalid credentials" });
+  const ok = user ? await bcrypt.compare(password, user.passwordHash) : false;
 
-  const ok = await bcrypt.compare(password, user.passwordHash);
-  if (!ok) return res.status(401).json({ error: "Invalid credentials" });
+  if (!user || !ok) {
+    await services.loginThrottle.recordFailure(email);
+    return res.status(401).json({ error: "Invalid credentials" });
+  }
 
+  await services.loginThrottle.recordSuccess(email);
   const accessToken = signAccessToken(String(user._id));
 
   return res.json({ accessToken, userId: String(user._id) });

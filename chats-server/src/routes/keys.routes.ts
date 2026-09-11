@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { requireAuth, type AuthedRequest } from '../middleware/auth';
+import { bundleLimiter } from '../middleware/rateLimit';
 import { UserModel } from '../models/User';
 import { SignedPreKeyModel } from '../models/SignedPreKey';
 import { OneTimePreKeyModel } from '../models/OneTimePreKey';
@@ -131,7 +132,9 @@ keysRouter.post('/prekeys', requireAuth, async (req: AuthedRequest, res) => {
 });
 
 
-keysRouter.get('/bundle/:userId', requireAuth, async (req: AuthedRequest, res) => {
+// bundleLimiter runs after requireAuth so it can key on the requester (20/h/user).
+// T1.4 adds the per-(requester,target) issue cache on top of this.
+keysRouter.get('/bundle/:userId', requireAuth, bundleLimiter, async (req: AuthedRequest, res) => {
   const peerUserId = req.params.userId;
 
   // 1) peer identity key (Ed25519 pub) from User

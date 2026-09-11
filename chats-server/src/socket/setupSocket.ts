@@ -209,6 +209,12 @@ import { ConversationModel } from "../models/Conversation";
 import { MessageModel } from "../models/Message";
 import { sendMessagePushToUser } from "../push/firebase";
 import { makeConversationId } from "../utils/conversation";
+import { services } from "../lib/services";
+
+/** Maximum encrypted message body accepted over the socket (P0-5 storage-flood control). */
+const MAX_CIPHERTEXT_BYTES = 64 * 1024;
+/** Same bound expressed as base64 characters (4 chars per 3 bytes, padded). */
+const MAX_CIPHERTEXT_B64_LENGTH = Math.ceil(MAX_CIPHERTEXT_BYTES / 3) * 4;
 
 type V2Header = {
   n: number;
@@ -336,6 +342,19 @@ export function setupSocket(io: Server) {
 
     socket.on("message:send", async (dto: SendMessageDTO, ack?: (r: any) => void) => {
       try {
+        // Per-user send limit (P0-5). Counted before validation so malformed
+        // spam is bounded too.
+        const sendBudget = await services.messageSendLimiter.hit(userId);
+        if (!sendBudget.allowed) {
+          console.warn("[socket] message:send rate limited", { from: userId, count: sendBudget.count });
+          return ack?.({
+            ok: false,
+            code: "RATE_LIMITED",
+            error: "Too many messages. Please slow down.",
+            retryAfterSeconds: sendBudget.retryAfterSeconds,
+          });
+        }
+
         console.log('[socket] message:send received', {
           from: userId,
           to: dto.toUserId,
@@ -387,6 +406,18 @@ export function setupSocket(io: Server) {
             cipherLen: dto.v2?.ciphertext?.length,
           });
           return ack?.({ ok: false, error: "Invalid v2 payload" });
+        }
+
+        if (v2.ciphertext.length > MAX_CIPHERTEXT_B64_LENGTH) {
+          console.warn("[socket] reject message: ciphertext too large", {
+            from: userId,
+            cipherLen: v2.ciphertext.length,
+          });
+          return ack?.({
+            ok: false,
+            code: "PAYLOAD_TOO_LARGE",
+            error: `Message too large (max ${MAX_CIPHERTEXT_BYTES / 1024} KiB)`,
+          });
         }
 
         const existingMessage = await MessageModel.findOne({
