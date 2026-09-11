@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  DEBUG builds only. Overrides src/main/res/xml/network_security_config.xml.
+  Cleartext is permitted solely to local development hosts and to the current
+  dev server, which has no TLS yet. Remove the dev-server entry once the domain
+  and certificate exist (T1.2 human action).
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false">
+        <trust-anchors>
+            <certificates src="system" />
+            <certificates src="user" />
+        </trust-anchors>
+    </base-config>
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">10.0.2.2</domain>
+        <domain includeSubdomains="false">localhost</domain>
+        <domain includeSubdomains="false">127.0.0.1</domain>
+        <!-- current dev server; delete after TLS -->
+        <domain includeSubdomains="false">13.63.159.111</domain>
+    </domain-config>
+</network-security-config>

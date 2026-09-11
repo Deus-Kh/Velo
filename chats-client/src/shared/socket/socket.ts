@@ -1,8 +1,5 @@
-
 import { io, Socket } from 'socket.io-client';
-
-// const SOCKET_URL = 'http://localhost:9999';
-const SOCKET_URL = 'http://13.63.159.111/';
+import { env } from '../config/env';
 
 let socket: Socket | null = null;
 let connectPromise: Promise<Socket> | null = null;
@@ -24,7 +21,7 @@ export function initSocket(token: string) {
 
   currentToken = token;
 
-  socket = io(SOCKET_URL, {
+  socket = io(env.SOCKET_URL, {
     transports: ['websocket'],
     auth: { token },
     autoConnect: false,

@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Release network policy: no cleartext anywhere, system trust anchors only.
+  The debug source set (src/debug/res/xml/network_security_config.xml) overrides
+  this file to permit cleartext to local development hosts.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>

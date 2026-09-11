@@ -1,12 +1,10 @@
 import axios from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useAuthStore } from '../../store/auth.store';
-
-// const API_URL = 'http://localhost:9999'; // Android emulator
-const API_URL = 'http://13.63.159.111/'; // Android emulator
+import { env } from '../config/env';
 
 export const http = axios.create({
-  baseURL: API_URL,
+  baseURL: env.API_URL,
   timeout: 10000,
   headers: {
     'Accept':'application/json',
