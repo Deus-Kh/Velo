@@ -40,6 +40,19 @@ type DiscoverSection =
   | { type: 'saved'; id: string; contact: SavedContact; verified: boolean; hasConversation: boolean }
   | { type: 'user'; id: string; user: UserListItem; verified: boolean };
 
+type SavedContactEntry = {
+  contact: SavedContact;
+  hasConversation: boolean;
+  verified: boolean;
+};
+
+/** Rows of the pre-search "contact hub" list. Discriminated on `type`. */
+type HomeRow =
+  | { type: 'section'; id: 'saved-header' | 'verified-header' | 'recent-header' }
+  | { type: 'saved-contact'; id: string; entry: SavedContactEntry }
+  | { type: 'verified-contact'; id: string; conversation: ConversationListItem }
+  | { type: 'recent-contact'; id: string; conversation: ConversationListItem };
+
 function EmptyState({
   title,
   description,
@@ -553,10 +566,10 @@ export default function NewChatScreen({
       )}
 
       {!canSearch && !contactsLoading && !contactsError && (
-        <FlatList
+        <FlatList<HomeRow>
           data={[
             ...(savedContactEntries.length > 0
-              ? [{ type: 'section', id: 'saved-header' as const }]
+              ? [{ type: 'section' as const, id: 'saved-header' as const }]
               : []),
             ...savedContactEntries.map((entry) => ({
               type: 'saved-contact' as const,
@@ -564,7 +577,7 @@ export default function NewChatScreen({
               entry,
             })),
             ...(verifiedConversations.length > 0
-              ? [{ type: 'section', id: 'verified-header' as const }]
+              ? [{ type: 'section' as const, id: 'verified-header' as const }]
               : []),
             ...verifiedConversations.map((conversation) => ({
               type: 'verified-contact' as const,
@@ -572,7 +585,7 @@ export default function NewChatScreen({
               conversation,
             })),
             ...(recentConversations.length > 0
-              ? [{ type: 'section', id: 'recent-header' as const }]
+              ? [{ type: 'section' as const, id: 'recent-header' as const }]
               : []),
             ...recentConversations
               .filter(

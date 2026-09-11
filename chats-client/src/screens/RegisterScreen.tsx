@@ -7,6 +7,9 @@ import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../app/Navigation';
 import { useForm, Controller } from 'react-hook-form';
+import { useState } from 'react';
+import { toApiError } from '../shared/api/errors';
+import { newPasswordRules, PASSWORD_MIN_LENGTH } from '../shared/validation/password';
 
 type NavProp = NativeStackNavigationProp<RootStackParamList, 'Register'>;
 
@@ -21,9 +24,12 @@ export default function RegisterScreen() {
   const insets = useSafeAreaInsets();
   const registerUser = useAuthStore((s) => s.register);
 
+  const [submitError, setSubmitError] = useState<string | null>(null);
+
   const {
     control,
     handleSubmit,
+    setError,
     formState: { errors, isSubmitting },
   } = useForm<FormData>({
     defaultValues: {
@@ -34,7 +40,22 @@ export default function RegisterScreen() {
   });
 
   const onSubmit = async (data: FormData) => {
-    await registerUser(data);
+    setSubmitError(null);
+    try {
+      await registerUser({
+        email: data.email.trim(),
+        username: data.username.trim(),
+        password: data.password,
+      });
+    } catch (e) {
+      const err = toApiError(e);
+      for (const [field, message] of Object.entries(err.fields)) {
+        if (field === 'email' || field === 'username' || field === 'password') {
+          setError(field, { message });
+        }
+      }
+      setSubmitError(err.message);
+    }
   };
 
   return (
@@ -102,16 +123,10 @@ export default function RegisterScreen() {
             <Controller
               control={control}
               name="password"
-              rules={{
-                required: 'Password is required',
-                minLength: {
-                  value: 6,
-                  message: 'Minimum 6 characters',
-                },
-              }}
+              rules={newPasswordRules}
               render={({ field: { onChange, value } }) => (
                 <Input
-                  placeholder="Password"
+                  placeholder={`Password (min ${PASSWORD_MIN_LENGTH} characters)`}
                   secureTextEntry
                   value={value}
                   onChangeText={onChange}
@@ -119,6 +134,15 @@ export default function RegisterScreen() {
               )}
             />
             {errors.password ? <Text className="px-1 text-sm text-danger">{errors.password.message}</Text> : null}
+
+            {submitError ? (
+              <View
+                accessibilityRole="alert"
+                className="rounded-2xl border border-danger/40 bg-danger/10 px-4 py-3"
+              >
+                <Text className="text-sm text-danger">{submitError}</Text>
+              </View>
+            ) : null}
 
             <View className="pt-2">
               <Button

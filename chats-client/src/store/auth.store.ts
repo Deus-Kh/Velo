@@ -47,6 +47,13 @@ interface AuthState {
 let socketDrainCleanup: (() => void) | null = null;
 let pushTokenRefreshCleanup: (() => void) | null = null;
 
+async function persistCredentials(userId: string, accessToken: string): Promise<void> {
+  await AsyncStorage.multiSet([
+    ['accessToken', accessToken],
+    ['userId', userId],
+  ]);
+}
+
 /**
  * Ensure legacy E2EE device keypair exists (current chat crypto).
  * Stored per-userId → safe for multi-accounts.
@@ -128,52 +135,51 @@ export const useAuthStore = create<AuthState>((set) => ({
   isLoading: true,
 
   login: async (data) => {
+    // The whole flow runs inside try/finally so that a failed request can never
+    // leave `isLoading: true`, which would make Navigation render nothing (P0-11).
+    // The caller (LoginScreen) catches the rethrown error and shows it.
     set({ isLoading: true });
-    const res = await authApi.login(data);
-
-    await AsyncStorage.setItem('accessToken', res.data.accessToken);
-    await AsyncStorage.setItem('userId', res.data.userId);
-
-    set({
-      token: res.data.accessToken,
-      userId: res.data.userId,
-      isAuthenticated: false,
-    });
-
     try {
-      await bootstrapAfterAuth(res.data.userId, res.data.accessToken);
+      const res = await authApi.login(data);
+      await persistCredentials(res.data.userId, res.data.accessToken);
+      set({ token: res.data.accessToken, userId: res.data.userId, isAuthenticated: false });
+
+      try {
+        await bootstrapAfterAuth(res.data.userId, res.data.accessToken);
+      } catch (e) {
+        // Credentials are valid; a bootstrap hiccup (e.g. push registration)
+        // must not block sign-in. Log and continue authenticated.
+        console.warn('[auth] post-login bootstrap failed:', (e as Error)?.message);
+      }
+
+      set({ token: res.data.accessToken, userId: res.data.userId, isAuthenticated: true });
+    } catch (e) {
+      set({ token: null, userId: null, isAuthenticated: false });
+      throw e;
     } finally {
-      set({
-        token: res.data.accessToken,
-        userId: res.data.userId,
-        isAuthenticated: true,
-        isLoading: false,
-      });
+      set({ isLoading: false });
     }
   },
 
   register: async (data) => {
     set({ isLoading: true });
-    const res = await authApi.register(data);
-
-    await AsyncStorage.setItem('accessToken', res.data.accessToken);
-    await AsyncStorage.setItem('userId', res.data.userId);
-
-    set({
-      token: res.data.accessToken,
-      userId: res.data.userId,
-      isAuthenticated: false,
-    });
-
     try {
-      await bootstrapAfterAuth(res.data.userId, res.data.accessToken);
+      const res = await authApi.register(data);
+      await persistCredentials(res.data.userId, res.data.accessToken);
+      set({ token: res.data.accessToken, userId: res.data.userId, isAuthenticated: false });
+
+      try {
+        await bootstrapAfterAuth(res.data.userId, res.data.accessToken);
+      } catch (e) {
+        console.warn('[auth] post-register bootstrap failed:', (e as Error)?.message);
+      }
+
+      set({ token: res.data.accessToken, userId: res.data.userId, isAuthenticated: true });
+    } catch (e) {
+      set({ token: null, userId: null, isAuthenticated: false });
+      throw e;
     } finally {
-      set({
-        token: res.data.accessToken,
-        userId: res.data.userId,
-        isAuthenticated: true,
-        isLoading: false,
-      });
+      set({ isLoading: false });
     }
   },
 
