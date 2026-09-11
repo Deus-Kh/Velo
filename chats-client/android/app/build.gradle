@@ -94,11 +94,21 @@ android {
             keyPassword 'android'
         }
         release {
-        storeFile file("my-release-key.keystore")
-        storePassword MYAPP_UPLOAD_STORE_PASSWORD
-        keyAlias MYAPP_UPLOAD_KEY_ALIAS
-        keyPassword MYAPP_UPLOAD_KEY_PASSWORD
-    }
+            // Upload-key credentials are NEVER stored in the repository.
+            // Provide them in ~/.gradle/gradle.properties (or as -P / ORG_GRADLE_PROJECT_*
+            // environment variables on CI):
+            //   MYAPP_UPLOAD_STORE_FILE=/absolute/path/to/upload.keystore
+            //   MYAPP_UPLOAD_STORE_PASSWORD=...
+            //   MYAPP_UPLOAD_KEY_ALIAS=...
+            //   MYAPP_UPLOAD_KEY_PASSWORD=...
+            // Debug builds do not need them; a release build without them fails loudly below.
+            if (project.hasProperty('MYAPP_UPLOAD_STORE_FILE')) {
+                storeFile file(MYAPP_UPLOAD_STORE_FILE)
+                storePassword MYAPP_UPLOAD_STORE_PASSWORD
+                keyAlias MYAPP_UPLOAD_KEY_ALIAS
+                keyPassword MYAPP_UPLOAD_KEY_PASSWORD
+            }
+        }
     }
     buildTypes {
         debug {
@@ -109,8 +119,12 @@ android {
             // see https://reactnative.dev/docs/signed-apk-android.
             // signingConfig signingConfigs.debug
 
-            signingConfig signingConfigs.release
-            // minifyEnabled false
+            // Only attach the release signing config when the external properties
+            // exist; the task-graph check below fails a release build loudly
+            // otherwise, without breaking debug builds at configuration time.
+            if (project.hasProperty('MYAPP_UPLOAD_STORE_FILE')) {
+                signingConfig signingConfigs.release
+            }
 
             minifyEnabled enableProguardInReleaseBuilds
             proguardFiles getDefaultProguardFile("proguard-android.txt"), "proguard-rules.pro"
@@ -126,5 +140,17 @@ dependencies {
         implementation("com.facebook.react:hermes-android")
     } else {
         implementation jscFlavor
+    }
+}
+
+// Fail a RELEASE build early and clearly when signing properties are absent,
+// instead of silently producing an unsigned APK. Debug builds are unaffected.
+gradle.taskGraph.whenReady { graph ->
+    def wantsRelease = graph.allTasks.any { it.project == project && it.name.toLowerCase().contains('release') }
+    if (wantsRelease && !project.hasProperty('MYAPP_UPLOAD_STORE_FILE')) {
+        throw new GradleException(
+            'Release signing is not configured. Set MYAPP_UPLOAD_STORE_FILE, ' +
+            'MYAPP_UPLOAD_STORE_PASSWORD, MYAPP_UPLOAD_KEY_ALIAS and MYAPP_UPLOAD_KEY_PASSWORD ' +
+            'in ~/.gradle/gradle.properties (never in the repository).')
     }
 }
