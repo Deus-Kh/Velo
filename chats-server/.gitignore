@@ -1,3 +1,13 @@
 node_modules/
-src/config.ts
-velo-deus-firebase-adminsdk-fbsvc-d6096986a9.json
+dist/
+
+# Secrets — never commit
+.env
+.env.*
+!.env.example
+secrets/
+*firebase-adminsdk*.json
+*.pem
+*.p12
+*.jks
+*.keystore

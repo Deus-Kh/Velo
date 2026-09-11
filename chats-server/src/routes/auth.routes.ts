@@ -1,11 +1,20 @@
 import { Router } from "express";
 import bcrypt from "bcrypt";
-import jwt from "jsonwebtoken";
+import jwt, { type SignOptions } from "jsonwebtoken";
 import { UserModel } from "../models/User";
 import { config } from "../config";
 import { requireAuth, type AuthedRequest } from "../middleware/auth";
 
 export const authRouter = Router();
+
+const accessTokenSignOptions: SignOptions = {
+  expiresIn: config.JWT_ACCESS_TTL as SignOptions["expiresIn"],
+  algorithm: config.JWT_ALGORITHM,
+};
+
+function signAccessToken(userId: string): string {
+  return jwt.sign({ userId }, config.JWT_SECRET, accessTokenSignOptions);
+}
 
 authRouter.post("/register", async (req, res) => {
   const { email, username, password } = req.body as {
@@ -30,13 +39,7 @@ authRouter.post("/register", async (req, res) => {
 
   const passwordHash = await bcrypt.hash(password, config.BCRYPT_ROUNDS);
   const user = await UserModel.create({ email, username, passwordHash });
-//@ts-ignore
-  const accessToken = jwt.sign(
-    { userId: String(user._id) },
-    config.JWT_SECRET,
-    //@ts-ignore
-    { expiresIn: config.JWT_MAX_AGE},
-  );
+  const accessToken = signAccessToken(String(user._id));
 
   return res.json({ accessToken, userId: String(user._id) });
 });
@@ -53,12 +56,8 @@ authRouter.post("/login", async (req, res) => {
 
   const ok = await bcrypt.compare(password, user.passwordHash);
   if (!ok) return res.status(401).json({ error: "Invalid credentials" });
-//@ts-ignore
-  const accessToken = jwt.sign(
-    { userId: String(user._id) },
-    config.JWT_SECRET,
-    { expiresIn: config.JWT_MAX_AGE },
-  );
+
+  const accessToken = signAccessToken(String(user._id));
 
   return res.json({ accessToken, userId: String(user._id) });
 });

@@ -274,7 +274,7 @@ export function setupSocket(io: Server) {
       const token = socket.handshake.auth?.token;
       if (!token) return next(new Error("Unauthorized"));
 
-      const decoded = jwt.verify(token, config.JWT_SECRET) as { userId: string };
+      const decoded = jwt.verify(token, config.JWT_SECRET, { algorithms: [config.JWT_ALGORITHM] }) as { userId: string };
       socket.data.userId = decoded.userId;
       next();
     } catch {

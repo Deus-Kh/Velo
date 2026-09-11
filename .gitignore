@@ -87,5 +87,3 @@ chats-client!.yarn/versions
 
 #server
 chats-server/node_modules/
-chats-server/src/config.ts
-chats-server/velo-deus-firebase-adminsdk-fbsvc-d6096986a9

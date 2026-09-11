@@ -33,14 +33,20 @@ function getFirebaseAdmin() {
         });
       } else {
         const resolvedPath = path.resolve(process.cwd(), config.FIREBASE_SERVICE_ACCOUNT_PATH);
-        if (fs.existsSync(resolvedPath)) {
-          const serviceAccount = JSON.parse(fs.readFileSync(resolvedPath, "utf8"));
-          firebaseAdmin.initializeApp({
-            credential: firebaseAdmin.credential.cert(serviceAccount),
-          });
-        } else {
-          firebaseAdmin.initializeApp();
+        if (!fs.existsSync(resolvedPath)) {
+          // Never fall back to application-default credentials: on a misconfigured
+          // host that would silently bind push to whatever project the machine
+          // happens to be logged into. Disable push loudly instead.
+          console.warn(
+            `[push] service-account file not found at ${resolvedPath}; push delivery is disabled.`,
+          );
+          firebaseAvailable = false;
+          return null;
         }
+        const serviceAccount = JSON.parse(fs.readFileSync(resolvedPath, "utf8"));
+        firebaseAdmin.initializeApp({
+          credential: firebaseAdmin.credential.cert(serviceAccount),
+        });
       }
     }
 
