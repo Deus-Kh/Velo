@@ -9,7 +9,7 @@ conversationsRouter.get('/', requireAuth, async (req: AuthedRequest, res) => {
   const me = String(req.userId);
 
   const docs = await ConversationModel.find({ members: me })
-    .populate('members', '_id username email identitySignUpdatedAt identityDhUpdatedAt')
+    .populate('members', '_id username identitySignUpdatedAt identityDhUpdatedAt')
     .sort({ lastMessageAt: -1 })
     .limit(100);
 
@@ -35,7 +35,6 @@ conversationsRouter.get('/', requireAuth, async (req: AuthedRequest, res) => {
         conversationId: doc.conversationId,
         peerUserId: String(peer._id),
         peerUsername: peer.username,
-        peerEmail: peer.email,
         peerHasPublicKey: !!(peer.identitySignUpdatedAt && peer.identityDhUpdatedAt),
         lastMessageAt: doc.lastMessageAt,
         lastProtoVersion: doc.lastProtoVersion,

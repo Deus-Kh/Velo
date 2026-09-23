@@ -5,7 +5,6 @@ export interface ConversationListItem {
   conversationId: string;
   peerUserId: string;
   peerUsername: string;
-  peerEmail: string;
   peerHasPublicKey: boolean;
   lastMessageAt: number;
   lastProtoVersion: number;

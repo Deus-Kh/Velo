@@ -22,6 +22,7 @@ import { conversationsApi, type ConversationListItem } from '../shared/api/conve
 import { useAuthStore } from '../store/auth.store';
 import { useContactsStore, type SavedContact } from '../store/contacts.store';
 import { listTrustedPeerUserIds } from '../shared/storage/trustedIdentities';
+import { contactSubtitle, formatHandle, shortSecureId } from '../shared/utils/identity';
 
 const listContentContainerStyle = {
   paddingHorizontal: 20,
@@ -220,7 +221,7 @@ export default function NewChatScreen({
         contact: {
           ...contact,
           peerUsername: matchingConversation?.peerUsername || contact.peerUsername,
-          peerEmail: matchingConversation?.peerEmail || contact.peerEmail,
+          peerEmail: contact.peerEmail,
         },
         hasConversation: Boolean(matchingConversation),
         verified: trustedPeerUserIdSet.has(contact.peerUserId),
@@ -271,8 +272,7 @@ export default function NewChatScreen({
       .filter((contact) => {
         const query = trimmedQuery.toLowerCase();
         return (
-          (contact.peerUsername || '').toLowerCase().includes(query) ||
-          (contact.peerEmail || '').toLowerCase().includes(query)
+          (contact.peerUsername || '').toLowerCase().includes(query)
         );
       })
       .map((contact) => ({
@@ -639,7 +639,7 @@ export default function NewChatScreen({
               return (
                 <ContactRow
                   title={contact.peerUsername || contact.peerUserId}
-                  subtitle={contact.peerEmail || contact.peerUserId}
+                  subtitle={contactSubtitle({ username: contact.peerUsername, userId: contact.peerUserId })}
                   avatarSeed={contact.peerUsername || contact.peerUserId}
                   onPress={() =>
                     onOpenChat({
@@ -675,7 +675,7 @@ export default function NewChatScreen({
             return (
               <ContactRow
                 title={conversation.peerUsername}
-                subtitle={conversation.peerEmail}
+                subtitle={formatHandle(conversation.peerUsername)}
                 avatarSeed={conversation.peerUsername}
                 onPress={() =>
                   onOpenChat({
@@ -695,13 +695,11 @@ export default function NewChatScreen({
                 action={renderVerifyAction({
                   peerUserId: conversation.peerUserId,
                   peerUsername: conversation.peerUsername,
-                  peerEmail: conversation.peerEmail,
                   verified: isVerified,
                 })}
                 topAction={renderSaveAction({
                   peerUserId: conversation.peerUserId,
                   peerUsername: conversation.peerUsername,
-                  peerEmail: conversation.peerEmail,
                 })}
                 trailing={<Text className="text-xs font-medium text-muted">Open chat</Text>}
               />
@@ -755,7 +753,7 @@ export default function NewChatScreen({
               return (
                 <ContactRow
                   title={item.contact.peerUsername || item.contact.peerUserId}
-                  subtitle={item.contact.peerEmail || item.contact.peerUserId}
+                  subtitle={contactSubtitle({ username: item.contact.peerUsername, userId: item.contact.peerUserId })}
                   avatarSeed={item.contact.peerUsername || item.contact.peerUserId}
                   onPress={() =>
                     onOpenChat({
@@ -791,7 +789,7 @@ export default function NewChatScreen({
             return (
               <ContactRow
                 title={item.user.username}
-                subtitle={item.user.email}
+                subtitle={shortSecureId(item.user.userId)}
                 avatarSeed={item.user.username}
                 onPress={() =>
                   onOpenChat({
@@ -811,13 +809,11 @@ export default function NewChatScreen({
                 action={renderVerifyAction({
                   peerUserId: item.user.userId,
                   peerUsername: item.user.username,
-                  peerEmail: item.user.email,
                   verified: item.verified,
                 })}
                 topAction={renderSaveAction({
                   peerUserId: item.user.userId,
                   peerUsername: item.user.username,
-                  peerEmail: item.user.email,
                 })}
                 trailing={<Text className="text-xs font-medium text-muted">Open chat</Text>}
               />

@@ -11,10 +11,10 @@ export interface MeResponse {
   email: string;
   publicKey?: string | null;
 }
+/** A search result. Deliberately carries no email (T1.6): other users' emails are never exposed. */
 export interface UserListItem {
   userId: string;
   username: string;
-  email: string;
   hasPublicKey: boolean;
 }
 export interface UsersListResponse {

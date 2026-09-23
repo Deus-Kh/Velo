@@ -28,6 +28,7 @@ import { useNotificationPreferencesStore } from '../store/notification-preferenc
 import { getNotificationPreferencesForUser } from '../store/notification-preferences.store';
 import { useAppUiStore } from '../store/app-ui.store';
 import { displayIncomingMessageNotification } from '../shared/notifications/notifee';
+import { formatHandle, shortSecureId } from '../shared/utils/identity';
 
 type ChatOpenHandler = (chat: { peerUserId: string; peerUsername?: string }) => void;
 
@@ -35,7 +36,6 @@ type SelectedConversationAction = {
   conversationId: string;
   peerUserId: string;
   peerUsername: string;
-  peerEmail: string;
   unreadCount: number;
 };
 
@@ -326,8 +326,7 @@ export default function ChatListScreen({
     const query = trimmedQuery.toLowerCase();
     return sortedConversations.filter((item) => {
       const username = item.peerUsername?.toLowerCase() ?? '';
-      const email = item.peerEmail?.toLowerCase() ?? '';
-      return username.includes(query) || email.includes(query);
+      return username.includes(query);
     });
   }, [showingSearch, sortedConversations, trimmedQuery]);
   const matchingSearchContacts = useMemo(() => {
@@ -477,7 +476,6 @@ export default function ChatListScreen({
       conversationId: item.conversationId,
       peerUserId: item.peerUserId,
       peerUsername: item.peerUsername,
-      peerEmail: item.peerEmail,
       unreadCount: item.unreadCount,
     });
   }, []);
@@ -837,7 +835,7 @@ export default function ChatListScreen({
                               </View>
                             ) : null}
                           </View>
-                          <Text className="mt-1 text-sm text-muted">{item.item.peerEmail}</Text>
+                          <Text className="mt-1 text-sm text-muted">{formatHandle(item.item.peerUsername)}</Text>
                         </View>
 
                         <View className="items-end">
@@ -930,7 +928,7 @@ export default function ChatListScreen({
                           </Text>
                         </View>
                       </View>
-                      <Text className="mt-1 text-sm text-muted">{item.peerEmail}</Text>
+                      <Text className="mt-1 text-sm text-muted">{formatHandle(item.peerUsername)}</Text>
                     </View>
 
                     <View className="items-end">
@@ -1024,7 +1022,7 @@ export default function ChatListScreen({
                             </Text>
                           </View>
                         </View>
-                        <Text className="mt-1 text-sm text-muted">{item.item.peerEmail}</Text>
+                        <Text className="mt-1 text-sm text-muted">{formatHandle(item.item.peerUsername)}</Text>
                       </View>
 
                       <View className="items-end">
@@ -1074,7 +1072,7 @@ export default function ChatListScreen({
 
                   <View className="flex-1">
                     <Text className="text-base font-semibold text-text">{item.item.username}</Text>
-                    <Text className="mt-1 text-sm text-muted">{item.item.email}</Text>
+                    <Text className="mt-1 text-sm text-muted">{shortSecureId(item.item.userId)}</Text>
                     <View
                       className={`flex-row items-center justify-between ${
                         interfaceDensity === 'compact' ? 'mt-2.5' : 'mt-3'
@@ -1101,7 +1099,7 @@ export default function ChatListScreen({
               {selectedConversationAction.peerUsername}
             </Text>
             <Text className="mt-1 text-[13px] leading-5 text-muted">
-              {selectedConversationAction.peerEmail}
+              {formatHandle(selectedConversationAction.peerUsername)}
             </Text>
           </View>
 

@@ -216,6 +216,7 @@ Fix: budget every fresh issue per (requester, target) pair and per requester, ke
 **P0-6 · User directory dump with emails, and ReDoS in search** `[CORE]`
 `users.routes.ts:173-199`: empty `q` returns every account with email; raw `$regex`. Emails also in `GET /conversations`.
 Fix: min 3 chars, escaped prefix match on username only, no email in any response, rate limit. → T1.6
+**Status 2026-09-23:** resolved by T1.6. `GET /users` requires a 3–32 character query, escapes it, and matches a case-insensitive username prefix only; email removed from the search response and from `GET /conversations`. Client shows `@username` or the short secure ID where it used to show email, and searches saved contacts by username only. Verified by route tests: empty/short query → `[]`, `(a+)+$` answers in well under a second, no `@` address in any body, `malice@` matches nothing.
 
 **P0-7 · Missing authorization on socket handlers** `[CORE]`
 `message:delivered` (`setupSocket.ts:588-597`) mutates any message by id; `message:read` (630–686) trusts a client `conversationId` and spoofs receipts; `presence:subscribe` / `typing:*` (292–335) accept any target.

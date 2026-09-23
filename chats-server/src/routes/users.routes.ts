@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { requireAuth, type AuthedRequest } from "../middleware/auth";
 import { UserModel } from "../models/User";
+import { escapeRegex } from "../utils/regex";
 
 export const usersRouter = Router();
 
@@ -169,22 +170,39 @@ usersRouter.delete("/me/push-token", requireAuth, async (req: AuthedRequest, res
   return res.json({ ok: true });
 });
 
-// GET /users  (JWT) — список пользователей (без пароля)
+/** Minimum query length for user search; shorter queries return nothing (no directory dumps). */
+export const USER_SEARCH_MIN_QUERY_LENGTH = 3;
+export const USER_SEARCH_MAX_QUERY_LENGTH = 32;
+export const USER_SEARCH_DEFAULT_LIMIT = 20;
+export const USER_SEARCH_MAX_LIMIT = 50;
+
+/**
+ * GET /users?q=<prefix>  (JWT) — find users by username prefix.
+ *
+ * Previously `q` was optional (an empty query listed every account, with
+ * email addresses) and was interpolated into `$regex` unescaped (ReDoS).
+ * Now: `q` is required, bounded, escaped, and anchored as a case-insensitive
+ * prefix on `username` only. Email is never a search key and never returned.
+ */
 usersRouter.get('/', requireAuth, async (req: AuthedRequest, res) => {
-  const q = String(req.query.q || '').trim(); // search by username/email
-  const limit = Math.min(Number(req.query.limit || 50), 100);
+  const q = String(req.query.q ?? '').trim();
+  const requestedLimit = Number(req.query.limit);
+  const limit = Number.isFinite(requestedLimit) && requestedLimit > 0
+    ? Math.min(Math.floor(requestedLimit), USER_SEARCH_MAX_LIMIT)
+    : USER_SEARCH_DEFAULT_LIMIT;
 
-  const filter: any = { _id: { $ne: req.userId } };
-
-  if (q) {
-    filter.$or = [
-      { username: { $regex: q, $options: 'i' } },
-      { email: { $regex: q, $options: 'i' } },
-    ];
+  if (q.length < USER_SEARCH_MIN_QUERY_LENGTH) {
+    return res.json({ items: [] });
+  }
+  if (q.length > USER_SEARCH_MAX_QUERY_LENGTH) {
+    return res.status(400).json({ error: 'Query too long', code: 'QUERY_TOO_LONG' });
   }
 
-  const users = await UserModel.find(filter)
-    .select('_id username email identitySignUpdatedAt identityDhUpdatedAt') // Check for E2EE key setup
+  const users = await UserModel.find({
+    _id: { $ne: req.userId },
+    username: { $regex: `^${escapeRegex(q)}`, $options: 'i' },
+  })
+    .select('_id username identitySignUpdatedAt identityDhUpdatedAt')
     .limit(limit)
     .sort({ username: 1 });
 
@@ -192,7 +210,6 @@ usersRouter.get('/', requireAuth, async (req: AuthedRequest, res) => {
     items: users.map((u) => ({
       userId: String(u._id),
       username: u.username,
-      email: u.email,
       hasPublicKey: !!(u.identitySignUpdatedAt && u.identityDhUpdatedAt),
     })),
   });

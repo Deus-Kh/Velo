@@ -14,7 +14,7 @@ import { getTrustedIdentity, setTrustedIdentity, clearTrustedIdentity } from '..
 type Props = NativeStackScreenProps<RootStackParamList, 'VerifyContact'>;
 
 export default function VerifyContactScreen({ route, navigation }: Props) {
-  const { peerUserId, peerUsername, peerEmail, source } = route.params;
+  const { peerUserId, peerUsername, source } = route.params;
   const insets = useSafeAreaInsets();
   const myUserId = useAuthStore((s) => s.userId);
 
@@ -142,7 +142,9 @@ export default function VerifyContactScreen({ route, navigation }: Props) {
               <Text className="text-xl font-semibold text-text">
                 {peerUsername || 'Unknown contact'}
               </Text>
-              <Text className="mt-1 text-sm text-muted">{peerEmail || peerUserId}</Text>
+              <Text className="mt-1 text-sm text-muted" selectable>
+                {peerUserId}
+              </Text>
               <View
                 className={`mt-3 self-start rounded-full border px-3 py-1 ${
                   status === 'verified'
