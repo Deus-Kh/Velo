@@ -11,7 +11,6 @@ import { encryptV2, decryptV2 } from '../crypto/messageV2';
 import type { RatchetSessionV2 } from '../crypto/sessionTypes';
 import type { X3DHInitPacket } from '../crypto/x3dh';
 import { ensureV2SessionFromIncoming } from '../crypto/sessionBootstrap';
-import { makeConversationId } from '../utils/conversation';
 
 function requireMyUserId(): string {
   const myUserId = useAuthStore.getState().userId;
@@ -157,18 +156,16 @@ export async function subscribeToMessages(onMessage: (m: {
       // Send delivery confirmation asynchronously (non-blocking)
       setImmediate(() => {
         try {
-          socket.emit('message:delivered', {
-            conversationId: msg.conversationId,
-            serverMessageId: msg.serverMessageId,
-          }, (ack: any) => {
+          // The server derives the conversation from the stored message (T1.7).
+          socket.emit('message:delivered', { serverMessageId: msg.serverMessageId }, (ack: any) => {
             if (!ack?.ok) {
               console.warn('[messaging] failed to deliver confirmation:', ack?.error);
             }
           });
 
-          // Also send read notification immediately since chat is open
-          const conversationId = makeConversationId(String(myUserId), msg.fromUserId);
-          socket.emit('message:read', { conversationId }, (ack: any) => {
+          // Also send read notification immediately since chat is open.
+          // Name the peer; the server derives the conversationId itself.
+          socket.emit('message:read', { peerUserId: msg.fromUserId }, (ack: any) => {
             if (!ack?.ok) {
               console.warn('[messaging] failed to send read notification:', ack?.error);
             }

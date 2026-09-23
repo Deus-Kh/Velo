@@ -507,7 +507,7 @@ useEffect(() => {
     const stopTyping = () => {
       if (!typingActiveRef.current) return;
       typingActiveRef.current = false;
-      socket.emit('typing:stop', { toUserId: peerUserId, conversationId });
+      socket.emit('typing:stop', { toUserId: peerUserId });
     };
 
     if (!trimmedText) {
@@ -517,7 +517,7 @@ useEffect(() => {
 
     if (!typingActiveRef.current) {
       typingActiveRef.current = true;
-      socket.emit('typing:start', { toUserId: peerUserId, conversationId });
+      socket.emit('typing:start', { toUserId: peerUserId });
     }
 
     if (typingStopTimeoutRef.current) {
@@ -542,7 +542,7 @@ useEffect(() => {
 
     try {
       const socket = getSocket();
-      socket.emit('typing:stop', { toUserId: peerUserId, conversationId });
+      socket.emit('typing:stop', { toUserId: peerUserId });
     } catch {
       // ignore missing socket during unmount cleanup
     }
@@ -620,7 +620,7 @@ useEffect(() => {
     if (conversationId) {
       try {
         const socket = getSocket();
-        socket.emit('typing:stop', { toUserId: peerUserId, conversationId });
+        socket.emit('typing:stop', { toUserId: peerUserId });
       } catch {
         // ignore missing socket on send cleanup
       }

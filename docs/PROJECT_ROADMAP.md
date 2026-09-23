@@ -221,6 +221,7 @@ Fix: min 3 chars, escaped prefix match on username only, no email in any respons
 **P0-7 · Missing authorization on socket handlers** `[CORE]`
 `message:delivered` (`setupSocket.ts:588-597`) mutates any message by id; `message:read` (630–686) trusts a client `conversationId` and spoofs receipts; `presence:subscribe` / `typing:*` (292–335) accept any target.
 Fix: ownership checks, server-derived conversation ids, relationship check for presence/typing. → T1.7
+**Status 2026-09-23:** resolved by T1.7. `message:delivered` takes only `serverMessageId` and requires the caller to be the recipient (read is never regressed); `message:read` names the peer and the server derives the conversation; presence and typing require an existing conversation between the two users; `message:send` refuses self-send and unknown recipients; acks return codes, never internal messages. The authorization table sits above `setupSocket`. Verified by socket-level tests with three real clients (stranger refused everywhere and hears nothing; partner works). P2-10's relationship check is done; the privacy toggles remain for Phase 7'.
 
 **P0-8 · No password policy at registration; mismatched client rules** `[CORE]` → T1.8
 

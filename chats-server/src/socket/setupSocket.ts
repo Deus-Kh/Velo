@@ -210,6 +210,8 @@ import { MessageModel } from "../models/Message";
 import { sendMessagePushToUser } from "../push/firebase";
 import { makeConversationId } from "../utils/conversation";
 import { services } from "../lib/services";
+import { haveConversation } from "../lib/socketAuthz";
+import { UserModel } from "../models/User";
 
 /** Maximum encrypted message body accepted over the socket (P0-5 storage-flood control). */
 const MAX_CIPHERTEXT_BYTES = 64 * 1024;
@@ -274,6 +276,22 @@ function emitPresence(io: Server, userId: string) {
   io.to(`presence:${userId}`).emit("presence:update", getPresencePayload(userId));
 }
 
+/**
+ * Socket event authorization (P0-7). Every handler's check, in one place:
+ *
+ * | Event                | Identity source     | Check                                                              |
+ * |----------------------|---------------------|--------------------------------------------------------------------|
+ * | handshake            | JWT in auth.token   | signature + algorithm pinned; userId from claims                   |
+ * | presence:subscribe   | socket.data.userId  | caller shares a conversation with the peer                         |
+ * | presence:unsubscribe | socket.data.userId  | none needed (leaving a room is harmless)                           |
+ * | typing:start / stop  | socket.data.userId  | shares a conversation; conversationId derived server-side          |
+ * | message:send         | fromUserId = caller | recipient exists and is not the caller; per-user rate limit        |
+ * | message:delivered    | socket.data.userId  | caller is the message's recipient; read is never regressed         |
+ * | message:read         | socket.data.userId  | peer named by client; conversationId derived; shares a conversation|
+ *
+ * General principle: never accept a server-derivable identifier from a client.
+ * conversationId is always makeConversationId(caller, peer).
+ */
 export function setupSocket(io: Server) {
   io.use((socket, next) => {
     try {
@@ -295,14 +313,20 @@ export function setupSocket(io: Server) {
     emitPresence(io, userId);
     console.log('[socket] join room', userId, 'socket', socket.id);
 
-    socket.on("presence:subscribe", (dto: { peerUserId?: string | null }) => {
+    // Authorization: caller must share a conversation with the peer.
+    socket.on("presence:subscribe", async (dto: { peerUserId?: string | null }) => {
       const peerUserId = String(dto?.peerUserId ?? "");
       if (!isValidObjectIdString(peerUserId)) return;
+      if (!(await haveConversation(userId, peerUserId))) {
+        console.warn("[socket] presence:subscribe refused (no conversation)", { userId, peerUserId });
+        return;
+      }
 
       socket.join(`presence:${peerUserId}`);
       socket.emit("presence:update", getPresencePayload(peerUserId));
     });
 
+    // Authorization: leaving a room you never joined is a no-op; nothing to check.
     socket.on("presence:unsubscribe", (dto: { peerUserId?: string | null }) => {
       const peerUserId = String(dto?.peerUserId ?? "");
       if (!isValidObjectIdString(peerUserId)) return;
@@ -310,35 +334,21 @@ export function setupSocket(io: Server) {
       socket.leave(`presence:${peerUserId}`);
     });
 
-    socket.on(
-      "typing:start",
-      (dto: { toUserId?: string | null; conversationId?: string | null }) => {
-        const toUserId = String(dto?.toUserId ?? "");
-        const conversationId = String(dto?.conversationId ?? "");
-        if (!isValidObjectIdString(toUserId) || !conversationId) return;
+    // Authorization: caller must share a conversation with the peer. The
+    // conversationId is derived server-side, never taken from the client.
+    const handleTyping = async (dto: { toUserId?: string | null }, isTyping: boolean) => {
+      const toUserId = String(dto?.toUserId ?? "");
+      if (!isValidObjectIdString(toUserId)) return;
+      if (!(await haveConversation(userId, toUserId))) return;
 
-        io.to(toUserId).emit("typing:update", {
-          fromUserId: userId,
-          conversationId,
-          isTyping: true,
-        });
-      }
-    );
-
-    socket.on(
-      "typing:stop",
-      (dto: { toUserId?: string | null; conversationId?: string | null }) => {
-        const toUserId = String(dto?.toUserId ?? "");
-        const conversationId = String(dto?.conversationId ?? "");
-        if (!isValidObjectIdString(toUserId) || !conversationId) return;
-
-        io.to(toUserId).emit("typing:update", {
-          fromUserId: userId,
-          conversationId,
-          isTyping: false,
-        });
-      }
-    );
+      io.to(toUserId).emit("typing:update", {
+        fromUserId: userId,
+        conversationId: makeConversationId(userId, toUserId),
+        isTyping,
+      });
+    };
+    socket.on("typing:start", (dto: { toUserId?: string | null }) => void handleTyping(dto, true));
+    socket.on("typing:stop", (dto: { toUserId?: string | null }) => void handleTyping(dto, false));
 
     socket.on("message:send", async (dto: SendMessageDTO, ack?: (r: any) => void) => {
       try {
@@ -363,8 +373,17 @@ export function setupSocket(io: Server) {
         });
 
         if (!dto?.toUserId || !isValidObjectIdString(dto.toUserId)) {
-          console.warn("[socket] reject message: invalid toUserId", { dto });
-          return ack?.({ ok: false, error: "Invalid toUserId" });
+          console.warn("[socket] reject message: invalid toUserId", { from: userId });
+          return ack?.({ ok: false, code: "BAD_ID", error: "Invalid toUserId" });
+        }
+        // Authorization: sender is always socket.data.userId; the recipient must
+        // be another existing account (self-send passed the 2-member validator
+        // with a duplicated id and double-emitted).
+        if (dto.toUserId === userId) {
+          return ack?.({ ok: false, code: "SELF_SEND", error: "Cannot message yourself" });
+        }
+        if (!(await UserModel.exists({ _id: dto.toUserId }))) {
+          return ack?.({ ok: false, code: "NOT_FOUND", error: "Recipient not found" });
         }
         if (!isNonEmptyString(dto.clientMessageId, 3)) {
           console.warn("[socket] reject message: invalid clientMessageId", { dto });
@@ -608,107 +627,87 @@ export function setupSocket(io: Server) {
     });
 
     // Listen for message:delivered notifications
-    socket.on('message:delivered', async (dto: { conversationId: string; serverMessageId: string }, ack?: (r: any) => void) => {
+    // Authorization: only the message's recipient may mark it delivered. The
+    // conversationId comes from the stored document, never from the client,
+    // and a message already read is never regressed to delivered.
+    socket.on('message:delivered', async (dto: { serverMessageId?: string }, ack?: (r: any) => void) => {
       try {
-        const conversationId = String(dto.conversationId);
-        const serverMessageId = String(dto.serverMessageId);
-        
-        console.log('[socket] message:delivered event received:', { from: userId, serverMessageId });
+        const serverMessageId = String(dto?.serverMessageId ?? '');
+        if (!isValidObjectIdString(serverMessageId)) {
+          return ack?.({ ok: false, code: 'BAD_ID', error: 'Invalid serverMessageId' });
+        }
 
-        // Update the message to delivered status
-        const doc = await MessageModel.findByIdAndUpdate(
-          serverMessageId,
-          {
-            $set: {
-              status: 'delivered',
-              deliveredAt: Date.now(),
-            },
-          },
-          { new: true }
+        const doc = await MessageModel.findById(serverMessageId);
+        if (!doc) {
+          return ack?.({ ok: false, code: 'NOT_FOUND', error: 'Message not found' });
+        }
+        if (String(doc.toUserId) !== userId) {
+          console.warn('[socket] message:delivered refused (not the recipient)', { userId, serverMessageId });
+          return ack?.({ ok: false, code: 'FORBIDDEN', error: 'Forbidden' });
+        }
+        if (doc.status === 'read') {
+          return ack?.({ ok: true, status: 'read' });
+        }
+
+        const deliveredAt = Date.now();
+        await MessageModel.updateOne(
+          { _id: doc._id, status: { $ne: 'read' } },
+          { $set: { status: 'delivered', deliveredAt } },
         );
 
-        if (!doc) {
-          console.warn('[socket] message:delivered - message not found:', { serverMessageId });
-          return ack?.({ ok: false, error: 'Message not found' });
-        }
-
-        console.log('[socket] message marked as delivered:', { 
-          from: userId, 
-          serverMessageId, 
-          senderUserId: String(doc.fromUserId)
+        io.to(String(doc.fromUserId)).emit('message:status-changed', {
+          conversationId: doc.conversationId,
+          status: 'delivered',
+          serverMessageId,
+          deliveredAt,
+          deliveredByUserId: userId,
         });
 
-        // Notify the sender that their message was delivered
-        const senderUserId = String(doc.fromUserId);
-        if (senderUserId) {
-          io.to(senderUserId).emit('message:status-changed', {
-            conversationId,
-            status: 'delivered',
-            serverMessageId,
-            deliveredAt: (doc as any).deliveredAt ?? Date.now(),
-            deliveredByUserId: userId,
-          });
-        }
-
-        return ack?.({ ok: true });
-      } catch (e: any) {
-        console.error('message:delivered failed:', e);
-        return ack?.({ ok: false, error: e?.message });
+        return ack?.({ ok: true, status: 'delivered' });
+      } catch (e) {
+        console.error('[socket] message:delivered failed:', (e as Error)?.message ?? e);
+        return ack?.({ ok: false, code: 'INTERNAL', error: 'Internal error' });
       }
     });
 
-    // Listen for message:read notifications
-    socket.on('message:read', async (dto: { conversationId: string }, ack?: (r: any) => void) => {
+    // Authorization: the DTO names the peer; the conversationId is derived
+    // server-side from (caller, peer). A legacy conversationId is accepted only
+    // if it is exactly the one the server would derive for its two members.
+    // The caller must share a conversation with the peer, so a stranger cannot
+    // push a forged read receipt at an arbitrary user.
+    socket.on('message:read', async (dto: { peerUserId?: string; conversationId?: string }, ack?: (r: any) => void) => {
       try {
-        const conversationId = String(dto.conversationId);
+        let peerUserId = String(dto?.peerUserId ?? '');
+        if (!peerUserId && typeof dto?.conversationId === 'string') {
+          const parts = dto.conversationId.split(':');
+          peerUserId = parts.find((p) => p !== userId) ?? '';
+          if (parts.length !== 2 || makeConversationId(userId, peerUserId) !== dto.conversationId) {
+            return ack?.({ ok: false, code: 'FORBIDDEN', error: 'Forbidden' });
+          }
+        }
+        if (!isValidObjectIdString(peerUserId) || peerUserId === userId) {
+          return ack?.({ ok: false, code: 'BAD_ID', error: 'Invalid peerUserId' });
+        }
+        if (!(await haveConversation(userId, peerUserId))) {
+          console.warn('[socket] message:read refused (no conversation)', { userId, peerUserId });
+          return ack?.({ ok: false, code: 'FORBIDDEN', error: 'Forbidden' });
+        }
+
+        const conversationId = makeConversationId(userId, peerUserId);
         const readAt = Date.now();
-        
-        console.log('[socket] message:read event received:', { from: userId, conversationId });
 
-        // Mark all messages sent TO this user as read
         const result = await MessageModel.updateMany(
-          {
-            conversationId,
-            toUserId: userId, // Messages sent TO this user
-            status: { $ne: 'read' },
-          },
-          {
-            $set: {
-              status: 'read',
-              readAt,
-            },
-          }
+          { conversationId, toUserId: userId, status: { $ne: 'read' } },
+          { $set: { status: 'read', readAt } },
         );
 
-        // ALSO reset unreadCount for this user in the conversation (they read the messages)
-        await ConversationModel.findOneAndUpdate(
+        await ConversationModel.updateOne(
           { conversationId },
-          {
-            $set: {
-              [`unreadCounts.${userId}`]: 0,
-            },
-          }
+          { $set: { [`unreadCounts.${userId}`]: 0 } },
         );
 
-        console.log('[socket] messages marked as read:', { 
-          from: userId, 
-          conversationId, 
-          count: result.modifiedCount 
-        });
-
-        // Extract the other user ID from conversationId (format: "userId1:userId2")
-        const [id1, id2] = conversationId.split(':');
-        const otherUserId = String(id1) === String(userId) ? String(id2) : String(id1);
-
-        console.log('[socket] sending message:status-changed to:', {
-          otherUserId,
-          conversationId,
-          userId,
-        });
-
-        // Notify the sender that their messages were read
-        if (otherUserId) {
-          io.to(otherUserId).emit('message:status-changed', {
+        if (result.modifiedCount > 0) {
+          io.to(peerUserId).emit('message:status-changed', {
             conversationId,
             status: 'read',
             readAt,
@@ -716,10 +715,10 @@ export function setupSocket(io: Server) {
           });
         }
 
-        return ack?.({ ok: true });
-      } catch (e: any) {
-        console.error('message:read failed:', e);
-        return ack?.({ ok: false, error: e?.message });
+        return ack?.({ ok: true, modified: result.modifiedCount });
+      } catch (e) {
+        console.error('[socket] message:read failed:', (e as Error)?.message ?? e);
+        return ack?.({ ok: false, code: 'INTERNAL', error: 'Internal error' });
       }
     });
 
