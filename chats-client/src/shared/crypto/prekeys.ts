@@ -28,6 +28,7 @@ async function getStoredSignedPreKey(userId: string): Promise<StoredSignedPreKey
 async function saveSignedPreKey(userId: string, data: StoredSignedPreKey) {
   await Keychain.setGenericPassword('signed-prekey', JSON.stringify(data), {
     service: signedPreKeyService(userId),
+    accessible: Keychain.ACCESSIBLE.WHEN_UNLOCKED_THIS_DEVICE_ONLY,
   });
 }
 

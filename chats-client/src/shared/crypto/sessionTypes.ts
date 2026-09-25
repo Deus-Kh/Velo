@@ -1,4 +1,5 @@
-export type ProtoVersion = 1 | 2;
+/** v1 (static shared-secret) was removed; only the ratchet wire format remains. */
+export type ProtoVersion = 2;
 
 export type AnySession = RatchetSessionV2;
 
@@ -15,10 +16,11 @@ export interface RatchetSessionV2 {
   Nr: number;
   PN: number;
 
-  // NEW: skipped message keys
-  skippedKeys?: {
-    [messageNumber: number]: string; // base64 messageKey
-  };
+  /**
+   * Skipped message keys, keyed `${dhPubBase64}:${messageNumber}` (epoch-
+   * namespaced — see messageV2.ts skippedKeyId). Value: base64 message key.
+   */
+  skippedKeys?: Record<string, string>;
 
   // DH ratchet placeholders
   DHsPublicKey: string | null;

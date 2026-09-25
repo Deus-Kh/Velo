@@ -29,6 +29,7 @@ export async function ensureIdentityDhKeyPairForUser(userId: string): Promise<st
 
   await Keychain.setGenericPassword('identity-dh', JSON.stringify(payload), {
     service: serviceForUser(userId),
+    accessible: Keychain.ACCESSIBLE.WHEN_UNLOCKED_THIS_DEVICE_ONLY,
   });
 
   return payload.publicKey;

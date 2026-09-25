@@ -1,5 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { ReplyReference } from '../chat/types';
+import { getOrCreateSessionMasterKey } from '../crypto/sessionMasterKey';
+import { looksSealed, openJson, sealJson } from './sealed';
 
 export type PendingMessageErrorCode =
   | 'send_failed'
@@ -24,21 +26,36 @@ function key(myUserId: string) {
   return `pending_messages_v1:${myUserId}`;
 }
 
+/**
+ * The queue holds PLAINTEXT bodies of messages not yet sent, so it is sealed
+ * under the session master key (T1.3). A pre-T1.3 plaintext array is
+ * migrated in place on first read.
+ */
 async function readAll(myUserId: string): Promise<PendingMessageRecord[]> {
   const raw = await AsyncStorage.getItem(key(myUserId));
   if (!raw) return [];
 
+  const mk = await getOrCreateSessionMasterKey(myUserId);
+
+  if (looksSealed(raw)) {
+    const items = openJson<unknown>(mk, raw);
+    return Array.isArray(items) ? (items.filter(Boolean) as PendingMessageRecord[]) : [];
+  }
+
+  let parsed: unknown;
   try {
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-    return parsed.filter(Boolean);
+    parsed = JSON.parse(raw);
   } catch {
     return [];
   }
+  const items = Array.isArray(parsed) ? (parsed.filter(Boolean) as PendingMessageRecord[]) : [];
+  await AsyncStorage.setItem(key(myUserId), sealJson(mk, items)); // migrate legacy plaintext
+  return items;
 }
 
 async function writeAll(myUserId: string, items: PendingMessageRecord[]) {
-  await AsyncStorage.setItem(key(myUserId), JSON.stringify(items));
+  const mk = await getOrCreateSessionMasterKey(myUserId);
+  await AsyncStorage.setItem(key(myUserId), sealJson(mk, items));
 }
 
 export async function listPendingMessages(myUserId: string): Promise<PendingMessageRecord[]> {

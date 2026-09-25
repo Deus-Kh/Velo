@@ -22,7 +22,7 @@ export async function generateAndStoreKeyPair(userId:string): Promise<string> {
   await Keychain.setGenericPassword(
     'keypair',
     JSON.stringify({ publicKey, privateKey } satisfies StoredKeyPair),
-    { service: serviceForUser(userId) }
+    { service: serviceForUser(userId), accessible: Keychain.ACCESSIBLE.WHEN_UNLOCKED_THIS_DEVICE_ONLY }
   );
 
   return publicKey;

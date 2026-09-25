@@ -18,6 +18,9 @@ export async function getOrCreateHistoryMasterKey(userId: string): Promise<Uint8
   }
 
   const mk = nacl.randomBytes(32);
-  await Keychain.setGenericPassword('history-mk', encodeBase64(mk), { service: service(userId) });
+  await Keychain.setGenericPassword('history-mk', encodeBase64(mk), {
+    service: service(userId),
+    accessible: Keychain.ACCESSIBLE.WHEN_UNLOCKED_THIS_DEVICE_ONLY,
+  });
   return mk;
 }

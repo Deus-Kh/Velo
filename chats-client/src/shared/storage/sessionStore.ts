@@ -1,22 +1,66 @@
-
-
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import nacl from 'tweetnacl';
 import { encodeBase64, decodeBase64 } from 'tweetnacl-util';
 import type { AnySession, RatchetSessionV2 } from '../crypto/sessionTypes';
 import { hkdfSha256 } from '../crypto/kdf';
+import { getOrCreateSessionMasterKey } from '../crypto/sessionMasterKey';
+import { looksSealed, openJson, sealJson } from './sealed';
 
 function sessionKey(myUserId: string, peerUserId: string) {
   return `session:v2:${myUserId}:${peerUserId}`;
 }
 
+function isSessionShape(value: unknown): value is AnySession {
+  const s = value as Partial<RatchetSessionV2> | null;
+  return (
+    !!s &&
+    typeof s === 'object' &&
+    s.protoVersion === 2 &&
+    typeof s.rootKey === 'string' &&
+    typeof s.chainKeySend === 'string' &&
+    typeof s.chainKeyRecv === 'string' &&
+    typeof s.Ns === 'number' &&
+    typeof s.Nr === 'number'
+  );
+}
+
+/**
+ * Loads the session for (me, peer). Session state is sealed under the
+ * session master key (T1.3). A pre-T1.3 plaintext session is migrated in
+ * place on first load: the plaintext bytes have already been on disk, so
+ * re-sealing does not undo that exposure, but discarding the session would
+ * break every existing conversation until re-bootstrap (T2.11) exists.
+ */
 export async function loadSession(params: {
   myUserId: string;
   peerUserId: string;
 }): Promise<AnySession | null> {
-  const raw = await AsyncStorage.getItem(sessionKey(params.myUserId, params.peerUserId));
+  const storageKey = sessionKey(params.myUserId, params.peerUserId);
+  const raw = await AsyncStorage.getItem(storageKey);
   if (!raw) return null;
-  return JSON.parse(raw) as AnySession;
+
+  const mk = await getOrCreateSessionMasterKey(params.myUserId);
+
+  if (looksSealed(raw)) {
+    const session = openJson<AnySession>(mk, raw);
+    // Wrong key or tampered blob → treat as no session; the UI offers a reset.
+    return session && isSessionShape(session) ? session : null;
+  }
+
+  // Legacy plaintext (pre-T1.3): migrate in place.
+  let legacy: unknown;
+  try {
+    legacy = JSON.parse(raw);
+  } catch {
+    await AsyncStorage.removeItem(storageKey);
+    return null;
+  }
+  if (!isSessionShape(legacy)) {
+    await AsyncStorage.removeItem(storageKey);
+    return null;
+  }
+  await AsyncStorage.setItem(storageKey, sealJson(mk, legacy));
+  return legacy;
 }
 
 export async function saveSession(params: {
@@ -24,9 +68,10 @@ export async function saveSession(params: {
   peerUserId: string;
   session: AnySession;
 }): Promise<void> {
+  const mk = await getOrCreateSessionMasterKey(params.myUserId);
   await AsyncStorage.setItem(
     sessionKey(params.myUserId, params.peerUserId),
-    JSON.stringify(params.session),
+    sealJson(mk, params.session),
   );
 }
 
@@ -44,6 +89,10 @@ export async function deleteSession(params: {
  * IMPORTANT:
  * Send/recv MUST be mirrored between peers.
  * Use a deterministic "initiator" rule so both sides agree without extra messages.
+ *
+ * NOTE (P1-0 / T2.0): this HKDF directional split is not the standard Double
+ * Ratchet bootstrap and is the reason the DH ratchet never fires today. T2.0
+ * replaces it; do not build on it.
  */
 export async function createSessionFromX3DH(params: {
   myUserId: string;
@@ -113,7 +162,6 @@ export async function createSessionFromX3DH(params: {
 
 /**
  * Utility: delete all v2 sessions for this account.
- * (Used on logout if you want)
  */
 export async function deleteAllSessionsForUser(myUserId: string): Promise<void> {
   const allKeys = await AsyncStorage.getAllKeys();

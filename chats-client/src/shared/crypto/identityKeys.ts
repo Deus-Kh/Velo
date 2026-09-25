@@ -40,7 +40,7 @@ export async function ensureIdentityKeyPairForUser(userId: string): Promise<stri
   await Keychain.setGenericPassword(
     'identity',
     JSON.stringify(payload),
-    { service: serviceForUser(userId) }
+    { service: serviceForUser(userId), accessible: Keychain.ACCESSIBLE.WHEN_UNLOCKED_THIS_DEVICE_ONLY }
   );
 
   return payload.publicKey;
