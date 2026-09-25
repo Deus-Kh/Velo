@@ -18,6 +18,7 @@ export async function startTestApp() {
   vi.stubEnv('JWT_SECRET', TEST_JWT_SECRET);
   vi.stubEnv('FIREBASE_SERVICE_ACCOUNT_PATH', './missing-service-account.json');
   vi.stubEnv('REDIS_URL', '');
+  vi.stubEnv('PASSWORD_BREACH_CHECK', 'false'); // no network in tests; breachCount() has its own unit test
 
   const mongod = await MongoMemoryServer.create();
   await mongoose.connect(mongod.getUri());

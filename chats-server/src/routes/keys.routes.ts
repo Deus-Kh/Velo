@@ -7,6 +7,13 @@ import { SignedPreKeyModel } from '../models/SignedPreKey';
 import { OneTimePreKeyModel } from '../models/OneTimePreKey';
 import { PreKeyBundleIssueModel } from '../models/PreKeyBundleIssue';
 import { isValidObjectIdString } from '../utils/objectId';
+import {
+  identityDhKeySchema,
+  identityKeySchema,
+  preKeysUploadSchema,
+  signedPreKeySchema,
+  validateBody,
+} from '../utils/validation';
 
 export const keysRouter = Router();
 
@@ -25,16 +32,8 @@ function tooManyRequests(res: Response, retryAfterSeconds: number, code: string,
  * Body: { identitySignPublicKey: string }
  * Stores user's identity signing public key (Ed25519 public key, base64).
  */
-keysRouter.post('/identity', requireAuth, async (req: AuthedRequest, res) => {
-  const { identitySignPublicKey } = req.body as { identitySignPublicKey?: string };
-
-  if (!identitySignPublicKey) {
-    return res.status(400).json({ error: 'identitySignPublicKey is required' });
-  }
-
-  if (typeof identitySignPublicKey !== 'string' || identitySignPublicKey.length < 20) {
-    return res.status(400).json({ error: 'Invalid identitySignPublicKey format' });
-  }
+keysRouter.post('/identity', requireAuth, validateBody(identityKeySchema), async (req: AuthedRequest, res) => {
+  const { identitySignPublicKey } = req.body as { identitySignPublicKey: string };
 
   await UserModel.updateOne(
     { _id: req.userId },
@@ -44,13 +43,8 @@ keysRouter.post('/identity', requireAuth, async (req: AuthedRequest, res) => {
   return res.json({ ok: true });
 });
 
-keysRouter.post('/identity-dh', requireAuth, async (req: AuthedRequest, res) => {
-  const { identityDhPublicKey } = req.body as { identityDhPublicKey?: string };
-
-  if (!identityDhPublicKey) return res.status(400).json({ error: 'identityDhPublicKey is required' });
-  if (typeof identityDhPublicKey !== 'string' || identityDhPublicKey.length < 20) {
-    return res.status(400).json({ error: 'Invalid identityDhPublicKey format' });
-  }
+keysRouter.post('/identity-dh', requireAuth, validateBody(identityDhKeySchema), async (req: AuthedRequest, res) => {
+  const { identityDhPublicKey } = req.body as { identityDhPublicKey: string };
 
   await UserModel.updateOne(
     { _id: req.userId },
@@ -81,23 +75,8 @@ keysRouter.get('/identity/:userId', requireAuth, async (req: AuthedRequest, res)
 });
 
 
-keysRouter.post('/signed-prekey', requireAuth, async (req: AuthedRequest, res) => {
-  const { keyId, publicKey, signature } = req.body as {
-    keyId?: number;
-    publicKey?: string;
-    signature?: string;
-  };
-
-  if (typeof keyId !== 'number') return res.status(400).json({ error: 'keyId is required (number)' });
-  if (!publicKey) return res.status(400).json({ error: 'publicKey is required' });
-  if (!signature) return res.status(400).json({ error: 'signature is required' });
-
-  if (typeof publicKey !== 'string' || publicKey.length < 20) {
-    return res.status(400).json({ error: 'Invalid publicKey format' });
-  }
-  if (typeof signature !== 'string' || signature.length < 20) {
-    return res.status(400).json({ error: 'Invalid signature format' });
-  }
+keysRouter.post('/signed-prekey', requireAuth, validateBody(signedPreKeySchema), async (req: AuthedRequest, res) => {
+  const { keyId, publicKey, signature } = req.body as { keyId: number; publicKey: string; signature: string };
 
   // upsert by (userId, keyId) to allow idempotent upload
   await SignedPreKeyModel.updateOne(
@@ -109,30 +88,8 @@ keysRouter.post('/signed-prekey', requireAuth, async (req: AuthedRequest, res) =
   return res.json({ ok: true });
 });
  
-keysRouter.post('/prekeys', requireAuth, async (req: AuthedRequest, res) => {
-  const { items } = req.body as { items?: Array<{ keyId: number; publicKey: string }> };
-
-  if (!Array.isArray(items) || items.length === 0) {
-    return res.status(400).json({ error: 'items is required (non-empty array)' });
-  }
-
-  if (items.length > MAX_UNUSED_ONE_TIME_PREKEYS) {
-    return res.status(400).json({ error: `Too many prekeys (max ${MAX_UNUSED_ONE_TIME_PREKEYS} per request)` });
-  }
-
-  const wellFormed = items.every(
-    (it) =>
-      it &&
-      typeof it === 'object' &&
-      Number.isInteger(it.keyId) &&
-      it.keyId >= 0 &&
-      typeof it.publicKey === 'string' &&
-      it.publicKey.length >= 20 &&
-      it.publicKey.length <= 200,
-  );
-  if (!wellFormed) {
-    return res.status(400).json({ error: 'Each item needs an integer keyId and a base64 publicKey', code: 'BAD_PREKEY_ITEM' });
-  }
+keysRouter.post('/prekeys', requireAuth, validateBody(preKeysUploadSchema), async (req: AuthedRequest, res) => {
+  const { items } = req.body as { items: Array<{ keyId: number; publicKey: string }> };
 
   // Total-pool cap (P0-4): the per-request cap alone allowed unbounded growth.
   const unused = await OneTimePreKeyModel.countDocuments({ userId: req.userId, used: false });

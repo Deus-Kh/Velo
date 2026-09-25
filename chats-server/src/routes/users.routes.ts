@@ -1,7 +1,8 @@
 import { Router } from "express";
 import { requireAuth, type AuthedRequest } from "../middleware/auth";
-import { UserModel } from "../models/User";
+import { UserModel, USERNAME_CI_COLLATION } from "../models/User";
 import { escapeRegex } from "../utils/regex";
+import { pushTokenSchema, updateMeSchema, validateBody } from "../utils/validation";
 
 export const usersRouter = Router();
 
@@ -58,39 +59,25 @@ usersRouter.get("/me", requireAuth, async (req: AuthedRequest, res) => {
   });
 });
 
-usersRouter.patch("/me", requireAuth, async (req: AuthedRequest, res) => {
-  const { email, username } = req.body as { email?: string; username?: string };
-
-  const nextEmail = String(email || "").trim().toLowerCase();
-  const nextUsername = String(username || "").trim();
-
-  if (!nextEmail || !nextUsername) {
-    return res.status(400).json({ error: "email and username are required" });
-  }
-
-  if (nextUsername.length < 3 || nextUsername.length > 32) {
-    return res.status(400).json({ error: "Username must be between 3 and 32 characters" });
-  }
-
-  const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-  if (!emailPattern.test(nextEmail)) {
-    return res.status(400).json({ error: "Invalid email format" });
-  }
+usersRouter.patch("/me", requireAuth, validateBody(updateMeSchema), async (req: AuthedRequest, res) => {
+  const { email: nextEmail, username: nextUsername } = req.body as { email: string; username: string };
 
   const existingEmail = await UserModel.findOne({
     email: nextEmail,
     _id: { $ne: req.userId },
   }).select("_id");
   if (existingEmail) {
-    return res.status(409).json({ error: "Email already in use" });
+    return res.status(409).json({ error: "Email already in use", code: "EMAIL_TAKEN" });
   }
 
   const existingUsername = await UserModel.findOne({
     username: nextUsername,
     _id: { $ne: req.userId },
-  }).select("_id");
+  })
+    .collation(USERNAME_CI_COLLATION)
+    .select("_id");
   if (existingUsername) {
-    return res.status(409).json({ error: "Username already in use" });
+    return res.status(409).json({ error: "Username already in use", code: "USERNAME_TAKEN" });
   }
 
   const user = await UserModel.findByIdAndUpdate(
@@ -114,17 +101,8 @@ usersRouter.patch("/me", requireAuth, async (req: AuthedRequest, res) => {
   });
 });
 
-usersRouter.post("/me/push-token", requireAuth, async (req: AuthedRequest, res) => {
-  const token = String(req.body?.token || "").trim();
-  const platform = String(req.body?.platform || "").trim().toLowerCase();
-
-  if (!token) {
-    return res.status(400).json({ error: "token is required" });
-  }
-
-  if (platform !== "android" && platform !== "ios") {
-    return res.status(400).json({ error: "platform must be android or ios" });
-  }
+usersRouter.post("/me/push-token", requireAuth, validateBody(pushTokenSchema), async (req: AuthedRequest, res) => {
+  const { token, platform } = req.body as { token: string; platform: "android" | "ios" };
 
   await UserModel.updateOne(
     { _id: req.userId },

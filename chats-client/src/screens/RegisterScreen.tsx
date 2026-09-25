@@ -7,9 +7,9 @@ import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../app/Navigation';
 import { useForm, Controller } from 'react-hook-form';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { toApiError } from '../shared/api/errors';
-import { newPasswordRules, PASSWORD_MIN_LENGTH } from '../shared/validation/password';
+import { estimatePasswordStrength, newPasswordRules, PASSWORD_MIN_LENGTH } from '../shared/validation/password';
 
 type NavProp = NativeStackNavigationProp<RootStackParamList, 'Register'>;
 
@@ -30,6 +30,7 @@ export default function RegisterScreen() {
     control,
     handleSubmit,
     setError,
+    watch,
     formState: { errors, isSubmitting },
   } = useForm<FormData>({
     defaultValues: {
@@ -38,6 +39,9 @@ export default function RegisterScreen() {
       password: '',
     },
   });
+
+  const passwordValue = watch("password");
+  const passwordStrength = useMemo(() => estimatePasswordStrength(passwordValue), [passwordValue]);
 
   const onSubmit = async (data: FormData) => {
     setSubmitError(null);
@@ -134,6 +138,33 @@ export default function RegisterScreen() {
               )}
             />
             {errors.password ? <Text className="px-1 text-sm text-danger">{errors.password.message}</Text> : null}
+            {passwordStrength.score > 0 ? (
+              <View
+                className="px-1"
+                accessibilityLabel={`Password strength: ${passwordStrength.label}`}
+              >
+                <View className="flex-row gap-1">
+                  {[1, 2, 3, 4].map((step) => (
+                    <View
+                      key={step}
+                      className={`h-1.5 flex-1 rounded-full ${
+                        step <= passwordStrength.score
+                          ? passwordStrength.score <= 1
+                            ? 'bg-danger'
+                            : passwordStrength.score === 2
+                            ? 'bg-warning'
+                            : 'bg-success'
+                          : 'bg-border'
+                      }`}
+                    />
+                  ))}
+                </View>
+                <Text className="mt-1 text-xs text-muted">
+                  {passwordStrength.label}
+                  {passwordStrength.score <= 2 ? ' · try a longer passphrase' : ''}
+                </Text>
+              </View>
+            ) : null}
 
             {submitError ? (
               <View

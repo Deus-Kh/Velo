@@ -1,11 +1,19 @@
 import { Router } from "express";
 import bcrypt from "bcrypt";
 import jwt, { type SignOptions } from "jsonwebtoken";
-import { UserModel } from "../models/User";
+import { UserModel, USERNAME_CI_COLLATION } from "../models/User";
 import { config } from "../config";
 import { requireAuth, type AuthedRequest } from "../middleware/auth";
 import { authLimiter } from "../middleware/rateLimit";
 import { services } from "../lib/services";
+import { checkPasswordPolicy } from "../lib/passwordPolicy";
+import {
+  changePasswordSchema,
+  loginSchema,
+  registerSchema,
+  validateBody,
+  validationFailed,
+} from "../utils/validation";
 
 export const authRouter = Router();
 
@@ -18,40 +26,48 @@ function signAccessToken(userId: string): string {
   return jwt.sign({ userId }, config.JWT_SECRET, accessTokenSignOptions);
 }
 
-authRouter.post("/register", authLimiter, async (req, res) => {
+function isDuplicateKeyError(e: unknown): boolean {
+  return typeof e === "object" && e !== null && (e as { code?: number }).code === 11000;
+}
+
+authRouter.post("/register", authLimiter, validateBody(registerSchema), async (req, res) => {
   const { email, username, password } = req.body as {
-    email?: string;
-    username?: string;
-    password?: string;
+    email: string;
+    username: string;
+    password: string;
   };
 
-  if (!email || !username || !password) {
-    return res
-      .status(400)
-      .json({ error: "email, username, password are required" });
-  }
+  // Strength + breach policy; the shape (length) was already enforced by the schema.
+  const policy = await checkPasswordPolicy(password, {
+    userInputs: [email, username],
+    breachCheck: config.PASSWORD_BREACH_CHECK,
+  });
+  if (!policy.ok) return validationFailed(res, { password: policy.reason });
 
-  const existingEmail = await UserModel.findOne({ email: email.toLowerCase() });
-  if (existingEmail)
-    return res.status(409).json({ error: "Email already in use" });
+  const existingEmail = await UserModel.findOne({ email }).select("_id");
+  if (existingEmail) return res.status(409).json({ error: "Email already in use", code: "EMAIL_TAKEN" });
 
-  const existingUsername = await UserModel.findOne({ username });
-  if (existingUsername)
-    return res.status(409).json({ error: "Username already in use" });
+  const existingUsername = await UserModel.findOne({ username }).collation(USERNAME_CI_COLLATION).select("_id");
+  if (existingUsername) return res.status(409).json({ error: "Username already in use", code: "USERNAME_TAKEN" });
 
   const passwordHash = await bcrypt.hash(password, config.BCRYPT_ROUNDS);
-  const user = await UserModel.create({ email, username, passwordHash });
-  const accessToken = signAccessToken(String(user._id));
+  let userId: string;
+  try {
+    const user = await UserModel.create({ email, username, passwordHash });
+    userId = String(user._id);
+  } catch (e) {
+    // Concurrent registration lost the race against the unique index.
+    if (isDuplicateKeyError(e)) {
+      return res.status(409).json({ error: "Email or username already in use", code: "TAKEN" });
+    }
+    throw e;
+  }
 
-  return res.json({ accessToken, userId: String(user._id) });
+  return res.json({ accessToken: signAccessToken(userId), userId });
 });
 
-authRouter.post("/login", authLimiter, async (req, res) => {
-  const { email, password } = req.body as { email?: unknown; password?: unknown };
-
-  if (typeof email !== "string" || typeof password !== "string" || !email || !password) {
-    return res.status(400).json({ error: "email and password are required" });
-  }
+authRouter.post("/login", authLimiter, validateBody(loginSchema), async (req, res) => {
+  const { email, password } = req.body as { email: string; password: string };
 
   // Per-account progressive backoff (P0-5). Checked before the database
   // lookup so unknown accounts are throttled exactly like real ones.
@@ -65,12 +81,12 @@ authRouter.post("/login", authLimiter, async (req, res) => {
     });
   }
 
-  const user = await UserModel.findOne({ email: email.toLowerCase() });
+  const user = await UserModel.findOne({ email });
   const ok = user ? await bcrypt.compare(password, user.passwordHash) : false;
 
   if (!user || !ok) {
     await services.loginThrottle.recordFailure(email);
-    return res.status(401).json({ error: "Invalid credentials" });
+    return res.status(401).json({ error: "Invalid credentials", code: "INVALID_CREDENTIALS" });
   }
 
   await services.loginThrottle.recordSuccess(email);
@@ -79,28 +95,38 @@ authRouter.post("/login", authLimiter, async (req, res) => {
   return res.json({ accessToken, userId: String(user._id) });
 });
 
-authRouter.post("/change-password", requireAuth, async (req: AuthedRequest, res) => {
-  const { currentPassword, newPassword } = req.body as {
-    currentPassword?: string;
-    newPassword?: string;
-  };
+authRouter.post(
+  "/change-password",
+  requireAuth,
+  validateBody(changePasswordSchema),
+  async (req: AuthedRequest, res) => {
+    const { currentPassword, newPassword } = req.body as {
+      currentPassword: string;
+      newPassword: string;
+    };
 
-  if (!currentPassword || !newPassword) {
-    return res.status(400).json({ error: "currentPassword and newPassword are required" });
-  }
+    const user = await UserModel.findById(req.userId);
+    if (!user) return res.status(404).json({ error: "User not found", code: "NOT_FOUND" });
 
-  if (newPassword.length < 8) {
-    return res.status(400).json({ error: "New password must be at least 8 characters" });
-  }
+    const ok = await bcrypt.compare(currentPassword, user.passwordHash);
+    if (!ok) {
+      return res.status(401).json({ error: "Current password is incorrect", code: "INVALID_CREDENTIALS" });
+    }
 
-  const user = await UserModel.findById(req.userId);
-  if (!user) return res.status(404).json({ error: "User not found" });
+    const policy = await checkPasswordPolicy(newPassword, {
+      userInputs: [user.email, user.username],
+      breachCheck: config.PASSWORD_BREACH_CHECK,
+    });
+    if (!policy.ok) return validationFailed(res, { newPassword: policy.reason });
 
-  const ok = await bcrypt.compare(currentPassword, user.passwordHash);
-  if (!ok) return res.status(401).json({ error: "Current password is incorrect" });
+    if (await bcrypt.compare(newPassword, user.passwordHash)) {
+      return validationFailed(res, { newPassword: "New password must differ from the current one" });
+    }
 
-  user.passwordHash = await bcrypt.hash(newPassword, config.BCRYPT_ROUNDS);
-  await user.save();
+    user.passwordHash = await bcrypt.hash(newPassword, config.BCRYPT_ROUNDS);
+    await user.save();
 
-  return res.json({ ok: true });
-});
+    // Existing access tokens stay valid until T1.10 introduces revocation.
+    return res.json({ ok: true });
+  },
+);

@@ -146,25 +146,29 @@ describe('POST /keys/prekeys', () => {
     return request(harness.app).post('/keys/prekeys').set('Authorization', `Bearer ${token}`).send({ items });
   }
 
-  it('rejects malformed items', async () => {
+  const validKey = () => Buffer.alloc(32, 1).toString('base64'); // 32 bytes, like a real X25519 key
+
+  it('rejects malformed items with field errors', async () => {
     const me = await createUser();
     const res = await upload(me.token, [{ keyId: 'one', publicKey: 'A'.repeat(44) }]);
     expect(res.status).toBe(400);
-    expect(res.body.code).toBe('BAD_PREKEY_ITEM');
+    expect(res.body.code).toBe('VALIDATION');
+    expect(res.body.fields['items.0.keyId']).toBeDefined();
+    expect(res.body.fields['items.0.publicKey']).toMatch(/32 bytes/);
   });
 
   it('caps the unused pool at 500 keys', async () => {
     const me = await createUser({ oneTimePreKeys: 495 });
     const tooMany = await upload(
       me.token,
-      Array.from({ length: 10 }, (_, i) => ({ keyId: 10_000 + i, publicKey: 'A'.repeat(44) })),
+      Array.from({ length: 10 }, (_, i) => ({ keyId: 10_000 + i, publicKey: validKey() })),
     );
     expect(tooMany.status).toBe(409);
     expect(tooMany.body.code).toBe('PREKEY_POOL_FULL');
 
     const justEnough = await upload(
       me.token,
-      Array.from({ length: 5 }, (_, i) => ({ keyId: 20_000 + i, publicKey: 'A'.repeat(44) })),
+      Array.from({ length: 5 }, (_, i) => ({ keyId: 20_000 + i, publicKey: validKey() })),
     );
     expect(justEnough.status).toBe(200);
 

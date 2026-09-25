@@ -60,6 +60,13 @@ export const config = {
   BCRYPT_ROUNDS: optionalNumber('BCRYPT_ROUNDS', 12),
 
   /**
+   * Check new passwords against the HaveIBeenPwned range API (k-anonymous:
+   * only a 5-character hash prefix leaves the server). Fails open on network
+   * errors. Set to "false" in tests or air-gapped environments.
+   */
+  PASSWORD_BREACH_CHECK: optionalString('PASSWORD_BREACH_CHECK', 'true') !== 'false',
+
+  /**
    * Redis backs rate limits and login backoff. Empty in development means
    * in-memory stores (single process, reset on restart). Required in
    * production — enforced in redis.ts at boot.

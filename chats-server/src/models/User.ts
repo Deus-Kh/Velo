@@ -32,5 +32,16 @@ const UserSchema = new Schema(
   { timestamps: true }
 );
 
+// Usernames are unique case-insensitively ("Alice" and "alice" would otherwise be
+// two accounts, which is an impersonation vector in a username-only UI). The
+// default unique index above stays for exact lookups; this one enforces the
+// case-insensitive rule at the database level.
+UserSchema.index(
+  { username: 1 },
+  { unique: true, name: 'username_ci_unique', collation: { locale: 'en', strength: 2 } },
+);
+
+export const USERNAME_CI_COLLATION = { locale: 'en', strength: 2 } as const;
+
 export type UserDoc = InferSchemaType<typeof UserSchema>;
 export const UserModel = model('User', UserSchema);

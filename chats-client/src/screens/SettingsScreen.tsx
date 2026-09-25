@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { validatePassword } from '../shared/validation/password';
 import { ScrollView, View, Text, Pressable, TextInput, Switch } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Keychain from 'react-native-keychain';
@@ -508,6 +509,11 @@ export default function SettingsScreen() {
       setPasswordError('Current password and new password are required.');
       return;
     }
+    const rule = validatePassword(passwordDraft.newPassword);
+    if (rule !== true) {
+      setPasswordError(rule);
+      return;
+    }
 
     setPasswordSaving(true);
     setPasswordError(null);
@@ -526,7 +532,11 @@ export default function SettingsScreen() {
       setEditingPassword(false);
     } catch (error: any) {
       setPasswordError(
-        error?.response?.data?.error || error?.message || 'Failed to change password',
+        error?.response?.data?.fields?.newPassword ||
+          error?.response?.data?.fields?.currentPassword ||
+          error?.response?.data?.error ||
+          error?.message ||
+          'Failed to change password',
       );
     } finally {
       setPasswordSaving(false);
