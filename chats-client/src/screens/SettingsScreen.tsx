@@ -11,6 +11,8 @@ import SectionEyebrow from '../components/SectionEyebrow';
 import StatusChip from '../components/StatusChip';
 import { useAuthStore } from '../store/auth.store';
 import { wipeLocalStateForUser } from '../shared/storage/localWipe';
+import { saveStoredSession } from '../shared/auth/tokenStore';
+import { setAccessToken } from '../shared/auth/session';
 import { authApi } from '../shared/api/auth.api';
 import { userApi, type MeResponse } from '../shared/api/user.api';
 import {
@@ -530,11 +532,17 @@ export default function SettingsScreen() {
     setPasswordStatus(null);
 
     try {
-      await authApi.changePassword({
+      const res = await authApi.changePassword({
         currentPassword: passwordDraft.currentPassword,
         newPassword: passwordDraft.newPassword,
       });
-      setPasswordStatus('Password updated for this account.');
+      // The server revoked every refresh family (including ours) and handed
+      // this client a fresh pair; adopt it or the next refresh logs us out.
+      if (res.data.refreshToken && res.data.accessToken && userId) {
+        await saveStoredSession({ userId, refreshToken: res.data.refreshToken });
+        setAccessToken(res.data.accessToken);
+      }
+      setPasswordStatus('Password updated for this account. Other devices were signed out.');
       setPasswordDraft({
         currentPassword: '',
         newPassword: '',
@@ -551,7 +559,7 @@ export default function SettingsScreen() {
     } finally {
       setPasswordSaving(false);
     }
-  }, [passwordDraft.currentPassword, passwordDraft.newPassword]);
+  }, [passwordDraft.currentPassword, passwordDraft.newPassword, userId]);
 
   const updateNotificationPreferences = useCallback(
     (patch: Parameters<typeof setUserNotificationPreferences>[1]) => {

@@ -71,6 +71,14 @@ export const changePasswordSchema = z.object({
   newPassword: passwordShapeSchema,
 });
 
+export const refreshSchema = z.object({
+  refreshToken: z.string().min(16).max(512),
+});
+
+export const logoutSchema = z.object({
+  refreshToken: z.string().min(16).max(512).optional(),
+});
+
 export const updateMeSchema = z.object({
   email: emailSchema,
   username: usernameSchema,

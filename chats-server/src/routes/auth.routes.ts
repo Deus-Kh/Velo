@@ -1,6 +1,5 @@
 import { Router } from "express";
 import bcrypt from "bcrypt";
-import jwt, { type SignOptions } from "jsonwebtoken";
 import { UserModel, USERNAME_CI_COLLATION } from "../models/User";
 import { config } from "../config";
 import { requireAuth, type AuthedRequest } from "../middleware/auth";
@@ -8,8 +7,16 @@ import { authLimiter } from "../middleware/rateLimit";
 import { services } from "../lib/services";
 import { checkPasswordPolicy } from "../lib/passwordPolicy";
 import {
+  issueTokenPair,
+  revokeAllRefreshTokens,
+  revokeFamilyByToken,
+  rotateRefreshToken,
+} from "../lib/refreshTokens";
+import {
   changePasswordSchema,
   loginSchema,
+  logoutSchema,
+  refreshSchema,
   registerSchema,
   validateBody,
   validationFailed,
@@ -17,17 +24,13 @@ import {
 
 export const authRouter = Router();
 
-const accessTokenSignOptions: SignOptions = {
-  expiresIn: config.JWT_ACCESS_TTL as SignOptions["expiresIn"],
-  algorithm: config.JWT_ALGORITHM,
-};
-
-function signAccessToken(userId: string): string {
-  return jwt.sign({ userId }, config.JWT_SECRET, accessTokenSignOptions);
-}
-
 function isDuplicateKeyError(e: unknown): boolean {
   return typeof e === "object" && e !== null && (e as { code?: number }).code === 11000;
+}
+
+function userAgentOf(req: { header(name: string): string | undefined }): string | null {
+  const ua = req.header("user-agent");
+  return ua ? ua.slice(0, 256) : null;
 }
 
 authRouter.post("/register", authLimiter, validateBody(registerSchema), async (req, res) => {
@@ -63,7 +66,8 @@ authRouter.post("/register", authLimiter, validateBody(registerSchema), async (r
     throw e;
   }
 
-  return res.json({ accessToken: signAccessToken(userId), userId });
+  const pair = await issueTokenPair(userId, userAgentOf(req));
+  return res.json({ ...pair, userId });
 });
 
 authRouter.post("/login", authLimiter, validateBody(loginSchema), async (req, res) => {
@@ -90,9 +94,34 @@ authRouter.post("/login", authLimiter, validateBody(loginSchema), async (req, re
   }
 
   await services.loginThrottle.recordSuccess(email);
-  const accessToken = signAccessToken(String(user._id));
+  const userId = String(user._id);
+  const pair = await issueTokenPair(userId, userAgentOf(req));
+  return res.json({ ...pair, userId });
+});
 
-  return res.json({ accessToken, userId: String(user._id) });
+/**
+ * POST /auth/refresh — exchange a refresh token for a new access + refresh
+ * pair (rotation). A rotated-out token presented again revokes its whole
+ * family (reuse detection). Not behind authLimiter: a healthy client refreshes
+ * about once per access-token lifetime, and abuse is bounded by the token
+ * itself plus the global limiter.
+ */
+authRouter.post("/refresh", validateBody(refreshSchema), async (req, res) => {
+  const { refreshToken } = req.body as { refreshToken: string };
+  const result = await rotateRefreshToken(refreshToken, userAgentOf(req));
+  if (!result.ok) {
+    return res.status(401).json({ error: "Session expired. Please sign in again.", code: `REFRESH_${result.code}` });
+  }
+  return res.json({ ...result.pair, userId: result.userId });
+});
+
+/** POST /auth/logout — revoke the caller's refresh-token family. Access token required. */
+authRouter.post("/logout", requireAuth, validateBody(logoutSchema), async (req: AuthedRequest, res) => {
+  const { refreshToken } = req.body as { refreshToken?: string };
+  if (refreshToken) {
+    await revokeFamilyByToken(refreshToken, String(req.userId));
+  }
+  return res.json({ ok: true });
 });
 
 authRouter.post(
@@ -126,7 +155,11 @@ authRouter.post(
     user.passwordHash = await bcrypt.hash(newPassword, config.BCRYPT_ROUNDS);
     await user.save();
 
-    // Existing access tokens stay valid until T1.10 introduces revocation.
-    return res.json({ ok: true });
+    // Every other session must re-authenticate: revoke all refresh families
+    // and hand this client a fresh pair. Outstanding access tokens expire
+    // within JWT_ACCESS_TTL.
+    await revokeAllRefreshTokens(String(user._id));
+    const pair = await issueTokenPair(String(user._id), userAgentOf(req));
+    return res.json({ ok: true, ...pair });
   },
 );

@@ -5,6 +5,9 @@ export interface LoginRequest {
 
 export interface AuthResponse {
   accessToken: string;
+  refreshToken: string;
+  /** Access-token lifetime in seconds. */
+  expiresIn: number;
   userId: string;
 }
 

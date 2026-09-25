@@ -49,6 +49,17 @@ export function initSocket(token: string) {
   return socket;
 }
 
+/**
+ * Installs a new access token for the NEXT (re)connect. The current
+ * connection keeps working (the server verifies the token at handshake
+ * only); without this, a reconnect after the token expired would fail.
+ */
+export function updateSocketAuthToken(token: string | null): void {
+  if (!socket || !token) return;
+  currentToken = token;
+  socket.auth = { token };
+}
+
 export function isSocketReady(): boolean {
   return socket !== null;
 }

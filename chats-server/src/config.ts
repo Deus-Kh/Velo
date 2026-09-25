@@ -49,12 +49,8 @@ export const config = {
   JWT_SECRET: required('JWT_SECRET'),
 
   JWT_ALGORITHM: 'HS256' as const,
-  /**
-   * Access-token lifetime. Target is 900s (15 min) once refresh tokens exist
-   * (T1.10). Until then the default stays at 3h so users are not logged out
-   * every 15 minutes; T1.10 lowers this default in the same change.
-   */
-  JWT_ACCESS_TTL: optionalString('JWT_ACCESS_TTL', '10800s'),
+  /** Access-token lifetime. Short by design; refresh tokens (T1.10) extend sessions. */
+  JWT_ACCESS_TTL: optionalString('JWT_ACCESS_TTL', '900s'),
   JWT_REFRESH_TTL_DAYS: optionalNumber('JWT_REFRESH_TTL_DAYS', 30),
 
   BCRYPT_ROUNDS: optionalNumber('BCRYPT_ROUNDS', 12),

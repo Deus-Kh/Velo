@@ -2,7 +2,6 @@
 
 import { create } from 'zustand';
 import { AppState, type AppStateStatus } from 'react-native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 // import { decodeBase64 } from 'tweetnacl-util';
 
 import { authApi } from '../shared/api/auth.api';
@@ -17,6 +16,14 @@ import {
 } from '../shared/socket/socket';
 import { drainPendingMessagesForUser } from '../shared/chat/drainPendingMessages';
 import { wipeLocalStateForUser } from '../shared/storage/localWipe';
+import {
+  clearStoredSession,
+  loadStoredSession,
+  readLegacyAccessSession,
+  saveStoredSession,
+} from '../shared/auth/tokenStore';
+import { getAccessToken, onSessionLost, refreshSession, SessionLostError, setAccessToken } from '../shared/auth/session';
+import { isJwtExpiring } from '../shared/auth/jwt';
 
 import { sharedSecretCache } from '../shared/crypto/sharedSecretCache';
 
@@ -72,11 +79,13 @@ function startForegroundPreKeyTopUp(userId: string): () => void {
   return () => subscription.remove();
 }
 
-async function persistCredentials(userId: string, accessToken: string): Promise<void> {
-  await AsyncStorage.multiSet([
-    ['accessToken', accessToken],
-    ['userId', userId],
-  ]);
+/**
+ * Persists a fresh token pair (T1.10): the refresh token goes to the Keychain,
+ * the access token stays in memory (and is handed to the socket layer).
+ */
+async function persistCredentials(userId: string, accessToken: string, refreshToken: string): Promise<void> {
+  await saveStoredSession({ userId, refreshToken });
+  setAccessToken(accessToken);
 }
 
 /**
@@ -168,7 +177,7 @@ export const useAuthStore = create<AuthState>((set) => ({
     set({ isLoading: true });
     try {
       const res = await authApi.login(data);
-      await persistCredentials(res.data.userId, res.data.accessToken);
+      await persistCredentials(res.data.userId, res.data.accessToken, res.data.refreshToken);
       set({ token: res.data.accessToken, userId: res.data.userId, isAuthenticated: false });
 
       try {
@@ -192,7 +201,7 @@ export const useAuthStore = create<AuthState>((set) => ({
     set({ isLoading: true });
     try {
       const res = await authApi.register(data);
-      await persistCredentials(res.data.userId, res.data.accessToken);
+      await persistCredentials(res.data.userId, res.data.accessToken, res.data.refreshToken);
       set({ token: res.data.accessToken, userId: res.data.userId, isAuthenticated: false });
 
       try {
@@ -212,6 +221,14 @@ export const useAuthStore = create<AuthState>((set) => ({
 
   logout: async (opts) => {
     const currentUserId = useAuthStore.getState().userId;
+
+    try {
+      // Revoke the refresh family server-side first, while the access token is still valid.
+      const stored = await loadStoredSession();
+      await authApi.logout(stored?.refreshToken ?? null);
+    } catch (e) {
+      console.warn('[auth] server-side logout failed (continuing locally):', (e as Error)?.message ?? e);
+    }
 
     try {
       // Regardless of the push preference: a device that is no longer signed
@@ -237,7 +254,8 @@ export const useAuthStore = create<AuthState>((set) => ({
       }
     }
 
-    await AsyncStorage.multiRemove(['accessToken', 'userId']);
+    await clearStoredSession();
+    setAccessToken(null);
 
     set({
       token: null,
@@ -247,55 +265,52 @@ export const useAuthStore = create<AuthState>((set) => ({
     });
   },
 
+  /**
+   * Cold start. Order of preference:
+   *  1. a stored refresh token (T1.10) → refresh to obtain a fresh access token;
+   *  2. a legacy pre-T1.10 access token in AsyncStorage → use it until it
+   *     expires (there is no refresh token to migrate), then the 401 path
+   *     forces a sign-in.
+   * A refresh rejected by the server means the session is gone: land on Login.
+   */
   hydrate: async () => {
     try {
-      const token = await AsyncStorage.getItem('accessToken');
-      const userId = await AsyncStorage.getItem('userId');
+      const stored = await loadStoredSession();
+      let token: string | null = null;
+      let userId: string | null = null;
 
-      if (!token || !userId) {
-        set({ isLoading: false });
-        return;
+      if (stored) {
+        try {
+          token = await refreshSession();
+          userId = stored.userId;
+        } catch (e) {
+          if (e instanceof SessionLostError) {
+            set({ token: null, userId: null, isAuthenticated: false, isLoading: false });
+            return;
+          }
+          // Offline at launch: keep the session, we'll refresh on the first 401.
+          console.warn('[auth] refresh at launch failed, continuing offline:', (e as Error)?.message ?? e);
+          userId = stored.userId;
+          token = getAccessToken();
+        }
+      } else {
+        const legacy = await readLegacyAccessSession();
+        if (!legacy || isJwtExpiring(legacy.accessToken, Date.now(), 0)) {
+          if (legacy) await clearStoredSession(); // expired leftover
+          set({ isLoading: false });
+          return;
+        }
+        token = legacy.accessToken;
+        userId = legacy.userId;
+        setAccessToken(token);
       }
 
-
-
-
-      
-      // Check if token is expired
-      // try {
-      //   const payload = token.split('.')[1];
-      //   const decoded_bytes = decodeBase64(payload);
-      //   const payloadString = String.fromCharCode.apply(null, Array.from(decoded_bytes));
-      //   const decoded: any = JSON.parse(payloadString);
-      //   const now = Math.floor(Date.now() / 1000);
-        
-      //   if (decoded.exp && decoded.exp < now) {
-      //     console.warn('[auth] token expired during hydrate, clearing');
-      //     await AsyncStorage.multiRemove(['accessToken', 'userId']);
-      //     set({ isLoading: false });
-      //     return;
-      //   }
-      // } catch (decodeErr) {
-      //   console.warn('[auth] Failed to decode token:', (decodeErr as any)?.message);
-      //   // If we can't decode, try using it anyway
-      // }
-
-      set({
-        token,
-        userId,
-        isAuthenticated: false,
-        isLoading: true,
-      });
+      set({ token, userId, isAuthenticated: false, isLoading: true });
 
       try {
-        await bootstrapAfterAuth(userId, token);
+        if (userId) await bootstrapAfterAuth(userId, token ?? '');
       } finally {
-        set({
-          token,
-          userId,
-          isAuthenticated: true,
-          isLoading: false,
-        });
+        set({ token, userId, isAuthenticated: true, isLoading: false });
       }
     } catch (e) {
       console.warn('Hydrate failed:', e);
@@ -303,3 +318,17 @@ export const useAuthStore = create<AuthState>((set) => ({
     }
   },
 }));
+
+// When a refresh is finally rejected (revoked family, expired), drop to Login.
+onSessionLost(() => {
+  const state = useAuthStore.getState();
+  if (!state.isAuthenticated) return;
+  socketDrainCleanup?.();
+  socketDrainCleanup = null;
+  pushTokenRefreshCleanup?.();
+  pushTokenRefreshCleanup = null;
+  foregroundTopUpCleanup?.();
+  foregroundTopUpCleanup = null;
+  disconnectSocket();
+  useAuthStore.setState({ token: null, userId: null, isAuthenticated: false, isLoading: false });
+});

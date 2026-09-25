@@ -75,7 +75,7 @@ describe('config', () => {
     expect(config.MONGO_URI).toBe(VALID_ENV.MONGO_URI);
     expect(config.PORT).toBe(9999);
     expect(config.JWT_ALGORITHM).toBe('HS256');
-    expect(config.JWT_ACCESS_TTL).toBe('10800s');
+    expect(config.JWT_ACCESS_TTL).toBe('900s');
     expect(config.BCRYPT_ROUNDS).toBe(12);
     expect(config.NODE_ENV).toBe('development');
     expect(config.IS_PRODUCTION).toBe(false);

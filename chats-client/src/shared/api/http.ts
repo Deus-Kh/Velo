@@ -1,7 +1,7 @@
-import axios from 'axios';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useAuthStore } from '../../store/auth.store';
+import axios, { type AxiosError, type InternalAxiosRequestConfig } from 'axios';
 import { env } from '../config/env';
+import { API_ENDPOINTS } from './endpoints';
+import { ensureFreshAccessToken, getAccessToken, refreshSession, SessionLostError } from '../auth/session';
 
 export const http = axios.create({
   baseURL: env.API_URL,
@@ -11,21 +11,29 @@ export const http = axios.create({
     'Content-Type':'application/json'
   },
 });
+
+type RetriableConfig = InternalAxiosRequestConfig & { _retried?: boolean };
+
+const AUTH_FREE_PATHS = new Set<string>([
+  API_ENDPOINTS.AUTH.LOGIN,
+  API_ENDPOINTS.AUTH.REGISTER,
+  API_ENDPOINTS.AUTH.REFRESH,
+]);
+
+function isAuthFree(config: InternalAxiosRequestConfig): boolean {
+  return AUTH_FREE_PATHS.has(config.url ?? '');
+}
+
 http.interceptors.request.use(
   async (config) => {
-    const storeToken = useAuthStore.getState().token;
-    const storageToken = await AsyncStorage.getItem('accessToken');
-    const token = storeToken || storageToken;
+    if (isAuthFree(config)) return config;
 
+    // Refresh proactively when the token is about to expire; otherwise the
+    // 401 path below handles it reactively.
+    const token = (await ensureFreshAccessToken()) ?? getAccessToken();
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
-    } else {
-      console.warn('[http] request without access token', {
-        method: config.method,
-        url: config.url,
-      });
     }
-
     return config;
   },
   (error) => Promise.reject(error),
@@ -33,14 +41,22 @@ http.interceptors.request.use(
 
 http.interceptors.response.use(
   (response) => response,
-  (error) => {
-    if (error.response?.status === 401) {
-      console.warn('[http] 401 Unauthorized', {
-        method: error.config?.method,
-        url: error.config?.url,
-      });
+  async (error: AxiosError) => {
+    const config = error.config as RetriableConfig | undefined;
+    if (error.response?.status === 401 && config && !config._retried && !isAuthFree(config)) {
+      config._retried = true;
+      try {
+        // Ten parallel 401s → one refresh (singleFlight inside refreshSession).
+        const token = await refreshSession();
+        config.headers.Authorization = `Bearer ${token}`;
+        return http.request(config);
+      } catch (e) {
+        if (!(e instanceof SessionLostError)) {
+          console.warn('[http] refresh failed, will retry later:', (e as Error)?.message ?? e);
+        }
+        return Promise.reject(error);
+      }
     }
-
     return Promise.reject(error);
   },
 );
