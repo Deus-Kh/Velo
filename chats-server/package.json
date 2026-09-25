@@ -7,7 +7,8 @@
   "type": "commonjs",
   "main": "index.ts",
   "scripts": {
-    "start": "nodemon src/index.ts",
+    "dev": "nodemon src/index.ts",
+    "start": "cross-env NODE_ENV=production node -r ts-node/register/transpile-only src/index.ts",
     "test": "vitest run",
     "test:watch": "vitest"
   },
@@ -36,6 +37,7 @@
     "@types/express": "^5.0.6",
     "@types/jsonwebtoken": "^9.0.10",
     "@types/supertest": "^7.2.1",
+    "cross-env": "^7.0.3",
     "mongodb-memory-server": "^11.2.0",
     "socket.io-client": "^4.8.3",
     "supertest": "^7.2.2",

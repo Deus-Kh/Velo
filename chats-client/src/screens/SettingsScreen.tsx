@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { validatePassword } from '../shared/validation/password';
-import { ScrollView, View, Text, Pressable, TextInput, Switch } from 'react-native';
+import { Alert, ScrollView, View, Text, Pressable, TextInput, Switch } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Keychain from 'react-native-keychain';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -10,7 +10,7 @@ import ScreenHeader from '../components/ScreenHeader';
 import SectionEyebrow from '../components/SectionEyebrow';
 import StatusChip from '../components/StatusChip';
 import { useAuthStore } from '../store/auth.store';
-import { deleteAllSessionsForUser } from '../shared/storage/sessionStore';
+import { wipeLocalStateForUser } from '../shared/storage/localWipe';
 import { authApi } from '../shared/api/auth.api';
 import { userApi, type MeResponse } from '../shared/api/user.api';
 import {
@@ -400,6 +400,35 @@ export default function SettingsScreen() {
     }, [loadDiagnostics, loadNotificationStatus, loadProfile]),
   );
 
+  const confirmResetLocalSecurityState = () => {
+    Alert.alert(
+      'Reset local secure state?',
+      'This deletes your identity keys, sessions and message keys on this device. ' +
+        'Contacts will see a safety-number change and existing conversations must be re-established. ' +
+        'This cannot be undone.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Reset', style: 'destructive', onPress: () => { resetLocalSecurityState(); } },
+      ],
+    );
+  };
+
+  const confirmLogout = () => {
+    Alert.alert(
+      'Log out?',
+      'Keep local data to sign back in with your sessions intact, or erase it so nothing on this device can decrypt your messages.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Log out', onPress: () => { logout(); } },
+        {
+          text: 'Log out and erase local data',
+          style: 'destructive',
+          onPress: () => { logout({ eraseLocalData: true }); },
+        },
+      ],
+    );
+  };
+
   const resetLocalSecurityState = async () => {
     if (!userId || isResettingSecurity) return;
 
@@ -407,29 +436,10 @@ export default function SettingsScreen() {
     setSecurityResetStatus(null);
 
     try {
-      await deleteAllSessionsForUser(userId);
-
-      const allKeys = await AsyncStorage.getAllKeys();
-      const removablePrefixes = [
-        `trusted-identity:${userId}:`,
-        `v2mk:${userId}:`,
-        `otpk:${userId}:`,
-      ];
-
-      const toRemove = allKeys.filter((key) =>
-        removablePrefixes.some((prefix) => key.startsWith(prefix)),
-      );
-
-      if (toRemove.length) {
-        await AsyncStorage.multiRemove(toRemove);
+      const report = await wipeLocalStateForUser(userId, 'all');
+      if (report.failures.length) {
+        console.warn('[Settings] partial wipe:', report.failures.join('; '));
       }
-
-      await Promise.allSettled([
-        Keychain.resetGenericPassword({ service: `history-mk:${userId}` }),
-        Keychain.resetGenericPassword({ service: `identity-sign:${userId}` }),
-        Keychain.resetGenericPassword({ service: `identity-dh:${userId}` }),
-        Keychain.resetGenericPassword({ service: `signed-prekey:${userId}` }),
-      ]);
 
       setSecurityResetStatus('Local secure state was cleared for this account.');
       await loadDiagnostics();
@@ -868,7 +878,7 @@ export default function SettingsScreen() {
             <SettingsRow
               title="Reset local secure state"
               subtitle="Clears local sessions, trusted identities, cached message keys and local crypto secrets for this account."
-              onPress={resetLocalSecurityState}
+              onPress={confirmResetLocalSecurityState}
               value={isResettingSecurity ? 'Resetting' : 'Clear'}
               danger
               last
@@ -1104,7 +1114,7 @@ export default function SettingsScreen() {
             <SettingsRow
               title="Log out"
               subtitle="Ends the current application session on this device."
-              onPress={() => logout()}
+              onPress={confirmLogout}
               value="Exit"
               danger
               last

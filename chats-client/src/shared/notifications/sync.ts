@@ -27,8 +27,16 @@ export async function syncPushTokenWithServer(pushEnabled: boolean) {
   return status.token;
 }
 
-export async function unregisterPushTokenFromServer(pushEnabled: boolean) {
-  const status = await getNotificationDeviceStatus(pushEnabled);
+/**
+ * Removes this device's FCM token from the account on the server.
+ *
+ * Always resolves the token regardless of the user's push preference: a user
+ * who disabled push and then logs out must not leave a live token registered
+ * against a device that is no longer signed in. (The old `pushEnabled`
+ * argument short-circuited exactly that case.)
+ */
+export async function unregisterPushTokenFromServer(_pushEnabled?: boolean) {
+  const status = await getNotificationDeviceStatus(true);
   if (!status.token) return;
   await userApi.unregisterPushToken(status.token);
 }

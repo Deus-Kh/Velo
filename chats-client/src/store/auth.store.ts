@@ -16,6 +16,7 @@ import {
   disconnectSocket,
 } from '../shared/socket/socket';
 import { drainPendingMessagesForUser } from '../shared/chat/drainPendingMessages';
+import { wipeLocalStateForUser } from '../shared/storage/localWipe';
 
 import { sharedSecretCache } from '../shared/crypto/sharedSecretCache';
 
@@ -41,7 +42,13 @@ interface AuthState {
 
   login: (data: LoginRequest) => Promise<void>;
   register: (data: RegisterRequest) => Promise<void>;
-  logout: () => Promise<void>;
+  /**
+   * Signs out. By default protocol state stays on disk (encrypted at rest
+   * after T1.3) so signing back in keeps sessions and identity. With
+   * `eraseLocalData`, sessions, message keys, the history master key and the
+   * plaintext outgoing queue are wiped first ('messages' scope).
+   */
+  logout: (opts?: { eraseLocalData?: boolean }) => Promise<void>;
   hydrate: () => Promise<void>;
 }
 
@@ -203,16 +210,15 @@ export const useAuthStore = create<AuthState>((set) => ({
     }
   },
 
-  logout: async () => {
+  logout: async (opts) => {
+    const currentUserId = useAuthStore.getState().userId;
+
     try {
-      const currentUserId = useAuthStore.getState().userId;
-      const preferences = getNotificationPreferencesForUser(
-        useNotificationPreferencesStore.getState().preferencesByUserId,
-        currentUserId,
-      );
-      await unregisterPushTokenFromServer(preferences.pushEnabled);
+      // Regardless of the push preference: a device that is no longer signed
+      // in must not keep a live token on the server (T1.14).
+      await unregisterPushTokenFromServer();
     } catch (e) {
-      console.warn('Push token unregister failed:', e);
+      console.warn('Push token unregister failed:', (e as Error)?.message ?? e);
     }
 
     sharedSecretCache.clear();
@@ -223,6 +229,13 @@ export const useAuthStore = create<AuthState>((set) => ({
     foregroundTopUpCleanup?.();
     foregroundTopUpCleanup = null;
     disconnectSocket();
+
+    if (opts?.eraseLocalData && currentUserId) {
+      const report = await wipeLocalStateForUser(currentUserId, 'messages');
+      if (report.failures.length) {
+        console.warn('[auth] local wipe incomplete:', report.failures.join('; '));
+      }
+    }
 
     await AsyncStorage.multiRemove(['accessToken', 'userId']);
 

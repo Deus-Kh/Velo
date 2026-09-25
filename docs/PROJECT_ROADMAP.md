@@ -243,6 +243,8 @@ Fix: try/catch/finally, error surfaced in the form, one shared password rule. �
 **P0-12 · Logout leaves every session, key, and plaintext pending message on disk** `[CORE]` *(new)*
 `auth.store.ts:199` removes two AsyncStorage keys. The next account on the device inherits the previous user's decryptable material. `deleteAllSessionsForUser` exists and is never called.
 Fix: full per-user wipe on logout (sessions, message keys, OPK secrets, pins, pending queue, Keychain entries); encrypt the pending queue. → T1.14
+**Design change 2026-09-25:** an unconditional wipe on logout was not implemented. All local state is already namespaced by userId, so a second account cannot use another account's material; the real risk is at-rest exposure, which T1.3 (encryption) addresses. Wiping sessions on every logout would also break every existing conversation on re-login until T2.11 automates re-bootstrap. Logout therefore offers two paths: "Log out" keeps protocol state, "Log out and erase local data" wipes sessions, message keys, the history master key and the plaintext outgoing queue (identity and trust pins survive so the safety number does not change). "Reset local secure state" is the full wipe and now asks for confirmation.
+**Status 2026-09-25:** resolved by T1.14 with the design above. Shared `wipeLocalStateForUser(userId, scope)` used by both paths; the push token is always unregistered on logout regardless of the push preference (previous no-op bug); the first two confirmation dialogs in the app. Pending-queue encryption stays with T1.3.
 
 ### 3.2 P1 — Protocol correctness
 
@@ -296,6 +298,7 @@ Fix: after T2.0, an inbound `initPacket` whose identity matches the pin but whos
 - **P2-11 · 69 dependency advisories, 7 critical** `[CORE]` *(new)* → T1.12
 - **P2-12 · Stack traces returned to clients; no error middleware; `NODE_ENV` unset** `[CORE]` *(new)* → T1.9
   **Status 2026-09-11:** error middleware landed with T1.5 (404/400/413/503/500 as `{error, code}`, no stack); `@ts-ignore`s removed in T1.1. Remaining for T1.9: `NODE_ENV=production` in the start script and socket acks that echo `e.message`.
+  **Status 2026-09-25:** closed. `npm start` runs with `NODE_ENV=production` (`npm run dev` keeps nodemon); the last socket ack echoing an internal message now returns `INTERNAL`. The `tsc` build to `dist/` remains T4.1.
 - **P2-13 · Server can be tricked into synthesising `initPacket`s** `[CORE]` *(new)* — remove `setupSocket.ts:481-495`; the client bootstraps from the stored first message or a dedicated fetch. → T2.13
 
 ### 3.4 P3 — Hygiene

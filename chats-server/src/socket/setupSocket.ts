@@ -621,8 +621,8 @@ export function setupSocket(io: Server) {
           }
         }
 
-        console.error("message:send failed:", e);
-        return ack?.({ ok: false, error: e?.message || "Server error" });
+        console.error("[socket] message:send failed:", (e as Error)?.message ?? e);
+        return ack?.({ ok: false, code: "INTERNAL", error: "Internal error" });
       }
     });
 
