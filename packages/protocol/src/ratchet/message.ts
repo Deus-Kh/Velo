@@ -6,7 +6,7 @@ import type { RatchetSessionV2 } from '../types/session';
 import { ProtocolError } from '../errors';
 import { openMessage, sealMessage, type AssociatedData, type MessageEnvelope } from './envelope';
 import type { MessageHeader } from './header';
-import { MAX_MESSAGE_NUMBER, MAX_SKIP_PER_STEP } from './limits';
+import { MAX_MESSAGE_NUMBER, MAX_SKIP_EPOCHS, MAX_SKIP_PER_STEP, MAX_SKIP_TOTAL } from './limits';
 
 export type { MessageHeader } from './header';
 export type { MessageEnvelope, AssociatedData } from './envelope';
@@ -40,8 +40,40 @@ export type RatchetDecryptResult = {
   consumedSkippedKeyId: string | null;
 };
 
-/** Bound on retained skipped keys per session (count only; the epoch-aware policy lands with the prune step). */
-export const MAX_SKIP = 50;
+/**
+ * pruneSkippedKeys (spec §8.1, T2.6, DEVIATION-4): keep skipped keys for at
+ * most MAX_SKIP_EPOCHS most recent epochs and at most MAX_SKIP_TOTAL keys
+ * overall, evicting oldest-epoch-first (by skippedEpochOrder, never JS
+ * object order) and lowest-counter-first within an epoch. Deterministic.
+ */
+export function pruneSkippedKeys(session: RatchetSessionV2): RatchetSessionV2 {
+  const keys = { ...(session.skippedKeys ?? {}) };
+  const order = [...(session.skippedEpochOrder ?? [])];
+
+  // 1. Epoch bound: drop every key of an epoch older than the last MAX_SKIP_EPOCHS.
+  const kept = order.slice(-MAX_SKIP_EPOCHS);
+  const dropped = new Set(order.slice(0, Math.max(0, order.length - MAX_SKIP_EPOCHS)));
+  for (const id of Object.keys(keys)) {
+    const epoch = id.slice(0, id.lastIndexOf(':'));
+    if (dropped.has(epoch) || !kept.includes(epoch)) delete keys[id];
+  }
+
+  // 2. Total bound: evict oldest epoch first, lowest n first within it.
+  let count = Object.keys(keys).length;
+  for (const epoch of kept) {
+    if (count <= MAX_SKIP_TOTAL) break;
+    const ids = Object.keys(keys)
+      .filter((id) => id.slice(0, id.lastIndexOf(':')) === epoch)
+      .sort((x, y) => Number(x.slice(x.lastIndexOf(':') + 1)) - Number(y.slice(y.lastIndexOf(':') + 1)));
+    for (const id of ids) {
+      if (count <= MAX_SKIP_TOTAL) break;
+      delete keys[id];
+      count -= 1;
+    }
+  }
+
+  return { ...session, skippedKeys: keys, skippedEpochOrder: kept };
+}
 
 function requireCounter(value: number, what: string): void {
   if (!Number.isInteger(value) || value < 0 || value >= MAX_MESSAGE_NUMBER) {
@@ -133,6 +165,10 @@ export function ratchetDecrypt(session: RatchetSessionV2, envelope: MessageEnvel
 
   // 2. New peer ratchet key: drain the old chain to header.pn (T2.8), then ratchet (R13).
   if (!work.DHrPublicKey || work.DHrPublicKey !== incomingDhPub) {
+    // A previous epoch whose keys were evicted (or never retained): never ratchet backwards (T2.6).
+    if ((work.peerEpochHistory ?? []).includes(incomingDhPub)) {
+      throw new ProtocolError('UNKNOWN_OLD_MESSAGE', 'Message from a previous epoch whose keys are no longer retained', { n: targetN });
+    }
     if (work.DHrPublicKey && work.chainKeyRecv) {
       requireGap(envelope.header.pn, work.Nr, 'header.pn');
       let oldCk = decodeBase64(work.chainKeyRecv);
@@ -140,9 +176,7 @@ export function ratchetDecrypt(session: RatchetSessionV2, envelope: MessageEnvel
       while (oldNr < envelope.header.pn) {
         const step = chainKdf(oldCk);
         const mkB64 = encodeBase64(step.messageKey);
-        if (Object.keys(retained).length < MAX_SKIP) {
-          retained[skippedKeyId(work.DHrPublicKey, oldNr)] = mkB64;
-        }
+        retained[skippedKeyId(work.DHrPublicKey, oldNr)] = mkB64;
         derivedKeys.push({ direction: 'in', dhPub: work.DHrPublicKey, n: oldNr, messageKeyB64: mkB64 });
         oldCk = step.nextChainKey;
         oldNr += 1;
@@ -171,7 +205,7 @@ export function ratchetDecrypt(session: RatchetSessionV2, envelope: MessageEnvel
 
     if (nr === targetN) {
       messageKey = step.messageKey;
-    } else if (Object.keys(retained).length < MAX_SKIP) {
+    } else {
       retained[skippedKeyId(incomingDhPub, nr)] = mkB64;
     }
     derivedKeys.push({ direction: 'in', dhPub: incomingDhPub, n: nr, messageKeyB64: mkB64 });
@@ -185,9 +219,9 @@ export function ratchetDecrypt(session: RatchetSessionV2, envelope: MessageEnvel
   // 5. Authenticate and decrypt — nothing above this line may be persisted.
   const plaintext = openMessage({ messageKey, envelope, ad });
 
-  // 6. Commit.
+  // 6. Commit, then prune (bounded by epochs and total, T2.6).
   return {
-    session: { ...work, chainKeyRecv: encodeBase64(ck), Nr: nr, skippedKeys: retained },
+    session: pruneSkippedKeys({ ...work, chainKeyRecv: encodeBase64(ck), Nr: nr, skippedKeys: retained }),
     plaintext,
     derivedKeys,
     consumedSkippedKeyId: null,

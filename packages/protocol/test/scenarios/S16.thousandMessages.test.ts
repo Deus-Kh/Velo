@@ -8,7 +8,7 @@
  * FAIL (finding added by T2.4; not in the original nine). After T2.14: pass.
  */
 import { describe, expect, it } from 'vitest';
-import { MAX_SKIP } from '../../src/ratchet/message';
+import { MAX_SKIP_TOTAL } from '../../src/ratchet/limits';
 import { makeWorld } from '../harness';
 
 describe('S16 1000-message conversation', () => {
@@ -19,18 +19,18 @@ describe('S16 1000-message conversation', () => {
     B!.send('A', 'b' + String(i));
   }
 
-  it('all 1000 messages decrypt and skipped keys stay within MAX_SKIP', () => {
+  it('all 1000 messages decrypt and skipped keys stay within MAX_SKIP_TOTAL', () => {
     expect(B!.inbox).toHaveLength(500);
     expect(A!.inbox).toHaveLength(500);
     expect(B!.inbox[499]!.text).toBe('a499');
-    expect(Object.keys(B!.sessionState('A')!.skippedKeys ?? {}).length).toBeLessThanOrEqual(MAX_SKIP);
-    expect(Object.keys(A!.sessionState('B')!.skippedKeys ?? {}).length).toBeLessThanOrEqual(MAX_SKIP);
+    expect(Object.keys(B!.sessionState('A')!.skippedKeys ?? {}).length).toBeLessThanOrEqual(MAX_SKIP_TOTAL);
+    expect(Object.keys(A!.sessionState('B')!.skippedKeys ?? {}).length).toBeLessThanOrEqual(MAX_SKIP_TOTAL);
   });
 
   it.fails('the per-pair message-key archive is bounded', () => {
     expect(
       B!.messageKeyCount('A'),
       'one archived message key per message, forever: forward secrecy at rest is void until keys are deleted after use (P1-10, T2.14)',
-    ).toBeLessThanOrEqual(2 * MAX_SKIP);
+    ).toBeLessThanOrEqual(100); // must not scale with the message count; only bounded skipped keys may remain after T2.14
   });
 });

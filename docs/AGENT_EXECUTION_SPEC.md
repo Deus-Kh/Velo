@@ -558,16 +558,18 @@ Target structure and migration map as in v1 T2.1 (`primitives/`, `ratchet/`, `ha
 ---
 
 ## T2.6 — Bound the skipped-key derivation
-**Tier** CORE · **Fixes** P1-2 · **Est** 1d
+**Tier** CORE · **Fixes** P1-2 · **Est** 1d · **Status:** done 2026-09-28 (two commits, with T2.7's remaining scope)
 
 Constants: `MAX_SKIP_PER_STEP = 100`, `MAX_SKIP_TOTAL = 1000`, `MAX_SKIP_EPOCHS = 5`, `MAX_MESSAGE_NUMBER = 2**24`. Throw `TOO_MANY_SKIPPED` before any derivation when `gap > MAX_SKIP_PER_STEP`. Server: `Number.isInteger(n) && 0 <= n < MAX_MESSAGE_NUMBER`, same for `pn`.
 
 **Acceptance:** S12 passes in < 50 ms; gap 99 decrypts; gap 101 throws; server rejects `n = 10_000_000`.
 
+**Status 2026-09-28:** done. `ratchet/limits.ts` holds `MAX_SKIP_PER_STEP = 100`, `MAX_SKIP_TOTAL = 1000`, `MAX_SKIP_EPOCHS = 5`, `MAX_MESSAGE_NUMBER = 2^24`, `PEER_EPOCH_HISTORY = 16`. (1) `ratchetDecrypt` refuses, before any derivation, a gap over `MAX_SKIP_PER_STEP` on the current chain or on the chain being drained via `pn` (`TOO_MANY_SKIPPED {what, gap, limit}`), and any counter outside `[0, MAX_MESSAGE_NUMBER)` (`HEADER_TAMPERED`); the server applies the same counter bound. S12 green: the child reports `TOO_MANY_SKIPPED` in under 50 ms. (2) `pruneSkippedKeys` runs at commit: keys are kept for the last `MAX_SKIP_EPOCHS` entries of the explicit `skippedEpochOrder` and at most `MAX_SKIP_TOTAL` overall, evicting oldest-epoch-first and lowest-counter-first, deterministically (idempotent, tested). `dhRatchet` appends the new epoch to `skippedEpochOrder` and to `peerEpochHistory` (last 16 peer ratchet keys). A message whose `dhPub` is a remembered previous epoch with no retained key is `UNKNOWN_OLD_MESSAGE` and never triggers a ratchet backwards; a never-seen key is still treated as a new epoch (S18: `DECRYPT_FAILED`). Acceptance from T2.7 met here: 2 epochs back decrypts, 6 epochs back is `UNKNOWN_OLD_MESSAGE`, retained keys never exceed `MAX_SKIP_TOTAL`. The old count-only `MAX_SKIP = 50` is gone. Session fields `skippedEpochOrder` / `peerEpochHistory` are optional (missing = empty), so no session migration. Deviation: per-step limit 100 rather than Signal's 2000, chosen for a mobile client and revisitable.
+
 ---
 
 ## T2.7 — Keep skipped keys across ratchet steps
-**Status:** core done 2026-09-28 with T2.0 (commit "T2.7: keep skipped message keys across a DH ratchet step"); epoch-aware bound and pruning (DEVIATION-4) remain, folded into T2.6.
+**Status:** done 2026-09-28: core with T2.0 (commit "T2.7: keep skipped message keys across a DH ratchet step"), epoch-aware bound, `skippedEpochOrder`, pruning and `UNKNOWN_OLD_MESSAGE` with T2.6 (DEVIATION-4 active).
 
 **Tier** CORE · **Fixes** P1-3 · **Est** 2d · **Depends** T2.0, T2.6
 
@@ -787,7 +789,7 @@ Canonical list in T2.4. Each scenario file states the checklist row it automates
 | `DEVIATION-1` | HKDF directional split instead of an initial DH ratchet | — | **Was the P1-0 bug. Removed by T2.0 on 2026-09-28.** |
 | `DEVIATION-2` | X3DH omits `DH(EK_A, IK_B)` | — | **Resolved by T2.9 (D2 = fix).** |
 | `DEVIATION-3` | Message keys retained 30 days for offline history | superseded by the local store | **Removed by T2.14** (fallback only if T2.14 slips) |
-| `DEVIATION-4` | Skipped keys bounded by count *and* epoch | DoS resistance with multi-epoch tolerance | Active after T2.7 |
+| `DEVIATION-4` | Skipped keys bounded by count *and* epoch (`MAX_SKIP_TOTAL = 1000`, `MAX_SKIP_EPOCHS = 5`, per-step gap 100) | DoS resistance with multi-epoch tolerance | **Active since 2026-09-28 (T2.6)** |
 | `DEVIATION-5` | Two identity keys (Ed25519 signing + X25519 DH) bound by a signature, versus Signal's single Curve25519 identity with XEdDSA; the safety number hashes `IK_sign || IK_dh` (64 bytes, no type byte) where libsignal hashes `0x05 || key` | avoids a new signature scheme; binding is verified on every bundle and `initPacket`; the fingerprint construction itself is libsignal's and is vector-tested with libsignal's key encoding | **Active since 2026-09-28 (T2.13, D10)** |
 | `DEVIATION-6` | Random 24-byte AEAD nonce instead of a KDF-derived nonce | — | **Removed by T2.5 (2026-09-28): the nonce is derived from the message key with `WhisperMessageKeys`, as in Signal.** |
 

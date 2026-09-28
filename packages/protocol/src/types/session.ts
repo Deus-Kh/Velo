@@ -29,6 +29,10 @@ export interface RatchetSessionV2 {
 
   /** Skipped message keys keyed `${dhPubBase64}:${n}` (epoch-namespaced). Value: base64 message key. */
   skippedKeys?: Record<string, string>;
+  /** Peer epochs (ratchet public keys) in the order they were entered, oldest first; eviction order for skipped keys (T2.6, never JS object order). */
+  skippedEpochOrder?: string[];
+  /** The last PEER_EPOCH_HISTORY peer ratchet keys seen, oldest first: tells an evicted epoch (UNKNOWN_OLD_MESSAGE) from an unknown one. */
+  peerEpochHistory?: string[];
 
   DHsPublicKey: string; // our current ratchet key pair (base64 X25519)
   DHsPrivateKey: string;

@@ -5,6 +5,7 @@ import { kdfRootKey } from './root';
 import { normalizeB64 } from '../primitives/base64';
 import { ProtocolError } from '../errors';
 import type { DhKeyPairB64 } from './session';
+import { PEER_EPOCH_HISTORY } from './limits';
 
 /**
  * DH ratchet step (spec §8.1 `dhRatchet`, Signal's DHRatchet):
@@ -14,8 +15,9 @@ import type { DhKeyPairB64 } from './session';
  *   (RK, CKs) := KDF_RK(RK, DH(DHs, DHr)).
  * Pure: returns a new session, never mutates the input. Draining the
  * previous receiving chain to `header.pn` is the caller's job (T2.8).
- * Skipped keys are keyed by epoch and survive the step (T2.7); bounding
- * and pruning them is the decrypt step's job.
+ * Skipped keys are keyed by epoch and survive the step (T2.7); the new
+ * epoch is appended to skippedEpochOrder and peerEpochHistory (T2.6);
+ * bounding and pruning is the decrypt step's job.
  *
  * `nextDhs` is injectable for vector tests only.
  */
@@ -59,6 +61,8 @@ export function dhRatchet(session: RatchetSessionV2, newPeerDhPubB64: string, ne
     Ns: 0,
     Nr: 0,
     skippedKeys: { ...(session.skippedKeys ?? {}) },
+    skippedEpochOrder: [...(session.skippedEpochOrder ?? []).filter((e) => e !== peerDhPubB64), peerDhPubB64],
+    peerEpochHistory: [...(session.peerEpochHistory ?? []).filter((e) => e !== peerDhPubB64), peerDhPubB64].slice(-PEER_EPOCH_HISTORY),
     DHrPublicKey: peerDhPubB64,
     DHsPublicKey: normalizeB64(next.publicKey),
     DHsPrivateKey: normalizeB64(next.privateKey),

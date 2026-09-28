@@ -2,8 +2,8 @@ import nacl from 'tweetnacl';
 import { encodeBase64, decodeBase64 } from 'tweetnacl-util';
 import { describe, expect, it } from 'vitest';
 import { initInitiatorSession, initResponderSession } from '../src/ratchet/session';
-import { MAX_SKIP, ratchetDecrypt, ratchetEncrypt, skippedKeyId, type MessageEnvelope } from '../src/ratchet/message';
-import { MAX_MESSAGE_NUMBER, MAX_SKIP_PER_STEP } from '../src/ratchet/limits';
+import { pruneSkippedKeys, ratchetDecrypt, ratchetEncrypt, skippedKeyId, type MessageEnvelope } from '../src/ratchet/message';
+import { MAX_MESSAGE_NUMBER, MAX_SKIP_EPOCHS, MAX_SKIP_PER_STEP, MAX_SKIP_TOTAL } from '../src/ratchet/limits';
 import { decryptWithMessageKey, MAC_LENGTH, type AssociatedData } from '../src/ratchet/envelope';
 import type { RatchetSessionV2 } from '../src/types/session';
 import { protocolErrorCode } from '../src/errors';
@@ -212,20 +212,63 @@ describe('ratchetEncrypt / ratchetDecrypt', () => {
     }
   });
 
-  it('retains at most MAX_SKIP skipped keys within an epoch (count bound; the epoch-aware prune follows)', () => {
+  it('retains skipped keys for the last MAX_SKIP_EPOCHS epochs only; an evicted epoch is UNKNOWN_OLD_MESSAGE (T2.6)', () => {
     let { a, b } = pair();
-    const envelopes: MessageEnvelope[] = [];
-    for (let i = 0; i < MAX_SKIP + 10; i += 1) {
-      const e = ratchetEncrypt(a, 'm' + String(i), AB);
-      a = e.session;
-      envelopes.push(e.envelope);
+    // Epoch 0..k: in each of A's epochs one message is held back (n = 0), the next (n = 1) is delivered.
+    const held: MessageEnvelope[] = [];
+    for (let epoch = 0; epoch <= MAX_SKIP_EPOCHS + 1; epoch += 1) {
+      const e0 = ratchetEncrypt(a, 'held-' + String(epoch), AB);
+      a = e0.session;
+      held.push(e0.envelope);
+      const e1 = ratchetEncrypt(a, 'seen-' + String(epoch), AB);
+      a = e1.session;
+      b = ratchetDecrypt(b, e1.envelope, AB).session; // skips n = 0 of this epoch
+      const reply = ratchetEncrypt(b, 'r' + String(epoch), BA);
+      b = reply.session;
+      a = ratchetDecrypt(a, reply.envelope, BA).session; // A moves to the next epoch
     }
-    const last = ratchetDecrypt(b, envelopes[envelopes.length - 1]!, AB); // gap 59 < MAX_SKIP_PER_STEP
-    expect(Object.keys(last.session.skippedKeys ?? {}).length).toBe(MAX_SKIP);
-    expect(last.derivedKeys.length).toBe(MAX_SKIP + 10);
-    b = last.session;
-    // Beyond the bound the old message is unrecoverable (current behaviour).
-    expect(codeOf(() => ratchetDecrypt(b, envelopes[MAX_SKIP + 5]!, AB))).toBe('REPLAY_DETECTED');
+    const epochs = b.skippedEpochOrder ?? [];
+    expect(epochs.length).toBe(MAX_SKIP_EPOCHS);
+    expect(Object.keys(b.skippedKeys ?? {}).length).toBe(MAX_SKIP_EPOCHS);
+
+    // 2 epochs back decrypts from its retained key.
+    const twoBack = held[held.length - 3]!;
+    expect(ratchetDecrypt(b, twoBack, AB).plaintext).toBe('held-' + String(held.length - 3));
+    // The oldest epochs were evicted: a known previous epoch without keys is UNKNOWN_OLD_MESSAGE, never a ratchet backwards.
+    const before = snapshot(b);
+    expect(codeOf(() => ratchetDecrypt(b, held[0]!, AB))).toBe('UNKNOWN_OLD_MESSAGE');
+    expect(b).toEqual(before);
+    // A never-seen epoch key is still treated as new (S18): ratchet attempt, then DECRYPT_FAILED.
+    const alien = { ...held[0]!, header: { ...held[0]!.header, dhPub: pairB64(0x99).publicKey } };
+    expect(codeOf(() => ratchetDecrypt(b, alien, AB))).toBe('DECRYPT_FAILED');
+  });
+
+  it('never retains more than MAX_SKIP_TOTAL skipped keys; eviction is oldest-epoch-first and deterministic', () => {
+    let { a, b } = pair();
+    const perEpoch = MAX_SKIP_PER_STEP - 1; // 99 skipped per epoch
+    const epochs = Math.ceil(MAX_SKIP_TOTAL / perEpoch) + 1; // enough to overflow within MAX_SKIP_EPOCHS? no: cap by epochs first
+    for (let epoch = 0; epoch < Math.min(epochs, MAX_SKIP_EPOCHS); epoch += 1) {
+      for (let i = 0; i < perEpoch; i += 1) a = ratchetEncrypt(a, 'skip', AB).session;
+      const last = ratchetEncrypt(a, 'last-' + String(epoch), AB);
+      a = last.session;
+      b = ratchetDecrypt(b, last.envelope, AB).session;
+      const reply = ratchetEncrypt(b, 'r', BA);
+      b = reply.session;
+      a = ratchetDecrypt(a, reply.envelope, BA).session;
+    }
+    const total = Object.keys(b.skippedKeys ?? {}).length;
+    expect(total).toBeLessThanOrEqual(MAX_SKIP_TOTAL);
+    expect(total).toBe(Math.min(MAX_SKIP_TOTAL, perEpoch * Math.min(epochs, MAX_SKIP_EPOCHS)));
+    // Oldest epoch lost keys first, lowest n first.
+    const order = b.skippedEpochOrder ?? [];
+    const oldest = order[0]!;
+    const oldestNs = Object.keys(b.skippedKeys ?? {}).filter((id) => id.startsWith(oldest + ':')).map((id) => Number(id.slice(id.lastIndexOf(':') + 1)));
+    if (total === MAX_SKIP_TOTAL) {
+      expect(Math.min(...oldestNs)).toBeGreaterThan(0);
+      expect(oldestNs.length).toBeLessThan(perEpoch);
+    }
+    expect(pruneSkippedKeys(b)).toEqual(pruneSkippedKeys(b));
+    expect(pruneSkippedKeys(pruneSkippedKeys(b))).toEqual(pruneSkippedKeys(b));
   });
 
   it('a previous-epoch message arriving after the next epoch decrypts from a key drained via pn (T2.7 + T2.8)', () => {

@@ -35,7 +35,7 @@ export {
   ratchetEncrypt,
   ratchetDecrypt,
   skippedKeyId,
-  MAX_SKIP,
+  pruneSkippedKeys,
   type MessageHeader,
   type MessageEnvelope,
   type AssociatedData,

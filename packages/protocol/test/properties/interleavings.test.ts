@@ -1,7 +1,7 @@
 /**
  * Property: over random interleavings of sends and deliveries, every message
  * decrypts exactly once and nothing throws, as long as no receiver gap
- * exceeds MAX_SKIP. Since T2.0 the traffic crosses epochs; skipped keys
+ * exceeds MAX_SKIP_PER_STEP. Since T2.0 the traffic crosses epochs; skipped keys
  * survive ratchet steps (T2.7) and the previous chain is drained to
  * header.pn (T2.8), so late old-epoch messages decrypt.
  *
@@ -10,7 +10,7 @@
  * the Phase 2 exit gate (10,000).
  */
 import { describe, expect, it } from 'vitest';
-import { MAX_SKIP } from '../../src/ratchet/message';
+import { MAX_SKIP_PER_STEP } from '../../src/ratchet/limits';
 import { makeWorld, rng } from '../harness';
 
 const RUNS = Number(process.env.PROPERTY_RUNS ?? 300);
@@ -40,9 +40,9 @@ describe('property: random interleavings', () => {
 
       for (let step = 0; step < STEPS; step += 1) {
         const r = rand();
-        // Keep gaps within MAX_SKIP: force deliveries when a queue is long.
-        if (network.pending('B').length > MAX_SKIP - 5) network.releaseOne('B', Math.floor(rand() * 3));
-        else if (network.pending('A').length > MAX_SKIP - 5) network.releaseOne('A', Math.floor(rand() * 3));
+        // Keep gaps within MAX_SKIP_PER_STEP: force deliveries when a queue is long.
+        if (network.pending('B').length > MAX_SKIP_PER_STEP - 5) network.releaseOne('B', Math.floor(rand() * 3));
+        else if (network.pending('A').length > MAX_SKIP_PER_STEP - 5) network.releaseOne('A', Math.floor(rand() * 3));
         else if (r < 0.3) {
           const t = 'A#' + String(sent.A!.length);
           A!.send('B', t);
@@ -61,8 +61,8 @@ describe('property: random interleavings', () => {
       expect(failures, 'seed ' + String(seed) + ': ' + JSON.stringify(failures.map((f) => (f.ok ? null : f.code)))).toEqual([]);
       expect(B!.inbox.map((m) => m.text).sort(), 'seed ' + String(seed)).toEqual([...sent.A!].sort());
       expect(A!.inbox.map((m) => m.text).sort(), 'seed ' + String(seed)).toEqual([...sent.B!].sort());
-      expect(Object.keys(A!.sessionState('B')!.skippedKeys ?? {}).length).toBeLessThanOrEqual(MAX_SKIP);
-      expect(Object.keys(B!.sessionState('A')!.skippedKeys ?? {}).length).toBeLessThanOrEqual(MAX_SKIP);
+      expect(Object.keys(A!.sessionState('B')!.skippedKeys ?? {}).length).toBeLessThanOrEqual(MAX_SKIP_PER_STEP);
+      expect(Object.keys(B!.sessionState('A')!.skippedKeys ?? {}).length).toBeLessThanOrEqual(MAX_SKIP_PER_STEP);
     }
   }, 120_000);
 });
