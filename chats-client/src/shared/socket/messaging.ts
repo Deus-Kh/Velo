@@ -28,7 +28,7 @@ export async function sendMessageV2(params: {
   clientMessageId: string;
   initPacket?: X3DHInitPacket | null;
   replyTo?: ReplyReference | null;
-}): Promise<{ serverMessageId: string }> {
+}): Promise<{ serverMessageId: string; seq: number | null }> {
   const socket = await ensureSocketConnected();
 
   const myUserId = requireMyUserId();
@@ -62,7 +62,7 @@ export async function sendMessageV2(params: {
   return new Promise((resolve, reject) => {
     socket.emit('message:send', dto, (ack: any) => {
       if (!ack?.ok) return reject(new ProtocolError('SEND_FAILED', ack?.error || 'Send failed'));
-      resolve({ serverMessageId: ack.serverMessageId });
+      resolve({ serverMessageId: ack.serverMessageId, seq: typeof ack.seq === 'number' ? ack.seq : null });
     });
   });
 }
@@ -79,6 +79,7 @@ export async function subscribeToMessages(onMessage: (m: {
   serverMessageId: string;
   clientMessageId: string;
   createdAt: number;
+  seq: number | null;
   replyTo?: ReplyReference | null;
   status?: 'sent' | 'delivered' | 'read' | 'failed';
   deliveredAt?: number | null;
@@ -121,6 +122,7 @@ export async function subscribeToMessages(onMessage: (m: {
         serverMessageId: msg.serverMessageId,
         clientMessageId: msg.clientMessageId,
         createdAt: msg.createdAt,
+        seq: typeof msg.seq === 'number' ? msg.seq : null,
         replyTo: msg.replyTo ?? null,
         status: msg.status,
         deliveredAt: msg.deliveredAt,

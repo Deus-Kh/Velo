@@ -33,6 +33,7 @@ function toStored(it: HistoryItem, direction: 'in' | 'out', text: string): Store
     direction,
     text,
     createdAt: Number(it.createdAt ?? Date.now()),
+    seq: typeof it.seq === 'number' ? it.seq : null,
     status: it.status ?? 'sent',
     deliveredAt: it.deliveredAt ?? null,
     readAt: it.readAt ?? null,
@@ -94,6 +95,7 @@ export async function syncNewerFromServer(params: {
         createdAt: r.createdAt,
         patch: {
           serverMessageId: r.serverMessageId,
+          seq: typeof r.seq === 'number' ? r.seq : undefined,
           status: r.status,
           deliveredAt: r.deliveredAt ?? null,
           readAt: r.readAt ?? null,
@@ -104,7 +106,7 @@ export async function syncNewerFromServer(params: {
 
     const stored: string[] = [];
     for (const it of items) {
-      after = Math.max(after ?? 0, Number(it.createdAt ?? 0));
+      if (typeof it.seq === 'number') after = Math.max(after ?? 0, it.seq); // T3.2: the cursor is the server sequence
       if (String(it.fromUserId) === String(myUserId) || it.protoVersion !== 3) continue;
       const envelope = envelopeOf(it);
       if (!envelope) continue;
@@ -133,7 +135,7 @@ export async function syncNewerFromServer(params: {
         console.warn('History sync: delivered ack failed (will retry next sync):', e);
       }
     }
-    if (items.length < SYNC_PAGE) break;
+    if (items.length < SYNC_PAGE || after === undefined) break; // no seq on this page: nothing to page on
   }
 
   if (serverTime !== null) {

@@ -22,7 +22,9 @@ export interface HistoryItem {
 
   clientMessageId: string;
   createdAt: number;
-  
+  /** T3.2: server-assigned per-conversation order (null on pre-T3.2 items). */
+  seq?: number | null;
+
   status?: 'sent' | 'delivered' | 'read' | 'failed';
   deliveredAt?: number | null;
   readAt?: number | null;
@@ -37,6 +39,7 @@ export interface ReceiptItem {
   serverMessageId: string;
   clientMessageId: string;
   createdAt: number;
+  seq?: number | null;
   status: 'delivered' | 'read';
   deliveredAt?: number | null;
   readAt?: number | null;
@@ -55,7 +58,7 @@ export const messagesApi = {
   markAsRead: (conversationId: string) =>
     http.post<{ ok: boolean; updatedCount: number }>(`/messages/mark-read/${conversationId}`),
 
-  /** T3.1: ciphertext the server still holds for me (oldest first) plus receipts for my own messages. */
+  /** T3.1: ciphertext the server still holds for me (oldest first) plus receipts for my own messages. `after` is a seq (T3.2). */
   getUndelivered: (params: { peerUserId?: string; limit?: number; after?: number; receiptsSince?: number }) =>
     http.get<UndeliveredResponse>('/messages/undelivered', { params }),
 

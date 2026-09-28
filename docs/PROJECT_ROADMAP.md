@@ -293,10 +293,10 @@ Fix: after T2.0, an inbound `initPacket` whose identity matches the pin but whos
 - **P2-3 · Stabilization checklist never run** `[CORE]` → T2.12
 - **P2-4 · Presence and push routing in process memory** `[CORE]` → T4.3
 - **P2-5 · No build step, no process manager** `[CORE]` → T4.1, T4.2
-- **P2-6 · Pagination on a client-supplied timestamp** `[PARITY]` → T3.2
+- **P2-6 · Pagination on a client-supplied timestamp** `[PARITY]` → T3.2 — **fixed 2026-09-28 (undelivered cursor is `seq`; the legacy history route keeps its timestamp cursor until it is removed)**
 - **P2-7 · `cors({ origin: true, credentials: true })`** `[PARITY]` → T4.4
 - **P2-8 · No structured error taxonomy** `[PARITY]` → T2.3, T4.7
-- **P2-9 · Ordering keyed on the client clock** `[PARITY]` *(new)* — any client pins itself to the top of everyone's history. Server-assigned per-conversation sequence. → T3.2
+- **P2-9 · Ordering keyed on the client clock** `[PARITY]` *(new)* — any client pins itself to the top of everyone's history. Server-assigned per-conversation sequence. → T3.2 — **fixed 2026-09-28**
 - **P2-10 · Presence/typing subscribable by anyone; no privacy toggles** `[PARITY]` *(new)* — relationship check; toggles for read receipts, typing, last-seen; consider dropping "online" broadcast entirely (Signal has none). → T1.7, Phase 7'
 - **P2-11 · 69 dependency advisories, 7 critical** `[CORE]` *(new)* → T1.12
   **Status 2026-09-28:** resolved by T1.12. Server: 26 → 8 advisories, all moderate, none high or critical. Client: 43 → 1; the remaining one is `image-size` inside Metro (the bundler, pinned by `@react-native/metro-config` 0.83.1), a build-time-only dependency that never ships in the app — accepted until the next React Native upgrade. Removed unused packages: `crypto-js`, `date-fns`, `uuid`, `@react-native/new-app-screen`, `@bam.tech/react-native-make`, legacy `react-native-vector-icons` and its type shim.
@@ -424,6 +424,8 @@ Extraction happens in T2.1. Secrets (`*.pem`, `*.keystore`, service-account JSON
 
 **3' progress — T3.1 done 2026-09-28** (two commits): the server deletes ciphertext on the recipient's delivered ack and keeps a metadata-only receipt with a 30-day TTL; the client syncs from `GET /messages/undelivered`, acks only after decrypting and storing, and applies receipts to its stored copies; S26 in the harness. T2.12 (manual checklist) remains the human gate before Phase 3' formally opens; T3.1 was built ahead of it because it closes P1-10. Next in order: T3.2.
 
+**3' progress — T3.2 done 2026-09-28** (two commits): the server hands out a per-conversation sequence number atomically on send; ordering, the undelivered cursor and the client's chat list use it; the sender's clock is display only. S27 in the harness. Next in order: T3.3 (push done right).
+
 **2b progress — T2.14 done 2026-09-28** (one commit, D7 = A): plaintext stored locally in sealed records, message keys never archived, history read from the device with the server asked only for newer messages, one-time migration of the old archive. **The known-red registry is empty: every scenario the harness owns is green.** Remaining in Phase 2: T2.12 (manual two-device checklist, owner).
 
 **2b progress — T2.11 done 2026-09-28** (two commits): bootstrap persists only after the first message decrypts, bootstrap replay refused, glare converges on the lower user id without losing messages, a peer's local reset is adopted automatically. Next in order: T2.14.
@@ -455,7 +457,7 @@ Extraction happens in T2.1. Secrets (`*.pem`, `*.keystore`, service-account JSON
 | Task | Detail | Est. |
 |---|---|---|
 | T3.1 Delete-on-delivery + TTL + `GET /messages/undelivered?after=seq` | Server keeps only undelivered ciphertext (30-day TTL). **Done 2026-09-28** (cursor is `createdAtClient` until T3.2) | 2d |
-| T3.2 Server sequence numbers; compound cursor | P2-6, P2-9 | 1d |
+| T3.2 Server sequence numbers; compound cursor | P2-6, P2-9. **Done 2026-09-28** | 1d |
 | T3.3 Push done right | Data-only payload; background handler; notifee render; tap deep-link; iOS APNs; token-prune fix; honest preview toggle | 3d |
 | T3.4 Key zeroization + replay window + no-mutation-before-auth audit | `fill(0)`; typed `REPLAY_DETECTED` vs `UNKNOWN_OLD_MESSAGE` | 2d |
 | T3.5 PQ-readiness | Handshake IKM accepts a KEM secret without another wire bump | 1d |

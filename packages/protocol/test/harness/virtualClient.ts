@@ -38,6 +38,9 @@ type StoredPair = { publicKey: string; privateKey: string };
 
 export type ReceivedMessage = { fromUserId: string; text: string; serverMessageId: string };
 
+/** storage/messageStore.ts record, as far as the harness models it. */
+export type StoredMessageRecord = { direction: 'in' | 'out'; text: string; createdAt: number; seq: number; serverMessageId: string };
+
 export class VirtualClient {
   network: Network | null = null;
   readonly inbox: ReceivedMessage[] = [];
@@ -46,6 +49,8 @@ export class VirtualClient {
   /** useChatE2EE 'identity_changed': sending to these peers is refused until the user accepts the new identity. */
   private readonly blockedPeers = new Set<string>();
   private msgCounter = 0; // orders createdAt; ids are random like the client's
+  /** Added to this client's clock when stamping outgoing messages (T3.2 scenarios). */
+  clockSkewMs = 0;
 
   constructor(
     readonly userId: string,
@@ -193,12 +198,13 @@ export class VirtualClient {
   }
 
   /** storage/messageStore.ts: plaintext kept locally, sealed in the real client. */
-  private storeMessage(peerUserId: string, m: { direction: 'in' | 'out'; text: string; createdAt: number; serverMessageId: string }): void {
+  private storeMessage(peerUserId: string, m: StoredMessageRecord): void {
     const key = 'msgs:' + peerUserId;
-    const list = this.store.getJson<Array<{ direction: 'in' | 'out'; text: string; createdAt: number; serverMessageId: string }>>(key) ?? [];
+    const list = this.store.getJson<StoredMessageRecord[]>(key) ?? [];
     if (list.some((x) => x.serverMessageId === m.serverMessageId)) return;
     list.push(m);
-    list.sort((a, b) => a.createdAt - b.createdAt || a.serverMessageId.localeCompare(b.serverMessageId));
+    // T3.2: conversation order is the server sequence, never the sender's clock.
+    list.sort((a, b) => a.seq - b.seq || a.serverMessageId.localeCompare(b.serverMessageId));
     this.store.setJson(key, list);
   }
 
@@ -208,8 +214,8 @@ export class VirtualClient {
   }
 
   /** Locally stored messages for the pair, oldest first. */
-  storedMessages(peerUserId: string): Array<{ direction: 'in' | 'out'; text: string; createdAt: number; serverMessageId: string }> {
-    return this.store.getJson<Array<{ direction: 'in' | 'out'; text: string; createdAt: number; serverMessageId: string }>>('msgs:' + peerUserId) ?? [];
+  storedMessages(peerUserId: string): StoredMessageRecord[] {
+    return this.store.getJson<StoredMessageRecord[]>('msgs:' + peerUserId) ?? [];
   }
 
   /** crypto/associatedData.ts: identities for the message MAC — ours from the store, the peer's from the pin. */
@@ -326,12 +332,12 @@ export class VirtualClient {
     const dto = this.network.send(this.userId, {
       toUserId: peerUserId,
       clientMessageId: this.userId + '-' + randomUUID(),
-      createdAt: Date.now() + this.msgCounter,
+      createdAt: Date.now() + this.clockSkewMs + this.msgCounter,
       protoVersion: 3,
       v3: step.envelope,
       initPacket,
     });
-    this.storeMessage(peerUserId, { direction: 'out', text, createdAt: dto.createdAt, serverMessageId: dto.serverMessageId });
+    this.storeMessage(peerUserId, { direction: 'out', text, createdAt: dto.createdAt, seq: dto.seq, serverMessageId: dto.serverMessageId });
     return dto;
   }
 
@@ -375,7 +381,7 @@ export class VirtualClient {
       }
     }
     this.inbox.push({ fromUserId: peerUserId, text: plaintext, serverMessageId: dto.serverMessageId });
-    this.storeMessage(peerUserId, { direction: 'in', text: plaintext, createdAt: dto.createdAt, serverMessageId: dto.serverMessageId });
+    this.storeMessage(peerUserId, { direction: 'in', text: plaintext, createdAt: dto.createdAt, seq: dto.seq, serverMessageId: dto.serverMessageId });
     // socket/messaging.ts: the delivered ack goes out only after the message decrypted (T3.1: the server then deletes it).
     this.server.ackDelivered(this.userId, dto.serverMessageId);
     return plaintext;

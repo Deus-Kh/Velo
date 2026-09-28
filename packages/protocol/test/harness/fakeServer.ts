@@ -46,6 +46,8 @@ export type NewMessageDTO = {
   initPacket: X3DHInitPacket | null;
   clientMessageId: string;
   createdAt: number;
+  /** T3.2: server-assigned per-conversation order. */
+  seq: number;
 };
 
 export type MaliciousHooks = {
@@ -60,7 +62,7 @@ export type MaliciousHooks = {
 export const MAX_UNUSED_ONE_TIME_PREKEYS = 500;
 export const MAX_SIGNED_PREKEYS_PER_USER = 5;
 
-export type Receipt = { serverMessageId: string; conversationId: string; fromUserId: string; toUserId: string; clientMessageId: string; createdAt: number; status: 'delivered' | 'read'; deliveredAt: number };
+export type Receipt = { serverMessageId: string; conversationId: string; fromUserId: string; toUserId: string; clientMessageId: string; createdAt: number; seq: number; status: 'delivered' | 'read'; deliveredAt: number };
 
 export class FakeServer {
   readonly users = new Map<string, ServerUser>();
@@ -69,6 +71,8 @@ export class FakeServer {
   readonly receipts: Receipt[] = [];
   /** Conversation members, like ConversationModel (survives message deletion). */
   readonly conversations = new Map<string, [string, string]>();
+  /** ConversationModel.lastSeq (T3.2). */
+  private readonly lastSeq = new Map<string, number>();
   readonly bundleIssues: Array<{ requesterId: string; targetId: string; oneTimePreKeyId: number | null }> = [];
   malicious: MaliciousHooks = {};
   /** Set by Network: routes an event to a client's socket room. */
@@ -182,7 +186,7 @@ export class FakeServer {
     // Dedupe by (sender, clientMessageId): a resend after delivery gets the same id and is not re-emitted.
     const delivered = this.receipts.find((r) => r.fromUserId === fromUserId && r.clientMessageId === dto.clientMessageId);
     const existing = this.messages.find((m) => m.fromUserId === fromUserId && m.clientMessageId === dto.clientMessageId)
-      ?? (delivered ? { serverMessageId: delivered.serverMessageId, conversationId, fromUserId, toUserId: dto.toUserId, protoVersion: 3 as const, v3: dto.v3, initPacket: dto.initPacket, clientMessageId: dto.clientMessageId, createdAt: delivered.createdAt } : undefined);
+      ?? (delivered ? { serverMessageId: delivered.serverMessageId, conversationId, fromUserId, toUserId: dto.toUserId, protoVersion: 3 as const, v3: dto.v3, initPacket: dto.initPacket, clientMessageId: dto.clientMessageId, createdAt: delivered.createdAt, seq: delivered.seq } : undefined);
 
     const stored: NewMessageDTO = existing ?? {
       serverMessageId: 'srv-' + String(++this.seq),
@@ -194,8 +198,12 @@ export class FakeServer {
       initPacket: dto.initPacket,
       clientMessageId: dto.clientMessageId,
       createdAt: dto.createdAt,
+      seq: (this.lastSeq.get(conversationId) ?? 0) + 1, // T3.2: atomic per conversation; the client clock never orders
     };
-    if (!existing) this.messages.push(stored);
+    if (!existing) {
+      this.messages.push(stored);
+      this.lastSeq.set(conversationId, stored.seq);
+    }
 
     let out: NewMessageDTO = { ...stored };
     if (this.malicious.substituteInitPacket) out = { ...out, initPacket: this.malicious.substituteInitPacket(out.initPacket, out) };
@@ -207,7 +215,7 @@ export class FakeServer {
   undelivered(userId: string, peerUserId?: string): NewMessageDTO[] {
     return this.messages
       .filter((m) => m.toUserId === userId && (!peerUserId || m.fromUserId === peerUserId))
-      .sort((a, b) => a.createdAt - b.createdAt || a.serverMessageId.localeCompare(b.serverMessageId))
+      .sort((a, b) => a.seq - b.seq || a.serverMessageId.localeCompare(b.serverMessageId))
       .map((m) => ({ ...m }));
   }
 
@@ -222,7 +230,7 @@ export class FakeServer {
     if (m.toUserId !== userId) return 'FORBIDDEN';
     this.messages.splice(i, 1);
     const deliveredAt = ++this.seq;
-    this.receipts.push({ serverMessageId, conversationId: m.conversationId, fromUserId: m.fromUserId, toUserId: m.toUserId, clientMessageId: m.clientMessageId, createdAt: m.createdAt, status: 'delivered', deliveredAt });
+    this.receipts.push({ serverMessageId, conversationId: m.conversationId, fromUserId: m.fromUserId, toUserId: m.toUserId, clientMessageId: m.clientMessageId, createdAt: m.createdAt, seq: m.seq, status: 'delivered', deliveredAt });
     this.emitToUser?.(m.fromUserId, 'message:status-changed', { conversationId: m.conversationId, status: 'delivered', serverMessageId, deliveredAt, deliveredByUserId: userId });
     return 'delivered';
   }

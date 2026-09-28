@@ -32,6 +32,8 @@ export type UIMessage = {
   text: string;
   mine: boolean;
   createdAt: number;
+  /** T3.2: server order; null while a send is in flight. */
+  seq?: number | null;
   replyTo?: ReplyReference | null;
   status?: 'sending' | 'sent' | 'delivered' | 'read' | 'failed';
   deliveredAt?: number | null;
@@ -77,8 +79,17 @@ function stableKey(
 }
 
 /**
+ * T3.2: the server sequence orders the conversation; the sender's clock only
+ * orders messages that have no sequence yet (a send in flight).
+ */
+function compareOrder(a: UIMessage, b: UIMessage): number {
+  if (a.seq != null && b.seq != null) return a.seq - b.seq;
+  return a.createdAt - b.createdAt;
+}
+
+/**
  * Merge `next` into `prev` list, deduplicating by serverMessageId, clientMessageId, then id.
- * Returns a new array sorted ascending by createdAt.
+ * Returns a new array in conversation order (seq, then createdAt for in-flight sends).
  */
 function upsertMessage(prev: UIMessage[], next: UIMessage): UIMessage[] {
   if (next.serverMessageId) {
@@ -99,6 +110,8 @@ function upsertMessage(prev: UIMessage[], next: UIMessage): UIMessage[] {
         ...next,
         id: next.serverMessageId || prev[idx].id,
       };
+      // The send ack brings the seq: settle the message into server order.
+      if (next.seq != null && prev[idx].seq == null) copy.sort(compareOrder);
       return copy;
     }
   }
@@ -110,8 +123,8 @@ function upsertMessage(prev: UIMessage[], next: UIMessage): UIMessage[] {
     return copy;
   }
 
-  // New message — insert sorted by createdAt
-  const insertAt = prev.findIndex((x) => x.createdAt > next.createdAt);
+  // New message: insert in conversation order
+  const insertAt = prev.findIndex((x) => compareOrder(x, next) > 0);
   if (insertAt === -1) {
     return [...prev, next];
   }
@@ -152,6 +165,7 @@ function toUI(m: StoredMessage): UIMessage {
     text: m.text,
     mine: m.direction === 'out',
     createdAt: m.createdAt,
+    seq: m.seq,
     replyTo: m.replyTo,
     status: m.status,
     deliveredAt: m.deliveredAt,
@@ -167,6 +181,7 @@ function toStored(m: UIMessage): StoredMessage {
     direction: m.mine ? 'out' : 'in',
     text: m.text,
     createdAt: m.createdAt,
+    seq: m.seq ?? null,
     status: m.status ?? 'sent',
     deliveredAt: m.deliveredAt ?? null,
     readAt: m.readAt ?? null,
@@ -294,7 +309,7 @@ export function useChatE2EE(peerUserId: string) {
     await upsertStoredMessage({
       myUserId: String(myUserId),
       peerUserId,
-      message: { id: params.clientMessageId, clientMessageId: params.clientMessageId, serverMessageId: null, direction: 'out', text: trimmed, createdAt: params.createdAt, status: 'sending', deliveredAt: null, readAt: null, replyTo: params.replyTo ?? null },
+      message: { id: params.clientMessageId, clientMessageId: params.clientMessageId, serverMessageId: null, direction: 'out', text: trimmed, createdAt: params.createdAt, seq: null, status: 'sending', deliveredAt: null, readAt: null, replyTo: params.replyTo ?? null },
     });
 
     try {
@@ -312,6 +327,7 @@ export function useChatE2EE(peerUserId: string) {
           id: r.serverMessageId,
           serverMessageId: r.serverMessageId,
           clientMessageId: params.clientMessageId,
+          seq: r.seq,
           text: trimmed,
           mine: true,
           createdAt: params.createdAt,
@@ -324,7 +340,7 @@ export function useChatE2EE(peerUserId: string) {
       await upsertStoredMessage({
         myUserId: String(myUserId),
         peerUserId,
-        message: { id: params.clientMessageId, clientMessageId: params.clientMessageId, serverMessageId: r.serverMessageId, direction: 'out', text: trimmed, createdAt: params.createdAt, status: 'sent', deliveredAt: null, readAt: null, replyTo: params.replyTo ?? null },
+        message: { id: params.clientMessageId, clientMessageId: params.clientMessageId, serverMessageId: r.serverMessageId, direction: 'out', text: trimmed, createdAt: params.createdAt, seq: r.seq, status: 'sent', deliveredAt: null, readAt: null, replyTo: params.replyTo ?? null },
       });
     } catch (e) {
       console.warn('Send failed:', e);
@@ -360,7 +376,7 @@ export function useChatE2EE(peerUserId: string) {
       await upsertStoredMessage({
         myUserId: String(myUserId),
         peerUserId,
-        message: { id: params.clientMessageId, clientMessageId: params.clientMessageId, serverMessageId: null, direction: 'out', text: trimmed, createdAt: params.createdAt, status: 'failed', deliveredAt: null, readAt: null, replyTo: params.replyTo ?? null },
+        message: { id: params.clientMessageId, clientMessageId: params.clientMessageId, serverMessageId: null, direction: 'out', text: trimmed, createdAt: params.createdAt, seq: null, status: 'failed', deliveredAt: null, readAt: null, replyTo: params.replyTo ?? null },
       });
     }
   }, [myUserId, peerUserId]);
@@ -477,6 +493,7 @@ export function useChatE2EE(peerUserId: string) {
               text: m.text,
               mine: false,
               createdAt: m.createdAt,
+              seq: m.seq,
               replyTo: m.replyTo ?? null,
               status: m.status || 'sent',
               deliveredAt: m.deliveredAt || null,

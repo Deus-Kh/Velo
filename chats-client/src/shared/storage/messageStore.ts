@@ -23,7 +23,10 @@ export type StoredMessage = {
   clientMessageId: string | null;
   direction: 'in' | 'out';
   text: string;
+  /** Sender's clock: the record key and the paging cursor (display order within a device). */
   createdAt: number;
+  /** T3.2: server-assigned per-conversation order; null until the send is acked or on pre-T3.2 records. */
+  seq: number | null;
   status: 'sending' | 'sent' | 'delivered' | 'read' | 'failed';
   deliveredAt: number | null;
   readAt: number | null;
@@ -64,7 +67,7 @@ export async function patchStoredMessage(params: {
   peerUserId: string;
   id: string;
   createdAt: number;
-  patch: Partial<Pick<StoredMessage, 'status' | 'deliveredAt' | 'readAt' | 'serverMessageId'>>;
+  patch: Partial<Pick<StoredMessage, 'status' | 'deliveredAt' | 'readAt' | 'serverMessageId' | 'seq'>>;
 }): Promise<StoredMessage | null> {
   const { myUserId, peerUserId } = params;
   const key = recordKey(myUserId, peerUserId, { id: params.id, createdAt: params.createdAt });

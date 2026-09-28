@@ -41,6 +41,7 @@ function msg(i: number, direction: 'in' | 'out' = 'in'): StoredMessage {
     direction,
     text: 'secret text ' + String(i),
     createdAt: 1_700_000_000_000 + i * 1000,
+    seq: i,
     status: 'sent',
     deliveredAt: null,
     readAt: null,

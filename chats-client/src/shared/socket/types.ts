@@ -14,6 +14,8 @@ export type SendMessageDTO = {
   toUserId: string;
   clientMessageId: string;
   createdAt: number;
+  /** T3.2: server-assigned per-conversation order. Ordering uses it; createdAt is display only. */
+  seq?: number | null;
   protoVersion?: 3;
   v3?: MessageEnvelope | null;
   initPacket?: X3DHInitPacket | null;
@@ -27,6 +29,8 @@ export type NewMessageDTO = {
   toUserId: string;
   clientMessageId: string;
   createdAt: number;
+  /** T3.2: server-assigned per-conversation order. Ordering uses it; createdAt is display only. */
+  seq?: number | null;
   protoVersion?: 3;
   v3?: MessageEnvelope | null;
   initPacket?: X3DHInitPacket | null;
