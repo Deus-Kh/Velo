@@ -7,7 +7,7 @@ import {
   type X3DHSessionKeys,
 } from '@velo/protocol';
 import { fetchAndVerifyPreKeyBundle } from './prekeyBundle';
-import { getSignedPreKeySecretBytesForUser } from './prekeys';
+import { getSignedPreKeyPairForUser } from './prekeys';
 import { getOneTimePreKeySecret, deleteOneTimePreKeySecret } from '../storage/oneTimePreKeys';
 import { ensureIdentityDhKeyPairForUser, getIdentityDhSecretKeyBytesForUser } from './identityDhKeys';
 
@@ -20,7 +20,7 @@ export type { X3DHInitPacket, X3DHSessionKeys };
 export async function x3dhInitiate(params: {
   myUserId: string;
   peerUserId: string;
-}): Promise<{ initPacket: X3DHInitPacket; sessionKeys: X3DHSessionKeys }> {
+}): Promise<{ initPacket: X3DHInitPacket; sessionKeys: X3DHSessionKeys; theirSignedPreKeyPublicKey: string }> {
   const { myUserId, peerUserId } = params;
 
   const bundle = await fetchAndVerifyPreKeyBundle(peerUserId);
@@ -31,16 +31,18 @@ export async function x3dhInitiate(params: {
 }
 
 /**
- * Responder wrapper: loads the signed-prekey secret and the named one-time
+ * Responder wrapper: loads the signed-prekey pair and the named one-time
  * prekey secret, runs the pure handshake, then deletes the one-time secret.
+ * Returns the signed-prekey pair too: the responder session copies it (T2.0).
  */
 export async function x3dhRespond(params: {
   myUserId: string;
   initPacket: X3DHInitPacket;
-}): Promise<X3DHSessionKeys> {
+}): Promise<{ sessionKeys: X3DHSessionKeys; signedPreKey: { publicKey: string; privateKey: string } }> {
   const { myUserId, initPacket } = params;
 
-  const signedPreKeySecretKey = await getSignedPreKeySecretBytesForUser(myUserId);
+  const spk = await getSignedPreKeyPairForUser(myUserId);
+  const signedPreKeySecretKey = decodeBase64(spk.privateKey);
 
   let oneTimePreKeySecretKey: Uint8Array | null = null;
   if (initPacket.oneTimePreKeyId !== null) {
@@ -54,5 +56,5 @@ export async function x3dhRespond(params: {
     await deleteOneTimePreKeySecret({ myUserId, keyId: initPacket.oneTimePreKeyId });
   }
 
-  return sessionKeys;
+  return { sessionKeys, signedPreKey: { publicKey: spk.publicKey, privateKey: spk.privateKey } };
 }

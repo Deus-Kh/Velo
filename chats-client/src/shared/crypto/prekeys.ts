@@ -151,3 +151,10 @@ export async function getSignedPreKeySecretBytesForUser(myUserId: string): Promi
   if (!spk) throw new Error('Signed prekey not found locally');
   return decodeBase64(spk.privateKey); // X25519 secret key bytes
 }
+
+/** The stored signed-prekey pair; the responder session copies it (T2.0). */
+export async function getSignedPreKeyPairForUser(myUserId: string): Promise<{ keyId: number; publicKey: string; privateKey: string }> {
+  const spk = await getStoredSignedPreKey(myUserId);
+  if (!spk) throw new Error('Signed prekey not found locally');
+  return { keyId: spk.keyId, publicKey: spk.publicKey, privateKey: spk.privateKey };
+}

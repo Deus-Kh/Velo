@@ -5,15 +5,17 @@
 const path = require('path');
 require('./ts-require.cjs');
 
+const nacl = require('tweetnacl');
 const { encodeBase64 } = require('tweetnacl-util');
-const { createSessionFromX3DH } = require(path.join(__dirname, '..', '..', 'src', 'ratchet', 'session.ts'));
+const { initInitiatorSession, initResponderSession } = require(path.join(__dirname, '..', '..', 'src', 'ratchet', 'session.ts'));
 const { ratchetEncrypt, ratchetDecrypt } = require(path.join(__dirname, '..', '..', 'src', 'ratchet', 'message.ts'));
 
 const n = Number(process.argv[2]);
-const rootKey = encodeBase64(new Uint8Array(32).fill(0xaa));
-const chainKey = encodeBase64(new Uint8Array(32).fill(0xbb));
-const a = createSessionFromX3DH({ peerUserId: 'b', rootKey, chainKey, isInitiator: true });
-const b = createSessionFromX3DH({ peerUserId: 'a', rootKey, chainKey, isInitiator: false });
+const sharedSecret = encodeBase64(new Uint8Array(32).fill(0xaa));
+const spk = nacl.box.keyPair();
+const signedPreKey = { publicKey: encodeBase64(spk.publicKey), privateKey: encodeBase64(spk.secretKey) };
+const a = initInitiatorSession({ peerUserId: 'b', sharedSecret, theirSignedPreKeyPublicKey: signedPreKey.publicKey });
+const b = initResponderSession({ peerUserId: 'a', sharedSecret, signedPreKey });
 
 const e = ratchetEncrypt(a, 'x');
 const forged = { ...e.envelope, header: { ...e.envelope.header, n } };

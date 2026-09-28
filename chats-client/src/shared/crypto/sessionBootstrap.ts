@@ -1,5 +1,5 @@
 import { x3dhInitiate, x3dhRespond, type X3DHInitPacket } from './x3dh';
-import { loadSession, createSessionFromX3DH } from '../storage/sessionStore';
+import { loadSession, createInitiatorSession, createResponderSession } from '../storage/sessionStore';
 
 export async function ensureV2Session(params: {
   myUserId: string;
@@ -8,17 +8,16 @@ export async function ensureV2Session(params: {
   const existing = await loadSession({ myUserId: params.myUserId, peerUserId: params.peerUserId });
   if (existing) return { created: false, initPacket: null };
 
-  const { sessionKeys, initPacket } = await x3dhInitiate({
+  const { sessionKeys, initPacket, theirSignedPreKeyPublicKey } = await x3dhInitiate({
     myUserId: params.myUserId,
     peerUserId: params.peerUserId,
   });
 
-  await createSessionFromX3DH({
+  await createInitiatorSession({
     myUserId: params.myUserId,
     peerUserId: params.peerUserId,
-    rootKey: sessionKeys.rootKey,
-    chainKey: sessionKeys.chainKey,
-    isInitiator: true,
+    sharedSecret: sessionKeys.rootKey,
+    theirSignedPreKeyPublicKey,
   });
 
   return { created: true, initPacket };
@@ -35,16 +34,15 @@ export async function ensureV2SessionFromIncoming(params: {
   });
   if (existing) return;
 
-  const sessionKeys = await x3dhRespond({
+  const { sessionKeys, signedPreKey } = await x3dhRespond({
     myUserId: params.myUserId,
     initPacket: params.initPacket,
   });
 
-  await createSessionFromX3DH({
+  await createResponderSession({
     myUserId: params.myUserId,
     peerUserId: params.peerUserId,
-    rootKey: sessionKeys.rootKey,
-    chainKey: sessionKeys.chainKey,
-    isInitiator: false,
+    sharedSecret: sessionKeys.rootKey,
+    signedPreKey,
   });
 }

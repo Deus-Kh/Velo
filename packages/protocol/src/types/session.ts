@@ -3,27 +3,34 @@ export type ProtoVersion = 2;
 
 export type AnySession = RatchetSessionV2;
 
+/**
+ * Double Ratchet session state (spec §8.1).
+ *
+ * `v: 2` is the on-device format introduced by T2.0 (standard bootstrap).
+ * A stored `v: 1` session (HKDF directional split, never ratcheted) is not
+ * loadable and is discarded; the pair re-bootstraps on the next message.
+ *
+ * Chain keys are null until the corresponding chain exists: the responder
+ * has no sending chain until it has received once, and neither side has a
+ * receiving chain before the first inbound message.
+ */
 export interface RatchetSessionV2 {
-  v: 1;
+  v: 2;
   protoVersion: 2;
   peerUserId: string;
 
-  rootKey: string;
-  chainKeySend: string;
-  chainKeyRecv: string;
+  rootKey: string; // base64, 32 bytes
+  chainKeySend: string | null; // CKs
+  chainKeyRecv: string | null; // CKr
 
   Ns: number;
   Nr: number;
   PN: number;
 
-  /**
-   * Skipped message keys, keyed `${dhPubBase64}:${messageNumber}` (epoch-
-   * namespaced — see the client's messageV2.ts skippedKeyId (moves here in T2.2)). Value: base64 message key.
-   */
+  /** Skipped message keys keyed `${dhPubBase64}:${n}` (epoch-namespaced). Value: base64 message key. */
   skippedKeys?: Record<string, string>;
 
-  // DH ratchet placeholders
-  DHsPublicKey: string | null;
-  DHsPrivateKey: string | null;
-  DHrPublicKey: string | null;
+  DHsPublicKey: string; // our current ratchet key pair (base64 X25519)
+  DHsPrivateKey: string;
+  DHrPublicKey: string | null; // peer's current ratchet key; null until the first inbound message
 }

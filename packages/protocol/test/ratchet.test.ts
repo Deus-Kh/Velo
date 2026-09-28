@@ -3,11 +3,19 @@ import { decodeBase64, encodeBase64 } from 'tweetnacl-util';
 import { describe, expect, it } from 'vitest';
 import { chainKdf } from '../src/ratchet/chain';
 import { kdfRootKey } from '../src/ratchet/root';
-import { applyDhRatchet } from '../src/ratchet/dh';
-import { createSessionFromX3DH } from '../src/ratchet/session';
-import type { RatchetSessionV2 } from '../src/types/session';
+import { dhRatchet } from '../src/ratchet/dh';
+import { initInitiatorSession, initResponderSession } from '../src/ratchet/session';
+import { isProtocolError, protocolErrorCode } from '../src/errors';
 
 const hex = (b: Uint8Array) => Array.from(b, (x) => x.toString(16).padStart(2, '0')).join('');
+const pairB64 = (byte: number) => {
+  const kp = nacl.box.keyPair.fromSecretKey(new Uint8Array(32).fill(byte));
+  return { publicKey: encodeBase64(kp.publicKey), privateKey: encodeBase64(kp.secretKey) };
+};
+const sharedSecret = encodeBase64(new Uint8Array(32).fill(0xaa));
+const spkB = pairB64(0x44);
+const dhsA0 = pairB64(0x66);
+const dhsB0 = pairB64(0x77);
 
 describe('chainKdf', () => {
   it('derives MK = HMAC(CK, 0x01) and CK\' = HMAC(CK, 0x02), deterministically', () => {
@@ -49,80 +57,94 @@ describe('kdfRootKey', () => {
   });
 });
 
-describe('applyDhRatchet (current behaviour, pinned before T2.0/T2.7 change it)', () => {
-  function session(): RatchetSessionV2 {
-    const dhs = nacl.box.keyPair();
-    return {
-      v: 1,
-      protoVersion: 2,
-      peerUserId: 'peer',
-      rootKey: encodeBase64(new Uint8Array(32).fill(3)),
-      chainKeySend: encodeBase64(new Uint8Array(32).fill(4)),
-      chainKeyRecv: encodeBase64(new Uint8Array(32).fill(5)),
-      Ns: 4,
-      Nr: 2,
-      PN: 0,
-      skippedKeys: { 'old:1': 'k' },
-      DHsPublicKey: encodeBase64(dhs.publicKey),
-      DHsPrivateKey: encodeBase64(dhs.secretKey),
-      DHrPublicKey: null,
-    };
-  }
+describe('session initialisation (spec §8.1, T2.0)', () => {
+  it('initiator: RK from KDF_RK(SK, DH(DHs, SPK_B)), sending chain only, DHr = SPK_B', () => {
+    const a = initInitiatorSession({ peerUserId: 'b', sharedSecret, theirSignedPreKeyPublicKey: spkB.publicKey, dhs: dhsA0 });
+    expect(a).toMatchObject({ v: 2, protoVersion: 2, peerUserId: 'b', Ns: 0, Nr: 0, PN: 0, skippedKeys: {}, chainKeyRecv: null });
+    expect(a.DHsPublicKey).toBe(dhsA0.publicKey);
+    expect(a.DHrPublicKey).toBe(spkB.publicKey);
+    expect(a.rootKey).not.toBe(sharedSecret);
+    expect(a.chainKeySend).not.toBeNull();
 
-  it('derives fresh root and chain keys, rotates DHs, resets counters and records PN', () => {
-    const before = session();
+    const expected = kdfRootKey({
+      rootKey: new Uint8Array(32).fill(0xaa),
+      dhOut: nacl.scalarMult(decodeBase64(dhsA0.privateKey), decodeBase64(spkB.publicKey)),
+    });
+    expect(decodeBase64(a.rootKey)).toEqual(expected.newRootKey);
+    expect(decodeBase64(a.chainKeySend!)).toEqual(expected.newChainKey);
+  });
+
+  it('responder: RK = SK, DHs = copied SPK pair, no chains, DHr null', () => {
+    const b = initResponderSession({ peerUserId: 'a', sharedSecret, signedPreKey: spkB });
+    expect(b).toMatchObject({ v: 2, protoVersion: 2, peerUserId: 'a', Ns: 0, Nr: 0, PN: 0, skippedKeys: {} });
+    expect(b.rootKey).toBe(sharedSecret);
+    expect(b.chainKeySend).toBeNull();
+    expect(b.chainKeyRecv).toBeNull();
+    expect(b.DHsPublicKey).toBe(spkB.publicKey);
+    expect(b.DHsPrivateKey).toBe(spkB.privateKey);
+    expect(b.DHrPublicKey).toBeNull();
+  });
+
+  it('the responder’s first ratchet step reproduces the initiator’s sending chain', () => {
+    const a = initInitiatorSession({ peerUserId: 'b', sharedSecret, theirSignedPreKeyPublicKey: spkB.publicKey, dhs: dhsA0 });
+    const b = dhRatchet(initResponderSession({ peerUserId: 'a', sharedSecret, signedPreKey: spkB }), a.DHsPublicKey, dhsB0);
+    expect(b.chainKeyRecv).toBe(a.chainKeySend);
+    expect(b.DHrPublicKey).toBe(a.DHsPublicKey);
+    expect(b.DHsPublicKey).toBe(dhsB0.publicKey);
+    // and the initiator's next step reproduces the responder's sending chain
+    const a2 = dhRatchet(a, b.DHsPublicKey);
+    expect(a2.chainKeyRecv).toBe(b.chainKeySend);
+    expect(a2.rootKey).not.toBe(a.rootKey);
+    expect(a2.DHsPublicKey).not.toBe(a.DHsPublicKey);
+  });
+
+  it('rejects wrong-length inputs with INVALID_KEY_LENGTH', () => {
+    const short = encodeBase64(new Uint8Array(16));
+    for (const fn of [
+      () => initInitiatorSession({ peerUserId: 'b', sharedSecret: short, theirSignedPreKeyPublicKey: spkB.publicKey }),
+      () => initInitiatorSession({ peerUserId: 'b', sharedSecret, theirSignedPreKeyPublicKey: short }),
+      () => initResponderSession({ peerUserId: 'a', sharedSecret, signedPreKey: { publicKey: spkB.publicKey, privateKey: short } }),
+    ]) {
+      let code: string | null = null;
+      try {
+        fn();
+      } catch (e) {
+        expect(isProtocolError(e)).toBe(true);
+        code = protocolErrorCode(e);
+      }
+      expect(code).toBe('INVALID_KEY_LENGTH');
+    }
+  });
+});
+
+describe('dhRatchet (spec §8.1)', () => {
+  it('derives fresh root and both chains, rotates DHs, records PN and resets counters', () => {
+    const before = { ...initInitiatorSession({ peerUserId: 'b', sharedSecret, theirSignedPreKeyPublicKey: spkB.publicKey, dhs: dhsA0 }), Ns: 4, Nr: 2 };
     const peer = nacl.box.keyPair();
-    const after = applyDhRatchet(before, encodeBase64(peer.publicKey));
+    const after = dhRatchet(before, encodeBase64(peer.publicKey));
 
     expect(after.rootKey).not.toBe(before.rootKey);
     expect(after.chainKeySend).not.toBe(before.chainKeySend);
-    expect(after.chainKeyRecv).not.toBe(before.chainKeyRecv);
+    expect(after.chainKeyRecv).not.toBeNull();
     expect(after.DHsPublicKey).not.toBe(before.DHsPublicKey);
     expect(after.DHrPublicKey).toBe(encodeBase64(peer.publicKey));
     expect(after.PN).toBe(4);
     expect(after.Ns).toBe(0);
     expect(after.Nr).toBe(0);
-    expect(decodeBase64(after.DHsPrivateKey!).length).toBe(32);
-    // Documented defect P1-3: the skipped-key map is wiped on a ratchet step.
-    expect(after.skippedKeys).toEqual({});
+    expect(decodeBase64(after.DHsPrivateKey).length).toBe(32);
     // Input is not mutated.
     expect(before.Ns).toBe(4);
   });
 
+  it('is deterministic for an injected next DHs (vector-friendly)', () => {
+    const s = initInitiatorSession({ peerUserId: 'b', sharedSecret, theirSignedPreKeyPublicKey: spkB.publicKey, dhs: dhsA0 });
+    const peer = pairB64(0x88);
+    expect(dhRatchet(s, peer.publicKey, dhsB0)).toEqual(dhRatchet(s, peer.publicKey, dhsB0));
+  });
+
   it('rejects keys of the wrong length and a session without a DH private key', () => {
-    const s = session();
-    expect(() => applyDhRatchet(s, encodeBase64(new Uint8Array(31)))).toThrow(/length/);
-    expect(() => applyDhRatchet({ ...s, DHsPrivateKey: null }, encodeBase64(new Uint8Array(32)))).toThrow(/private key/);
-  });
-});
-
-describe('createSessionFromX3DH (current HKDF directional split, pinned before T2.0 replaces it)', () => {
-  const rootKey = encodeBase64(new Uint8Array(32).fill(0xaa));
-  const chainKey = encodeBase64(new Uint8Array(32).fill(0xbb));
-  const dhs = { publicKey: encodeBase64(new Uint8Array(32).fill(1)), privateKey: encodeBase64(new Uint8Array(32).fill(2)) };
-
-  it('mirrors send/recv between initiator and responder', () => {
-    const a = createSessionFromX3DH({ peerUserId: 'b', rootKey, chainKey, isInitiator: true, dhs });
-    const b = createSessionFromX3DH({ peerUserId: 'a', rootKey, chainKey, isInitiator: false, dhs });
-    expect(a.chainKeySend).toBe(b.chainKeyRecv);
-    expect(a.chainKeyRecv).toBe(b.chainKeySend);
-    expect(a.chainKeySend).not.toBe(a.chainKeyRecv);
-    expect(a.rootKey).toBe(rootKey);
-    expect(a).toMatchObject({ v: 1, protoVersion: 2, peerUserId: 'b', Ns: 0, Nr: 0, PN: 0, skippedKeys: {}, DHrPublicKey: null });
-    expect(a.DHsPublicKey).toBe(dhs.publicKey);
-    expect(a.DHsPrivateKey).toBe(dhs.privateKey);
-  });
-
-  it('is byte-for-byte what the client produced before the move (frozen vectors, R8)', () => {
-    const a = createSessionFromX3DH({ peerUserId: 'b', rootKey, chainKey, isInitiator: true, dhs });
-    expect(hex(decodeBase64(a.chainKeySend))).toBe('5c3b36a39fe1de43f8850bb581eb11ae46dbd56638ce160c0a5029ab1df6fa02');
-    expect(hex(decodeBase64(a.chainKeyRecv))).toBe('02cd35496f9e43a1fffb530481cb3aa5a72dd7341c61f003acf34a295b3419e5');
-  });
-
-  it('generates a fresh 32-byte DH pair when none is injected, and rejects a bad chain key', () => {
-    const s = createSessionFromX3DH({ peerUserId: 'b', rootKey, chainKey, isInitiator: true });
-    expect(decodeBase64(s.DHsPublicKey!).length).toBe(32);
-    expect(decodeBase64(s.DHsPrivateKey!).length).toBe(32);
-    expect(() => createSessionFromX3DH({ peerUserId: 'b', rootKey, chainKey: encodeBase64(new Uint8Array(16)), isInitiator: true })).toThrow(/32 bytes/);
+    const s = initInitiatorSession({ peerUserId: 'b', sharedSecret, theirSignedPreKeyPublicKey: spkB.publicKey });
+    expect(() => dhRatchet(s, encodeBase64(new Uint8Array(31)))).toThrow(/length/);
+    expect(() => dhRatchet({ ...s, DHsPrivateKey: null as unknown as string }, encodeBase64(new Uint8Array(32)))).toThrow(/private key/);
   });
 });

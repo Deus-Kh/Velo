@@ -54,6 +54,7 @@ describe('x3dh (pure, current 3-DH construction pinned before T2.9/T2.13)', () =
       expect(initPacket.peerUserId).toBe('B');
       expect(initPacket.ephPublicKey).toBe(encodeBase64(ephA.publicKey));
       expect(initPacket.initiatorIdentityDhPublicKey).toBe(encodeBase64(ikDhA.publicKey));
+      expect(initiate(withOpk).theirSignedPreKeyPublicKey).toBe(encodeBase64(spkB.publicKey));
     }
   });
 

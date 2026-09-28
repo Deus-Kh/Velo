@@ -3,7 +3,7 @@ import { decodeBase64, encodeBase64 } from 'tweetnacl-util';
 import { normalizeB64 } from '../primitives/base64';
 import { utf8Decode, utf8Encode } from '../primitives/utf8';
 import { chainKdf } from './chain';
-import { applyDhRatchet } from './dh';
+import { dhRatchet } from './dh';
 import type { RatchetSessionV2 } from '../types/session';
 import { ProtocolError } from '../errors';
 
@@ -81,6 +81,10 @@ export function ratchetEncrypt(
   if (!session.DHsPublicKey) {
     throw new ProtocolError('STORAGE_CORRUPTION', 'Session missing DHsPublicKey', { what: 'DHsPublicKey' });
   }
+  if (!session.chainKeySend) {
+    // A responder that has not received yet has no sending chain (§8.1).
+    throw new ProtocolError('SESSION_RESET_REQUIRED', 'Session has no sending chain yet', { what: 'chainKeySend' });
+  }
 
   const ck = decodeBase64(session.chainKeySend);
   const { messageKey, nextChainKey } = chainKdf(ck);
@@ -114,50 +118,52 @@ export function ratchetEncrypt(
 }
 
 /**
- * Pure receiving step. Synchronous, no I/O, never mutates `session`.
- * On any throw the caller must persist nothing (R7): the returned session is
- * the only thing that may be saved, and only after this function returns.
+ * Pure receiving step (spec §8.1). Synchronous, no I/O, never mutates
+ * `session`. On any throw the caller must persist nothing (R7).
  *
- * Behaviour is T2.1's client code moved verbatim, including the documented
- * defects: a null `DHrPublicKey` adopts the peer key without ratcheting
- * (P1-0, fixed in T2.0) and `applyDhRatchet` drops skipped keys (P1-3, T2.7).
+ *  1. skipped-key fast path;
+ *  2. if the peer's ratchet key is new (or there is none yet), perform a
+ *     full DH ratchet step — never merely adopt the key (R13);
+ *  3. derive forward on the current receiving chain to header.n, keeping
+ *     the skipped keys;
+ *  4-6. derive the target key, authenticate, commit.
  */
 export function ratchetDecrypt(session: RatchetSessionV2, envelope: V2Encrypted): RatchetDecryptResult {
-  let work = session;
-  const incomingDhPub = envelope.header.dhPub;
-
-  if (!work.DHrPublicKey) {
-    work = { ...work, DHrPublicKey: incomingDhPub };
-  } else if (work.DHrPublicKey !== incomingDhPub) {
-    work = applyDhRatchet(work, incomingDhPub);
-  }
-
+  const incomingDhPub = normalizeB64(envelope.header.dhPub);
   const targetN = envelope.header.n;
-  const skipped: Record<string, string> = { ...(work.skippedKeys || {}) };
 
-  if (targetN < work.Nr) {
-    const id = skippedKeyId(incomingDhPub, targetN);
-    const mkB64 = skipped[id];
-    // No skipped key for an old counter: the message was already consumed or
-    // its key was never retained. libsignal treats this as a duplicate; T2.6
-    // will be able to tell an evicted key (UNKNOWN_OLD_MESSAGE) apart once
-    // eviction is tracked.
-    if (!mkB64) {
-      throw new ProtocolError('REPLAY_DETECTED', 'Replay or unknown old message', { n: targetN, nr: work.Nr });
-    }
-
-    const plaintext = openWithMessageKey(mkB64, envelope);
-    delete skipped[id];
-
+  // 1. Skipped-key fast path.
+  const skipped: Record<string, string> = { ...(session.skippedKeys || {}) };
+  const skippedId = skippedKeyId(incomingDhPub, targetN);
+  const skippedKey = skipped[skippedId];
+  if (skippedKey) {
+    const plaintext = openWithMessageKey(skippedKey, envelope);
+    delete skipped[skippedId];
     return {
-      session: { ...work, skippedKeys: skipped },
+      session: { ...session, skippedKeys: skipped },
       plaintext,
-      derivedKeys: [{ direction: 'in', dhPub: incomingDhPub, n: targetN, messageKeyB64: mkB64 }],
-      consumedSkippedKeyId: id,
+      derivedKeys: [{ direction: 'in', dhPub: incomingDhPub, n: targetN, messageKeyB64: skippedKey }],
+      consumedSkippedKeyId: skippedId,
     };
   }
 
+  // 2. New peer ratchet key → DH ratchet step (R13).
+  let work = session;
+  if (!work.DHrPublicKey || work.DHrPublicKey !== incomingDhPub) {
+    work = dhRatchet(work, incomingDhPub);
+  }
+  if (!work.chainKeyRecv) {
+    throw new ProtocolError('STORAGE_CORRUPTION', 'Session has no receiving chain after ratchet', { what: 'chainKeyRecv' });
+  }
+
+  // An old counter on the current chain with no skipped key: consumed or never retained.
+  if (targetN < work.Nr) {
+    throw new ProtocolError('REPLAY_DETECTED', 'Replay or unknown old message', { n: targetN, nr: work.Nr });
+  }
+
+  // 3–4. Derive forward to the target, retaining skipped keys.
   const derivedKeys: DerivedMessageKey[] = [];
+  const retained: Record<string, string> = { ...(work.skippedKeys || {}) };
   let ck = decodeBase64(work.chainKeyRecv);
   let nr = work.Nr;
   let messageKey: Uint8Array | null = null;
@@ -168,8 +174,8 @@ export function ratchetDecrypt(session: RatchetSessionV2, envelope: V2Encrypted)
 
     if (nr === targetN) {
       messageKey = step.messageKey;
-    } else if (Object.keys(skipped).length < MAX_SKIP) {
-      skipped[skippedKeyId(incomingDhPub, nr)] = mkB64;
+    } else if (Object.keys(retained).length < MAX_SKIP) {
+      retained[skippedKeyId(incomingDhPub, nr)] = mkB64;
     }
     derivedKeys.push({ direction: 'in', dhPub: incomingDhPub, n: nr, messageKeyB64: mkB64 });
 
@@ -177,14 +183,14 @@ export function ratchetDecrypt(session: RatchetSessionV2, envelope: V2Encrypted)
     nr += 1;
   }
 
-  if (!messageKey) {
-    throw new ProtocolError('DECRYPT_FAILED', 'Failed to derive message key', { n: targetN, nr: work.Nr });
-  }
+  if (!messageKey) throw new ProtocolError('DECRYPT_FAILED', 'Failed to derive message key', { n: targetN, nr: work.Nr });
 
+  // 5. Authenticate — nothing above this line may be persisted.
   const plaintext = openWithMessageKey(encodeBase64(messageKey), envelope);
 
+  // 6. Commit.
   return {
-    session: { ...work, chainKeyRecv: encodeBase64(ck), Nr: nr, skippedKeys: skipped },
+    session: { ...work, chainKeyRecv: encodeBase64(ck), Nr: nr, skippedKeys: retained },
     plaintext,
     derivedKeys,
     consumedSkippedKeyId: null,

@@ -4,30 +4,31 @@ import type { RatchetSessionV2 } from '../types/session';
 import { kdfRootKey } from './root';
 import { normalizeB64 } from '../primitives/base64';
 import { ProtocolError } from '../errors';
+import type { DhKeyPairB64 } from './session';
 
 /**
- * Applies a DH ratchet step when we detect peer dhPub change.
+ * DH ratchet step (spec §8.1 `dhRatchet`, Signal's DHRatchet):
+ *   PN := Ns; Ns := Nr := 0; DHr := dhPub;
+ *   (RK, CKr) := KDF_RK(RK, DH(DHs, DHr));
+ *   DHs := fresh;
+ *   (RK, CKs) := KDF_RK(RK, DH(DHs, DHr)).
+ * Pure: returns a new session, never mutates the input. Draining the
+ * previous receiving chain to `header.pn` is the caller's job (T2.8).
  *
- * Signal-like:
- * 1) PN = Ns, reset Ns/Nr, (MVP: clear skipped keys)
- * 2) RK, CKr = KDF_RK(RK, DH(DHs_priv, DHr_new))
- * 3) Set DHr = DHr_new
- * 4) Generate new DHs
- * 5) RK, CKs = KDF_RK(RK, DH(DHs_new_priv, DHr))
+ * `nextDhs` is injectable for vector tests only.
+ *
+ * NOTE (P1-3): the skipped-key map is still wiped here; T2.7 removes that.
  */
-export function applyDhRatchet(session: RatchetSessionV2, newPeerDhPubB64: string): RatchetSessionV2 {
+export function dhRatchet(session: RatchetSessionV2, newPeerDhPubB64: string, nextDhs?: DhKeyPairB64): RatchetSessionV2 {
   if (!session.DHsPrivateKey) {
     throw new ProtocolError('STORAGE_CORRUPTION', 'Session missing DHs private key', { what: 'DHsPrivateKey' });
   }
 
-  // Normalize all stored b64 inputs to avoid silent decode mismatches
   const rootKeyBytes = decodeBase64(normalizeB64(session.rootKey));
-
   const dhsPriv = decodeBase64(normalizeB64(session.DHsPrivateKey));
   const peerDhPubB64 = normalizeB64(newPeerDhPubB64);
   const dhrNewPub = decodeBase64(peerDhPubB64);
 
-  // X25519 keys must be 32 bytes
   if (dhsPriv.length !== 32) {
     throw new ProtocolError('INVALID_KEY_LENGTH', 'Bad DHsPrivateKey length', { what: 'DHsPrivateKey', length: dhsPriv.length });
   }
@@ -35,42 +36,31 @@ export function applyDhRatchet(session: RatchetSessionV2, newPeerDhPubB64: strin
     throw new ProtocolError('INVALID_KEY_LENGTH', 'Bad peer DH public key length', { what: 'peerDhPublicKey', length: dhrNewPub.length });
   }
 
-  // 1) Reset counters and skipped keys (MVP)
-  const PN = session.Ns;
+  // Receiving chain from DH(DHs, DHr_new).
+  const step1 = kdfRootKey({ rootKey: rootKeyBytes, dhOut: nacl.scalarMult(dhsPriv, dhrNewPub) });
 
-  // 2) Derive receiving chain from DH(DHs_priv, DHr_new)
-  const dh1 = nacl.scalarMult(dhsPriv, dhrNewPub);
-  const step1 = kdfRootKey({ rootKey: rootKeyBytes, dhOut: dh1 });
-
-  // 3) Update DHr
-  const DHrPublicKey = peerDhPubB64;
-
-  // 4) Generate new DHs (for sending chain)
-  const dhsNew = nacl.box.keyPair();
-
-  // 5) Derive sending chain from DH(DHs_new_priv, DHr)
-  const dh2 = nacl.scalarMult(dhsNew.secretKey, dhrNewPub);
-  const step2 = kdfRootKey({ rootKey: step1.newRootKey, dhOut: dh2 });
+  // Fresh sending ratchet key, sending chain from DH(DHs_new, DHr_new).
+  const next = nextDhs ?? (() => {
+    const kp = nacl.box.keyPair();
+    return { publicKey: encodeBase64(kp.publicKey), privateKey: encodeBase64(kp.secretKey) };
+  })();
+  const nextPriv = decodeBase64(normalizeB64(next.privateKey));
+  if (nextPriv.length !== 32) {
+    throw new ProtocolError('INVALID_KEY_LENGTH', 'Bad next DHs private key length', { what: 'nextDhsPrivateKey', length: nextPriv.length });
+  }
+  const step2 = kdfRootKey({ rootKey: step1.newRootKey, dhOut: nacl.scalarMult(nextPriv, dhrNewPub) });
 
   return {
     ...session,
-
-    // Update root and chains
     rootKey: encodeBase64(step2.newRootKey),
     chainKeyRecv: encodeBase64(step1.newChainKey),
     chainKeySend: encodeBase64(step2.newChainKey),
-
-    // Reset counters for new chains
-    PN,
+    PN: session.Ns,
     Ns: 0,
     Nr: 0,
-
-    // MVP: clear skipped on ratchet boundary (consider namespacing by dhPub later)
     skippedKeys: {},
-
-    // Save new DH keys
-    DHrPublicKey,
-    DHsPublicKey: encodeBase64(dhsNew.publicKey),
-    DHsPrivateKey: encodeBase64(dhsNew.secretKey),
+    DHrPublicKey: peerDhPubB64,
+    DHsPublicKey: normalizeB64(next.publicKey),
+    DHsPrivateKey: normalizeB64(next.privateKey),
   };
 }

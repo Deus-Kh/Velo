@@ -7,7 +7,7 @@ import { x3dhInitiate, x3dhRespond, type X3DHInitPacket } from '../../src/handsh
 import { normalizeB64 } from '../../src/primitives/base64';
 import { utf8Decode } from '../../src/primitives/utf8';
 import { ratchetDecrypt, ratchetEncrypt, type DerivedMessageKey, type V2Encrypted } from '../../src/ratchet/message';
-import { createSessionFromX3DH } from '../../src/ratchet/session';
+import { initInitiatorSession, initResponderSession } from '../../src/ratchet/session';
 import type { RatchetSessionV2 } from '../../src/types/session';
 import { FakeServer, type NewMessageDTO, type ServerIdentity } from './fakeServer';
 import { MemoryStore } from './memoryStore';
@@ -24,6 +24,10 @@ import type { Network } from './network';
  * Identity pinning mirrors today's client: NewChatScreen pins on first
  * contact (TOFU) and nothing in the crypto path checks the pin (P0-9).
  * T2.13 changes the client and this model together.
+ *
+ * Sessions use the standard Double Ratchet bootstrap (T2.0): the initiator
+ * ratchets once at creation against SPK_B; the responder copies its SPK
+ * pair and ratchets on the first inbound message.
  */
 type StoredPair = { publicKey: string; privateKey: string };
 type StoredSignedPreKey = StoredPair & { keyId: number; signature: string };
@@ -161,13 +165,13 @@ export class VirtualClient {
     const dh = this.store.getJson<StoredPair>('identity-dh');
     if (!dh) throw new Error('not registered');
 
-    const { initPacket, sessionKeys } = x3dhInitiate({
+    const { initPacket, sessionKeys, theirSignedPreKeyPublicKey } = x3dhInitiate({
       bundle,
       peerUserId,
       identityDhPublicKey: dh.publicKey,
       identityDhSecretKey: decodeBase64(dh.privateKey),
     });
-    const session = createSessionFromX3DH({ peerUserId, rootKey: sessionKeys.rootKey, chainKey: sessionKeys.chainKey, isInitiator: true });
+    const session = initInitiatorSession({ peerUserId, sharedSecret: sessionKeys.rootKey, theirSignedPreKeyPublicKey });
     this.saveSession(peerUserId, session);
     return initPacket;
   }
@@ -188,7 +192,11 @@ export class VirtualClient {
     const sessionKeys = x3dhRespond({ initPacket, signedPreKeySecretKey: decodeBase64(spk.privateKey), oneTimePreKeySecretKey: opkSecret });
     if (initPacket.oneTimePreKeyId !== null) this.store.delete('opk:' + String(initPacket.oneTimePreKeyId));
 
-    const session = createSessionFromX3DH({ peerUserId, rootKey: sessionKeys.rootKey, chainKey: sessionKeys.chainKey, isInitiator: false });
+    const session = initResponderSession({
+      peerUserId,
+      sharedSecret: sessionKeys.rootKey,
+      signedPreKey: { publicKey: spk.publicKey, privateKey: spk.privateKey },
+    });
     this.saveSession(peerUserId, session);
   }
 

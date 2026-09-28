@@ -5,9 +5,9 @@ import { encodeBase64, decodeBase64 } from 'tweetnacl-util';
 import { describe, expect, it } from 'vitest';
 import { PROTOCOL_ERROR_CODES, ProtocolError, isProtocolError, protocolErrorCode } from '../src/errors';
 import { verifySignedPreKeyBundle } from '../src/handshake/bundle';
-import { applyDhRatchet } from '../src/ratchet/dh';
+import { dhRatchet } from '../src/ratchet/dh';
 import { ratchetDecrypt, ratchetEncrypt } from '../src/ratchet/message';
-import { createSessionFromX3DH } from '../src/ratchet/session';
+import { initInitiatorSession, initResponderSession } from '../src/ratchet/session';
 import type { RatchetSessionV2 } from '../src/types/session';
 
 function codeOf(fn: () => unknown): string | null {
@@ -27,13 +27,14 @@ function walk(dir: string): string[] {
   });
 }
 
-const rootKey = encodeBase64(new Uint8Array(32).fill(0xaa));
-const chainKey = encodeBase64(new Uint8Array(32).fill(0xbb));
+const sharedSecret = encodeBase64(new Uint8Array(32).fill(0xaa));
+const spkPair = nacl.box.keyPair.fromSecretKey(new Uint8Array(32).fill(0x44));
+const signedPreKey = { publicKey: encodeBase64(spkPair.publicKey), privateKey: encodeBase64(spkPair.secretKey) };
 
 function pair(): { a: RatchetSessionV2; b: RatchetSessionV2 } {
   return {
-    a: createSessionFromX3DH({ peerUserId: 'b', rootKey, chainKey, isInitiator: true }),
-    b: createSessionFromX3DH({ peerUserId: 'a', rootKey, chainKey, isInitiator: false }),
+    a: initInitiatorSession({ peerUserId: 'b', sharedSecret, theirSignedPreKeyPublicKey: signedPreKey.publicKey }),
+    b: initResponderSession({ peerUserId: 'a', sharedSecret, signedPreKey }),
   };
 }
 
@@ -90,17 +91,18 @@ describe('throw sites map to the taxonomy', () => {
 
     expect(codeOf(() => ratchetDecrypt(b, e0.envelope))).toBe('REPLAY_DETECTED');
     expect(codeOf(() => ratchetDecrypt(b, { ...ratchetEncrypt(a, 'x').envelope, nonce: encodeBase64(new Uint8Array(24)) }))).toBe('DECRYPT_FAILED');
-    expect(codeOf(() => ratchetEncrypt({ ...a, DHsPublicKey: null }, 'x'))).toBe('STORAGE_CORRUPTION');
+    expect(codeOf(() => ratchetEncrypt({ ...a, DHsPublicKey: null as unknown as string }, 'x'))).toBe('STORAGE_CORRUPTION');
+    expect(codeOf(() => ratchetEncrypt(pair().b, 'x')), 'responder before first receive').toBe('SESSION_RESET_REQUIRED');
     expect(codeOf(() => ratchetEncrypt(a, 'x', { nonce: new Uint8Array(3) }))).toBe('INVALID_KEY_LENGTH');
   });
 
   it('ratchet/dh.ts and ratchet/session.ts', () => {
     const { a } = pair();
     const peer = nacl.box.keyPair();
-    expect(codeOf(() => applyDhRatchet({ ...a, DHsPrivateKey: null }, encodeBase64(peer.publicKey)))).toBe('STORAGE_CORRUPTION');
-    expect(codeOf(() => applyDhRatchet(a, encodeBase64(new Uint8Array(31))))).toBe('INVALID_KEY_LENGTH');
-    expect(codeOf(() => applyDhRatchet({ ...a, DHsPrivateKey: encodeBase64(new Uint8Array(16)) }, encodeBase64(peer.publicKey)))).toBe('INVALID_KEY_LENGTH');
-    expect(codeOf(() => createSessionFromX3DH({ peerUserId: 'b', rootKey, chainKey: encodeBase64(new Uint8Array(16)), isInitiator: true }))).toBe('INVALID_KEY_LENGTH');
+    expect(codeOf(() => dhRatchet({ ...a, DHsPrivateKey: null as unknown as string }, encodeBase64(peer.publicKey)))).toBe('STORAGE_CORRUPTION');
+    expect(codeOf(() => dhRatchet(a, encodeBase64(new Uint8Array(31))))).toBe('INVALID_KEY_LENGTH');
+    expect(codeOf(() => dhRatchet({ ...a, DHsPrivateKey: encodeBase64(new Uint8Array(16)) }, encodeBase64(peer.publicKey)))).toBe('INVALID_KEY_LENGTH');
+    expect(codeOf(() => initInitiatorSession({ peerUserId: 'b', sharedSecret: encodeBase64(new Uint8Array(16)), theirSignedPreKeyPublicKey: signedPreKey.publicKey }))).toBe('INVALID_KEY_LENGTH');
   });
 
   it('handshake/bundle.ts', () => {
@@ -132,7 +134,7 @@ describe('throw sites map to the taxonomy', () => {
     }
     expect(isProtocolError(caught)).toBe(true);
     const ctx = JSON.stringify((caught as ProtocolError).context);
-    for (const secret of [a.chainKeySend, a.rootKey, b.chainKeyRecv, e.derivedKeys[0]!.messageKeyB64]) {
+    for (const secret of [a.chainKeySend!, a.rootKey, b.rootKey, e.derivedKeys[0]!.messageKeyB64]) {
       expect(ctx).not.toContain(secret);
       expect(ctx).not.toContain(Array.from(decodeBase64(secret), (x) => x.toString(16).padStart(2, '0')).join(''));
     }

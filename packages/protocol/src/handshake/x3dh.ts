@@ -63,7 +63,7 @@ export function x3dhInitiate(params: {
   identityDhPublicKey: string; // base64, ours
   identityDhSecretKey: Uint8Array; // ours
   ephemeral?: nacl.BoxKeyPair;
-}): { initPacket: X3DHInitPacket; sessionKeys: X3DHSessionKeys } {
+}): { initPacket: X3DHInitPacket; sessionKeys: X3DHSessionKeys; theirSignedPreKeyPublicKey: string } {
   const { bundle } = params;
   verifySignedPreKeyBundle(bundle);
   requireLength(params.identityDhSecretKey, 32, 'identityDhSecretKey');
@@ -93,6 +93,7 @@ export function x3dhInitiate(params: {
       initiatorIdentityDhPublicKey: params.identityDhPublicKey,
     },
     sessionKeys: deriveSessionKeys(dhParts),
+    theirSignedPreKeyPublicKey: bundle.signedPreKey.publicKey,
   };
 }
 

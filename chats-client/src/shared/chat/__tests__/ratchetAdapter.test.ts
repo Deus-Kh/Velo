@@ -1,7 +1,8 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Keychain from 'react-native-keychain';
+import nacl from 'tweetnacl';
 import { encodeBase64, decodeBase64 } from 'tweetnacl-util';
-import { createSessionFromX3DH, type RatchetSessionV2 } from '@velo/protocol';
+import { initInitiatorSession, initResponderSession, type RatchetSessionV2 } from '@velo/protocol';
 import { decryptAndPersist, encryptAndPersist } from '../ratchetAdapter';
 import { loadSession, saveSession } from '../../storage/sessionStore';
 import { getV2MessageKey } from '../../storage/v2MessageKeyStore';
@@ -29,13 +30,14 @@ jest.mock('react-native-keychain', () => {
 const ME = '65f000000000000000000001';
 const PEER = '65f000000000000000000002';
 
-const rootKey = encodeBase64(new Uint8Array(32).fill(0xaa));
-const chainKey = encodeBase64(new Uint8Array(32).fill(0xbb));
+const sharedSecret = encodeBase64(new Uint8Array(32).fill(0xaa));
 
 function sessions(): { a: RatchetSessionV2; b: RatchetSessionV2 } {
+  const spk = nacl.box.keyPair();
+  const signedPreKey = { publicKey: encodeBase64(spk.publicKey), privateKey: encodeBase64(spk.secretKey) };
   return {
-    a: createSessionFromX3DH({ peerUserId: PEER, rootKey, chainKey, isInitiator: true }),
-    b: createSessionFromX3DH({ peerUserId: ME, rootKey, chainKey, isInitiator: false }),
+    a: initInitiatorSession({ peerUserId: PEER, sharedSecret, theirSignedPreKeyPublicKey: signedPreKey.publicKey }),
+    b: initResponderSession({ peerUserId: ME, sharedSecret, signedPreKey }),
   };
 }
 
@@ -57,7 +59,7 @@ describe('ratchetAdapter', () => {
     const stored = await loadSession({ myUserId: ME, peerUserId: PEER });
     expect(stored).toEqual(r.updatedSession);
 
-    const mk = await getV2MessageKey({ myUserId: ME, peerUserId: PEER, direction: 'out', dhPub: a.DHsPublicKey!, n: 0 });
+    const mk = await getV2MessageKey({ myUserId: ME, peerUserId: PEER, direction: 'out', dhPub: a.DHsPublicKey, n: 0 });
     expect(mk).not.toBeNull();
     expect(decodeBase64(mk!).length).toBe(32);
   });
@@ -76,7 +78,7 @@ describe('ratchetAdapter', () => {
     b = d.updatedSession;
     expect(await loadSession({ myUserId: PEER, peerUserId: ME })).toEqual(b);
     for (const n of [0, 1, 2]) {
-      const mk = await getV2MessageKey({ myUserId: PEER, peerUserId: ME, direction: 'in', dhPub: a.DHsPublicKey!, n });
+      const mk = await getV2MessageKey({ myUserId: PEER, peerUserId: ME, direction: 'in', dhPub: a.DHsPublicKey, n });
       expect(mk).not.toBeNull();
     }
     expect(Object.keys(b.skippedKeys ?? {}).length).toBe(2);
@@ -117,5 +119,13 @@ describe('ratchetAdapter', () => {
     expect(await loadSession({ myUserId: PEER, peerUserId: ME })).toEqual(b);
     expect(await messageKeyRows()).toEqual(rows);
     expect(a.Ns).toBe(1);
+  });
+
+  it('a pre-T2.0 session on disk is discarded on load so the pair re-bootstraps', async () => {
+    const { a } = sessions();
+    const legacy = { ...a, v: 1, chainKeyRecv: a.chainKeySend } as unknown as RatchetSessionV2;
+    await saveSession({ myUserId: ME, peerUserId: PEER, session: legacy });
+    expect(await loadSession({ myUserId: ME, peerUserId: PEER })).toBeNull();
+    expect((await AsyncStorage.getAllKeys()).filter((k) => k.startsWith('session:'))).toEqual([]);
   });
 });

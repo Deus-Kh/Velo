@@ -16,7 +16,6 @@ const KNOWN_RED: Record<string, string> = {
   S13: 'tampered dhPub not HEADER_TAMPERED — T2.5',
   S14: 'tampered n / pn not HEADER_TAMPERED (pn accepted) — T2.5',
   S16: 'message-key archive unbounded — T2.14 (finding added by T2.4)',
-  S19: 'ratchet never advances — T2.0',
   S20: 'forged initPacket identity accepted — T2.13',
   S21: 'substituted bundle vs pin accepted — T2.13',
 };

@@ -1,6 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { AnySession, RatchetSessionV2 } from '@velo/protocol';
-import { createSessionFromX3DH as buildSessionFromX3DH } from '@velo/protocol';
+import { initInitiatorSession, initResponderSession } from '@velo/protocol';
 import { getOrCreateSessionMasterKey } from '../crypto/sessionMasterKey';
 import { looksSealed, openJson, sealJson } from './sealed';
 
@@ -8,15 +8,25 @@ function sessionKey(myUserId: string, peerUserId: string) {
   return `session:v2:${myUserId}:${peerUserId}`;
 }
 
+/**
+ * Only the T2.0 format (`v: 2`, standard bootstrap) is loadable. A `v: 1`
+ * session used the HKDF directional split and never ratcheted; it is
+ * discarded so the pair re-bootstraps on the next message.
+ */
 function isSessionShape(value: unknown): value is AnySession {
   const s = value as Partial<RatchetSessionV2> | null;
+  const keyOrNull = (k: unknown) => k === null || typeof k === 'string';
   return (
     !!s &&
     typeof s === 'object' &&
+    s.v === 2 &&
     s.protoVersion === 2 &&
     typeof s.rootKey === 'string' &&
-    typeof s.chainKeySend === 'string' &&
-    typeof s.chainKeyRecv === 'string' &&
+    keyOrNull(s.chainKeySend) &&
+    keyOrNull(s.chainKeyRecv) &&
+    typeof s.DHsPublicKey === 'string' &&
+    typeof s.DHsPrivateKey === 'string' &&
+    keyOrNull(s.DHrPublicKey) &&
     typeof s.Ns === 'number' &&
     typeof s.Nr === 'number'
   );
@@ -41,8 +51,11 @@ export async function loadSession(params: {
 
   if (looksSealed(raw)) {
     const session = openJson<AnySession>(mk, raw);
-    // Wrong key or tampered blob → treat as no session; the UI offers a reset.
-    return session && isSessionShape(session) ? session : null;
+    // Wrong key, tampered blob or a pre-T2.0 format → no session. A stale
+    // format is removed so the next message re-bootstraps cleanly.
+    if (session && isSessionShape(session)) return session;
+    if (session) await AsyncStorage.removeItem(storageKey);
+    return null;
   }
 
   // Legacy plaintext (pre-T1.3): migrate in place.
@@ -81,38 +94,41 @@ export async function deleteSession(params: {
 }
 
 /**
- * Create and persist a new v2 session from X3DH-derived keys.
- *
- * The session bytes come from the pure builder in @velo/protocol (T2.1);
- * this wrapper only resolves the initiator rule and saves the result.
- * When `isInitiator` is omitted a deterministic user-id comparison is used
- * so both peers agree without extra messages.
+ * Create and persist the initiator's session (T2.0, spec §8.1). The
+ * session bytes come from the pure initialiser in @velo/protocol; this
+ * wrapper only saves the result.
  */
-export async function createSessionFromX3DH(params: {
+export async function createInitiatorSession(params: {
   myUserId: string;
   peerUserId: string;
-  rootKey: string;  // base64
-  chainKey: string; // base64 (single X3DH chain key)
-  isInitiator?: boolean;
+  sharedSecret: string; // base64, X3DH root key
+  theirSignedPreKeyPublicKey: string; // base64, SPK_B from the bundle
 }): Promise<RatchetSessionV2> {
-  const isInitiator =
-    typeof params.isInitiator === 'boolean'
-      ? params.isInitiator
-      : String(params.myUserId) < String(params.peerUserId);
-
-  const session = buildSessionFromX3DH({
+  const session = initInitiatorSession({
     peerUserId: params.peerUserId,
-    rootKey: params.rootKey,
-    chainKey: params.chainKey,
-    isInitiator,
+    sharedSecret: params.sharedSecret,
+    theirSignedPreKeyPublicKey: params.theirSignedPreKeyPublicKey,
   });
+  await saveSession({ myUserId: params.myUserId, peerUserId: params.peerUserId, session });
+  return session;
+}
 
-  await saveSession({
-    myUserId: params.myUserId,
+/**
+ * Create and persist the responder's session (T2.0). The signed-prekey
+ * pair is copied into the session so a later rotation cannot break it.
+ */
+export async function createResponderSession(params: {
+  myUserId: string;
+  peerUserId: string;
+  sharedSecret: string; // base64, X3DH root key
+  signedPreKey: { publicKey: string; privateKey: string };
+}): Promise<RatchetSessionV2> {
+  const session = initResponderSession({
     peerUserId: params.peerUserId,
-    session,
+    sharedSecret: params.sharedSecret,
+    signedPreKey: params.signedPreKey,
   });
-
+  await saveSession({ myUserId: params.myUserId, peerUserId: params.peerUserId, session });
   return session;
 }
 
