@@ -8,7 +8,7 @@
  * Expected before fixes: pass (typed error). After: pass.
  */
 import { describe, expect, it } from 'vitest';
-import { alienHeader, makeWorld } from '../harness';
+import { alienHeader, makeWorld, type NewMessageDTO } from '../harness';
 
 describe('S18 message from an unknown epoch', () => {
   it('is rejected with a ProtocolError and the session is unchanged', () => {
@@ -19,7 +19,7 @@ describe('S18 message from an unknown epoch', () => {
     A!.send('B', 'a2');
 
     const before = B!.sessionState('A');
-    const genuine = network.log.at(-1)!.dto; // T3.1: delivered ciphertext is gone from the server; the wire log has it
+    const genuine = network.log.at(-1)!.dto as NewMessageDTO; // T3.1: delivered ciphertext is gone from the server; the wire log has it
     const alien = alienHeader(genuine); // T3.6: a header sealed under a key this session does not know
 
     const r = network.deliverNow('B', alien);

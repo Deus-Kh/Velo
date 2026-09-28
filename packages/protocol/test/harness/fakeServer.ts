@@ -1,6 +1,7 @@
 import type { PreKeyBundle } from '../../src/handshake/types';
 import type { X3DHInitPacket } from '../../src/handshake/x3dh';
 import type { MessageEnvelope } from '../../src/ratchet/message';
+import type { GroupMessage } from '../../src/senderkey/message';
 
 /**
  * Model of chats-server's key routes and message:send path, faithful to
@@ -50,6 +51,27 @@ export type NewMessageDTO = {
   seq: number;
 };
 
+/** T6.3: group:send from a client. */
+export type GroupSendDTO = { groupId: string; clientMessageId: string; createdAt: number; epoch: number; g1: GroupMessage };
+
+/** T6.3: one Message document per recipient (`conversationId = group:<id>`). What a member receives or syncs. */
+export type GroupCopyDTO = {
+  serverMessageId: string;
+  conversationId: string;
+  groupId: string;
+  epoch: number;
+  fromUserId: string;
+  toUserId: string;
+  g1: GroupMessage;
+  clientMessageId: string;
+  createdAt: number;
+  seq: number;
+};
+
+export type GroupChange = { type: 'created' | 'added' | 'removed' | 'left'; byUserId: string; userIds: string[] };
+export type ServerGroup = { groupId: string; name: string; members: string[]; epoch: number; lastSeq: number };
+export type GroupSendResult = { ok: true; serverMessageId: string; seq: number; epoch: number; copies: GroupCopyDTO[] } | { ok: false; code: 'FORBIDDEN' | 'STALE_EPOCH'; epoch?: number };
+
 export type MaliciousHooks = {
   substituteBundle?: (bundle: PreKeyBundle, requesterId: string) => PreKeyBundle;
   substituteIdentity?: (identity: ServerIdentity, requesterId: string, targetId: string) => ServerIdentity;
@@ -74,6 +96,10 @@ export class FakeServer {
   /** ConversationModel.lastSeq (T3.2). */
   private readonly lastSeq = new Map<string, number>();
   readonly bundleIssues: Array<{ requesterId: string; targetId: string; oneTimePreKeyId: number | null }> = [];
+  /** T6.3: groups and the undelivered per-recipient copies of group messages. */
+  readonly groups = new Map<string, ServerGroup>();
+  readonly groupCopies: GroupCopyDTO[] = [];
+  private groupCounter = 0;
   malicious: MaliciousHooks = {};
   /** Set by Network: routes an event to a client's socket room. */
   emitToUser: ((userId: string, event: string, payload: unknown) => void) | null = null;
@@ -225,6 +251,14 @@ export class FakeServer {
    * ack; the ciphertext is deleted and a receipt remains; the sender is told.
    */
   ackDelivered(userId: string, serverMessageId: string): 'delivered' | 'NOT_FOUND' | 'FORBIDDEN' {
+    const gi = this.groupCopies.findIndex((c) => c.serverMessageId === serverMessageId && c.toUserId === userId);
+    if (gi >= 0) {
+      const c = this.groupCopies[gi]!;
+      this.groupCopies.splice(gi, 1);
+      const deliveredAt = ++this.seq;
+      this.receipts.push({ serverMessageId, conversationId: c.conversationId, fromUserId: c.fromUserId, toUserId: c.toUserId, clientMessageId: c.clientMessageId, createdAt: c.createdAt, seq: c.seq, status: 'delivered', deliveredAt });
+      return 'delivered';
+    }
     const i = this.messages.findIndex((m) => m.serverMessageId === serverMessageId);
     if (i < 0) return this.receipts.some((r) => r.serverMessageId === serverMessageId && r.toUserId === userId) ? 'delivered' : 'NOT_FOUND';
     const m = this.messages[i]!;
@@ -238,6 +272,96 @@ export class FakeServer {
 
   /** Ciphertext the server holds for a conversation (any direction). Zero once everything is delivered. */
   heldCiphertextCount(conversationId: string): number {
-    return this.messages.filter((m) => m.conversationId === conversationId).length;
+    return this.messages.filter((m) => m.conversationId === conversationId).length + this.groupCopies.filter((c) => c.conversationId === conversationId).length;
+  }
+
+  // ───────── groups (T6.3) ─────────
+
+  static groupConversationId(groupId: string): string {
+    return 'group:' + groupId;
+  }
+
+  private requireGroup(groupId: string): ServerGroup {
+    const g = this.groups.get(groupId);
+    if (!g) throw new Error('no group ' + groupId);
+    return g;
+  }
+
+  private notifyGroupChanged(g: ServerGroup, change: GroupChange, alsoNotify: string[] = []): void {
+    const payload = { groupId: g.groupId, epoch: g.epoch, name: g.name, change };
+    for (const userId of new Set([...g.members, ...alsoNotify])) this.emitToUser?.(userId, 'group:changed', payload);
+  }
+
+  /** POST /groups: the creator is a member; epoch 1. */
+  createGroup(creatorId: string, memberIds: string[], name = 'group'): string {
+    const groupId = 'g-' + String(++this.groupCounter);
+    const members = [...new Set([creatorId, ...memberIds])];
+    const g: ServerGroup = { groupId, name, members, epoch: 1, lastSeq: 0 };
+    this.groups.set(groupId, g);
+    this.notifyGroupChanged(g, { type: 'created', byUserId: creatorId, userIds: members });
+    return groupId;
+  }
+
+  /** GET /groups/:id: the group as a member sees it; null (403) for anyone else. */
+  getGroup(requesterId: string, groupId: string): ServerGroup | null {
+    const g = this.groups.get(groupId);
+    if (!g || !g.members.includes(requesterId)) return null;
+    return { ...g, members: [...g.members] };
+  }
+
+  /** POST /groups/:id/members: epoch+1, everyone (the new members included) is told. */
+  addMembers(groupId: string, byUserId: string, userIds: string[]): ServerGroup {
+    const g = this.requireGroup(groupId);
+    if (!g.members.includes(byUserId)) throw new Error('not a member');
+    const added = userIds.filter((u) => !g.members.includes(u));
+    g.members.push(...added);
+    g.epoch += 1;
+    this.notifyGroupChanged(g, { type: 'added', byUserId, userIds: added });
+    return this.getGroup(byUserId, groupId)!;
+  }
+
+  /** DELETE /groups/:id/members/:userId or POST /groups/:id/leave: epoch+1, the departed member is told too. */
+  removeMember(groupId: string, byUserId: string, userId: string): void {
+    const g = this.requireGroup(groupId);
+    if (!g.members.includes(byUserId) || !g.members.includes(userId)) throw new Error('not a member');
+    g.members = g.members.filter((u) => u !== userId);
+    g.epoch += 1;
+    this.notifyGroupChanged(g, { type: byUserId === userId ? 'left' : 'removed', byUserId, userIds: [userId] }, [userId]);
+  }
+
+  /**
+   * group:send: membership and epoch checked, one seq from the group, one
+   * copy per other member. The copies are what `Network.sendGroup` delivers.
+   */
+  groupSend(fromUserId: string, dto: GroupSendDTO): GroupSendResult {
+    const g = this.groups.get(dto.groupId);
+    if (!g || !g.members.includes(fromUserId)) return { ok: false, code: 'FORBIDDEN' };
+    if (dto.epoch !== g.epoch) return { ok: false, code: 'STALE_EPOCH', epoch: g.epoch };
+    g.lastSeq += 1;
+    const serverMessageId = 'srv-' + String(++this.seq);
+    const copies: GroupCopyDTO[] = g.members
+      .filter((u) => u !== fromUserId)
+      .map((toUserId) => ({
+        serverMessageId: serverMessageId + ':' + toUserId,
+        conversationId: FakeServer.groupConversationId(g.groupId),
+        groupId: g.groupId,
+        epoch: g.epoch,
+        fromUserId,
+        toUserId,
+        g1: dto.g1,
+        clientMessageId: dto.clientMessageId,
+        createdAt: dto.createdAt,
+        seq: g.lastSeq,
+      }));
+    this.groupCopies.push(...copies);
+    return { ok: true, serverMessageId, seq: g.lastSeq, epoch: g.epoch, copies: copies.map((c) => ({ ...c })) };
+  }
+
+  /** GET /messages/undelivered?groupId=: group copies still held for `userId`, oldest first. */
+  undeliveredGroup(userId: string, groupId?: string): GroupCopyDTO[] {
+    return this.groupCopies
+      .filter((c) => c.toUserId === userId && (!groupId || c.groupId === groupId))
+      .sort((a, b) => a.seq - b.seq || a.serverMessageId.localeCompare(b.serverMessageId))
+      .map((c) => ({ ...c }));
   }
 }

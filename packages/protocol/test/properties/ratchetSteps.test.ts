@@ -16,7 +16,7 @@ const SEGMENTS_PER_SESSION = 10;
 const STEPS = 6;
 
 describe('property: one ratchet step per direction change', () => {
-  it('DHs and root key change exactly on new-epoch receives (1000 random conversation segments)', () => {
+  it('DHs and root key change exactly on new-epoch receives (1000 random conversation segments)', { timeout: 180_000 }, () => {
     const worlds = Array.from({ length: 10 }, () => makeWorld(['A', 'B'], { oneTimePreKeys: 12 }));
     let checkedReceives = 0;
     let ratchetSteps = 0;

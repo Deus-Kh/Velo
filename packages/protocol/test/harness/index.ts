@@ -4,10 +4,11 @@ import { Network } from './network';
 import { VirtualClient } from './virtualClient';
 
 export { FakeServer } from './fakeServer';
-export type { NewMessageDTO, SendMessageDTO, ServerIdentity } from './fakeServer';
+export type { GroupCopyDTO, GroupSendDTO, GroupSendResult, NewMessageDTO, SendMessageDTO, ServerIdentity } from './fakeServer';
 export { MemoryStore } from './memoryStore';
 export { Network } from './network';
-export type { DeliveryResult } from './network';
+export type { DeliveryResult, WireDTO } from './network';
+export { isGroupCopy } from './network';
 export { flipEncHeader, resealHeader, alienHeader } from './tamper';
 export { VirtualClient } from './virtualClient';
 

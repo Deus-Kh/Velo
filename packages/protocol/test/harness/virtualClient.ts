@@ -13,7 +13,9 @@ import { decodeContent, encodeContent, isControlContent, textContent, type Conte
 import type { AssociatedData } from '../../src/ratchet/envelope';
 import { glareWinner, initInitiatorSession, initResponderSession, sessionHasReceived } from '../../src/ratchet/session';
 import type { RatchetSessionV2 } from '../../src/types/session';
-import { FakeServer, type NewMessageDTO, type ServerIdentity } from './fakeServer';
+import { groupDecrypt, groupEncrypt } from '../../src/senderkey/message';
+import { createSenderKeyState, senderKeyDistributionMessage, senderKeyStateFromDistribution, type SenderKeyState } from '../../src/senderkey/state';
+import { FakeServer, type GroupCopyDTO, type GroupSendResult, type NewMessageDTO, type ServerIdentity } from './fakeServer';
 import { MemoryStore } from './memoryStore';
 import type { Network } from './network';
 
@@ -38,6 +40,10 @@ import type { Network } from './network';
 type StoredPair = { publicKey: string; privateKey: string };
 
 export type ReceivedMessage = { fromUserId: string; text: string; serverMessageId: string };
+export type ReceivedGroupMessage = { groupId: string; fromUserId: string; text: string; serverMessageId: string };
+/** storage/senderKeyStore.ts records, as the harness models them. */
+type OwnSenderKeyRecord = { epoch: number; state: SenderKeyState };
+type DistributionRecord = { epoch: number; keyId: number; userIds: string[] };
 
 /** storage/messageStore.ts record, as far as the harness models it. */
 export type StoredMessageRecord = { direction: 'in' | 'out'; text: string; createdAt: number; seq: number; serverMessageId: string };
@@ -56,6 +62,11 @@ export class VirtualClient {
   readonly sentHeaders = new Map<string, MessageHeader>();
   /** T6.2: control content received over pairwise sessions (sender-key distributions and requests). */
   readonly controlInbox: Array<{ fromUserId: string; content: Content; serverMessageId: string }> = [];
+  /** T6.4: group messages this client opened. */
+  readonly groupInbox: ReceivedGroupMessage[] = [];
+  /** T6.4: sender-key traffic this client sent over pairwise sessions (assertions only). */
+  readonly distributionsSent: Array<{ to: string; groupId: string; keyId: number }> = [];
+  readonly keyRequestsSent: Array<{ to: string; groupId: string }> = [];
 
   constructor(
     readonly userId: string,
@@ -165,13 +176,14 @@ export class VirtualClient {
     this.blockedPeers.delete(peerUserId);
   }
 
-  /** Socket events from the server (identity:changed). */
+  /** Socket events from the server (identity:changed, group:changed). */
   onEvent(event: string, payload: unknown): void {
     if (event === 'identity:changed') {
       const peer = (payload as { userId: string }).userId;
       this.identityChanges.push(peer);
       this.blockedPeers.add(peer);
     }
+    if (event === 'group:changed') this.onGroupChanged(payload as { groupId: string; epoch: number; change: { type: string; userIds: string[] } });
   }
 
   trustedIdentity(peerUserId: string): ServerIdentity | null {
@@ -420,6 +432,7 @@ export class VirtualClient {
     const content = decodeContent(plaintext);
     if (isControlContent(content)) {
       this.controlInbox.push({ fromUserId: peerUserId, content, serverMessageId: dto.serverMessageId });
+      this.handleControl(peerUserId, content); // T6.4: a member's key is stored; a request is answered
       this.server.ackDelivered(this.userId, dto.serverMessageId);
       return plaintext;
     }
@@ -450,6 +463,193 @@ export class VirtualClient {
       }
     }
     return this.storedMessages(peerUserId).map((m) => ({ mine: m.direction === 'out', text: m.text }));
+  }
+
+  // ───────── groups (T6.4 / T6.5): chat/groupKeys.ts + chat/groupMessaging.ts ─────────
+
+  private ownKeyRecord(groupId: string): OwnSenderKeyRecord | null {
+    return this.store.getJson<OwnSenderKeyRecord>('sk-own:' + groupId);
+  }
+
+  /** Our sender-key state for the group (null before the first send or change notice). */
+  ownSenderKey(groupId: string): SenderKeyState | null {
+    return this.ownKeyRecord(groupId)?.state ?? null;
+  }
+
+  /** A member's state as we hold it (null = SENDER_KEY_MISSING on its next message). */
+  peerSenderKey(groupId: string, userId: string): SenderKeyState | null {
+    return this.store.getJson<SenderKeyState>('sk-peer:' + groupId + ':' + userId);
+  }
+
+  private distribution(groupId: string): DistributionRecord | null {
+    return this.store.getJson<DistributionRecord>('sk-dist:' + groupId);
+  }
+
+  /** groupKeys.ensureOwnSenderKey: one key per membership epoch; a new epoch is a fresh keyId with nobody holding it yet. */
+  private ensureOwnSenderKey(groupId: string, epoch: number): SenderKeyState {
+    const existing = this.ownKeyRecord(groupId);
+    if (existing && existing.epoch === epoch) return existing.state;
+    const state = createSenderKeyState();
+    this.store.setJson('sk-own:' + groupId, { epoch, state });
+    this.store.setJson('sk-dist:' + groupId, { epoch, keyId: state.keyId, userIds: [] });
+    return state;
+  }
+
+  private sendDistribution(groupId: string, state: SenderKeyState, to: string): void {
+    this.sendContent(to, { v: 1, kind: 'skdm', groupId, skdm: senderKeyDistributionMessage(state) });
+    this.distributionsSent.push({ to, groupId, keyId: state.keyId });
+  }
+
+  /** groupKeys.distributeSenderKey: our current key to every member who does not have it yet. */
+  distributeSenderKey(groupId: string): string[] {
+    const group = this.server.getGroup(this.userId, groupId);
+    if (!group) return [];
+    const state = this.ensureOwnSenderKey(groupId, group.epoch);
+    const dist = this.distribution(groupId);
+    const have = dist && dist.epoch === group.epoch && dist.keyId === state.keyId ? new Set(dist.userIds) : new Set<string>();
+    const lacking = group.members.filter((u) => u !== this.userId && !have.has(u));
+    for (const to of lacking) this.sendDistribution(groupId, state, to);
+    this.store.setJson('sk-dist:' + groupId, { epoch: group.epoch, keyId: state.keyId, userIds: [...have, ...lacking] });
+    return lacking;
+  }
+
+  /** groupKeys.handleControlContent: keys from members only; a request is answered with our key to that member. */
+  private handleControl(fromUserId: string, content: Content): void {
+    if (content.kind === 'text') return;
+    const group = this.server.getGroup(this.userId, content.groupId);
+    if (!group || !group.members.includes(fromUserId)) return; // not a member (any more): ignored
+    if (content.kind === 'skdm') {
+      this.store.setJson('sk-peer:' + content.groupId + ':' + fromUserId, senderKeyStateFromDistribution(content.skdm));
+      return;
+    }
+    const state = this.ensureOwnSenderKey(group.groupId, group.epoch);
+    this.sendDistribution(group.groupId, state, fromUserId);
+    const dist = this.distribution(group.groupId);
+    const userIds = new Set(dist && dist.epoch === group.epoch && dist.keyId === state.keyId ? dist.userIds : []);
+    userIds.add(fromUserId);
+    this.store.setJson('sk-dist:' + group.groupId, { epoch: group.epoch, keyId: state.keyId, userIds: [...userIds] });
+  }
+
+  /** T6.5: everything the device holds for a group (removed, left, or the group is gone). */
+  private wipeGroupKeys(groupId: string): void {
+    this.store.delete('sk-own:' + groupId);
+    this.store.delete('sk-dist:' + groupId);
+    for (const k of this.store.keys('sk-peer:' + groupId + ':')) this.store.delete(k);
+  }
+
+  /** ChatListScreen / useGroupChat on group:changed: rotate for the new epoch, forget departed members, redistribute; or wipe if we are out. */
+  private onGroupChanged(evt: { groupId: string; epoch: number; change: { type: string; userIds: string[] } }): void {
+    const gone = (evt.change.type === 'removed' || evt.change.type === 'left') && evt.change.userIds.includes(this.userId);
+    const group = gone ? null : this.server.getGroup(this.userId, evt.groupId);
+    if (!group) {
+      this.wipeGroupKeys(evt.groupId);
+      return;
+    }
+    for (const k of this.store.keys('sk-peer:' + evt.groupId + ':')) {
+      const member = k.slice(('sk-peer:' + evt.groupId + ':').length);
+      if (!group.members.includes(member)) this.store.delete(k);
+    }
+    this.ensureOwnSenderKey(evt.groupId, group.epoch);
+    this.distributeSenderKey(evt.groupId);
+  }
+
+  /** POST /groups: create; every member (us included) learns of it and distributes its key. */
+  createGroup(memberIds: string[], name = 'group'): string {
+    return this.server.createGroup(this.userId, memberIds, name);
+  }
+
+  addMembers(groupId: string, userIds: string[]): void {
+    this.server.addMembers(groupId, this.userId, userIds);
+  }
+
+  removeMember(groupId: string, userId: string): void {
+    this.server.removeMember(groupId, this.userId, userId);
+  }
+
+  leaveGroup(groupId: string): void {
+    this.server.removeMember(groupId, this.userId, this.userId);
+  }
+
+  /** groupMessaging.sendGroupMessage: distribute to whoever lacks our key, encrypt, group:send, store locally. */
+  sendGroup(groupId: string, text: string): GroupSendResult {
+    if (!this.network) throw new Error('client not attached to a network');
+    const group = this.server.getGroup(this.userId, groupId);
+    if (!group) throw new Error(this.userId + ' is not a member of ' + groupId);
+    this.distributeSenderKey(groupId);
+    const state = this.ensureOwnSenderKey(groupId, group.epoch);
+    const step = groupEncrypt(state, text, { groupId, senderUserId: this.userId });
+    this.store.setJson('sk-own:' + groupId, { epoch: group.epoch, state: step.state });
+    this.msgCounter += 1;
+    const clientMessageId = this.userId + '-' + randomUUID();
+    const createdAt = Date.now() + this.clockSkewMs + this.msgCounter;
+    const result = this.network.sendGroup(this.userId, { groupId, clientMessageId, createdAt, epoch: group.epoch, g1: step.message });
+    if (result.ok) this.storeMessage(FakeServer.groupConversationId(groupId), { direction: 'out', text, createdAt, seq: result.seq, serverMessageId: result.serverMessageId });
+    return result;
+  }
+
+  /**
+   * groupMessaging.ingestGroupItems for one live copy. Null = dropped (from a
+   * non-member). Throws like the client's decrypt path: SENDER_KEY_MISSING
+   * (after asking the member for its key), SENDER_KEY_STALE (same), a
+   * signature failure, replay, or an old iteration with no retained key.
+   */
+  receiveGroup(copy: GroupCopyDTO): string | null {
+    if (copy.fromUserId === this.userId) throw new Error('own copy must not be delivered to the harness client');
+    const group = this.server.getGroup(this.userId, copy.groupId);
+    if (!group) throw new ProtocolError('SENDER_KEY_MISSING', 'Not a member of this group: no keys held', { groupId: copy.groupId });
+    if (!group.members.includes(copy.fromUserId)) {
+      this.server.ackDelivered(this.userId, copy.serverMessageId); // dropped: a departed member's copy never lingers
+      return null;
+    }
+    const state = this.peerSenderKey(copy.groupId, copy.fromUserId);
+    if (!state) {
+      this.requestSenderKey(copy.groupId, copy.fromUserId);
+      throw new ProtocolError('SENDER_KEY_MISSING', 'No sender key for this member', { groupId: copy.groupId, fromUserId: copy.fromUserId });
+    }
+    let step;
+    try {
+      step = groupDecrypt(state, copy.g1, { groupId: copy.groupId, senderUserId: copy.fromUserId });
+    } catch (e) {
+      if (e instanceof ProtocolError && e.code === 'SENDER_KEY_STALE') this.requestSenderKey(copy.groupId, copy.fromUserId);
+      throw e;
+    }
+    this.store.setJson('sk-peer:' + copy.groupId + ':' + copy.fromUserId, step.state);
+    this.groupInbox.push({ groupId: copy.groupId, fromUserId: copy.fromUserId, text: step.plaintext, serverMessageId: copy.serverMessageId });
+    this.storeMessage(FakeServer.groupConversationId(copy.groupId), { direction: 'in', text: step.plaintext, createdAt: copy.createdAt, seq: copy.seq, serverMessageId: copy.serverMessageId });
+    this.server.ackDelivered(this.userId, copy.serverMessageId);
+    return step.plaintext;
+  }
+
+  private requestSenderKey(groupId: string, fromUserId: string): void {
+    this.keyRequestsSent.push({ to: fromUserId, groupId });
+    this.sendContent(fromUserId, { v: 1, kind: 'skdm-request', groupId });
+  }
+
+  /** useGroupChat open: the local store, then whatever the server still holds for us in the group. */
+  loadGroupHistory(groupId: string): Array<{ mine: boolean; from: string | null; text: string }> {
+    const conversationId = FakeServer.groupConversationId(groupId);
+    const stored = this.storedMessages(conversationId);
+    for (const copy of this.server.undeliveredGroup(this.userId, groupId)) {
+      if (stored.some((m) => m.serverMessageId === copy.serverMessageId)) {
+        this.server.ackDelivered(this.userId, copy.serverMessageId);
+        continue;
+      }
+      try {
+        this.receiveGroup(copy);
+      } catch {
+        /* warned, skipped, left on the server */
+      }
+    }
+    return this.storedMessages(conversationId).map((m) => ({
+      mine: m.direction === 'out',
+      from: m.direction === 'out' ? this.userId : (this.groupInbox.find((g) => g.serverMessageId === m.serverMessageId)?.fromUserId ?? null),
+      text: m.text,
+    }));
+  }
+
+  /** Locally stored group messages, in server order. */
+  groupMessages(groupId: string): string[] {
+    return this.storedMessages(FakeServer.groupConversationId(groupId)).map((m) => m.text);
   }
 
   // ───────── lifecycle ─────────

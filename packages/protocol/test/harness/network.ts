@@ -1,12 +1,20 @@
 import { isProtocolError, type ProtocolErrorCode } from '../../src/errors';
-import type { FakeServer, NewMessageDTO, SendMessageDTO } from './fakeServer';
+import type { FakeServer, GroupCopyDTO, GroupSendDTO, GroupSendResult, NewMessageDTO, SendMessageDTO } from './fakeServer';
 import type { VirtualClient } from './virtualClient';
 
+/** What travels: a pairwise message or (T6.3) one recipient's copy of a group message. */
+export type WireDTO = NewMessageDTO | GroupCopyDTO;
+
+export function isGroupCopy(dto: WireDTO): dto is GroupCopyDTO {
+  return 'g1' in dto;
+}
+
 export type DeliveryResult =
-  | { ok: true; to: string; dto: NewMessageDTO; text: string }
-  | { ok: false; to: string; dto: NewMessageDTO; error: unknown; code: ProtocolErrorCode | null };
+  | { ok: true; to: string; dto: WireDTO; text: string }
+  | { ok: false; to: string; dto: WireDTO; error: unknown; code: ProtocolErrorCode | null };
 
 export type Tamperer = (dto: NewMessageDTO) => NewMessageDTO | null;
+export type GroupTamperer = (copy: GroupCopyDTO) => GroupCopyDTO | null;
 
 /**
  * The wire between clients and the server. Delivery is immediate unless the
@@ -15,10 +23,11 @@ export type Tamperer = (dto: NewMessageDTO) => NewMessageDTO | null;
  */
 export class Network {
   private clients = new Map<string, VirtualClient>();
-  private queues = new Map<string, NewMessageDTO[]>();
+  private queues = new Map<string, WireDTO[]>();
   private held = new Set<string>();
   private partitioned = new Set<string>();
   private tamperers: Tamperer[] = [];
+  private groupTamperers: GroupTamperer[] = [];
   readonly log: DeliveryResult[] = [];
 
   constructor(readonly server: FakeServer) {
@@ -38,7 +47,7 @@ export class Network {
     return c;
   }
 
-  private queue(userId: string): NewMessageDTO[] {
+  private queue(userId: string): WireDTO[] {
     let q = this.queues.get(userId);
     if (!q) {
       q = [];
@@ -66,11 +75,29 @@ export class Network {
     return emitted;
   }
 
+  /** group:send from a client (T6.3): the server fans out one copy per member; each is delivered or queued like a pairwise message. */
+  sendGroup(fromUserId: string, dto: GroupSendDTO): GroupSendResult {
+    const result = this.server.groupSend(fromUserId, dto);
+    if (!result.ok) return result;
+    for (const copy of result.copies) {
+      let out: GroupCopyDTO | null = copy;
+      for (const t of this.groupTamperers) {
+        if (!out) break;
+        out = t(out);
+      }
+      if (!out) continue; // dropped on the wire
+      const to = out.toUserId;
+      if (this.held.has(to) || this.partitioned.has(to)) this.queue(to).push(out);
+      else this.deliverNow(to, out);
+    }
+    return result;
+  }
+
   /** Deliver one message to a client, recording the outcome instead of throwing. */
-  deliverNow(to: string, dto: NewMessageDTO): DeliveryResult {
+  deliverNow(to: string, dto: WireDTO): DeliveryResult {
     let result: DeliveryResult;
     try {
-      const text = this.client(to).receive(dto);
+      const text = isGroupCopy(dto) ? (this.client(to).receiveGroup(dto) ?? '') : this.client(to).receive(dto);
       result = { ok: true, to, dto, text };
     } catch (error) {
       result = { ok: false, to, dto, error, code: isProtocolError(error) ? error.code : null };
@@ -80,7 +107,7 @@ export class Network {
   }
 
   /** Deliver and throw on failure (for scenarios asserting an error). */
-  deliverOrThrow(to: string, dto: NewMessageDTO): string {
+  deliverOrThrow(to: string, dto: WireDTO): string {
     const r = this.deliverNow(to, dto);
     if (!r.ok) throw r.error;
     return r.text;
@@ -90,7 +117,7 @@ export class Network {
     this.held.add(userId);
   }
 
-  pending(userId: string): NewMessageDTO[] {
+  pending(userId: string): WireDTO[] {
     return [...this.queue(userId)];
   }
 
@@ -111,9 +138,9 @@ export class Network {
     return this.deliverNow(userId, dto!);
   }
 
-  reorder(userId: string, order: 'reverse' | number[] | ((q: NewMessageDTO[]) => NewMessageDTO[])): void {
+  reorder(userId: string, order: 'reverse' | number[] | ((q: WireDTO[]) => WireDTO[])): void {
     const q = this.queue(userId);
-    let next: NewMessageDTO[];
+    let next: WireDTO[];
     if (order === 'reverse') next = [...q].reverse();
     else if (typeof order === 'function') next = order([...q]);
     else next = order.map((i) => q[i]!);
@@ -123,10 +150,10 @@ export class Network {
   duplicate(userId: string, index = 0): void {
     const q = this.queue(userId);
     const dto = q[index];
-    if (dto) q.push({ ...dto, v4: { ...dto.v4 } });
+    if (dto) q.push(isGroupCopy(dto) ? { ...dto, g1: { ...dto.g1 } } : { ...dto, v4: { ...dto.v4 } });
   }
 
-  drop(userId: string, index = 0): NewMessageDTO | null {
+  drop(userId: string, index = 0): WireDTO | null {
     const q = this.queue(userId);
     const [dto] = q.splice(index, 1);
     return dto ?? null;
@@ -141,6 +168,14 @@ export class Network {
     this.tamperers.push(fn);
     return () => {
       this.tamperers = this.tamperers.filter((t) => t !== fn);
+    };
+  }
+
+  /** Install an on-path modifier for group copies; returns a remover. Return null to drop. */
+  tamperGroup(fn: GroupTamperer): () => void {
+    this.groupTamperers.push(fn);
+    return () => {
+      this.groupTamperers = this.groupTamperers.filter((t) => t !== fn);
     };
   }
 

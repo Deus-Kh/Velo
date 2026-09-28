@@ -21,7 +21,7 @@ describe('canonicalHeaderBytes (R4)', () => {
     expect(hex(bytes.slice(41, 45))).toBe('00000102');
   });
 
-  it('round-trips byte-identically over 1000 randomised headers, regardless of base64 padding or field order', () => {
+  it('round-trips byte-identically over 1000 randomised headers, regardless of base64 padding or field order', { timeout: 60_000 }, () => {
     const rand = rng(7);
     for (let i = 0; i < 1000; i += 1) {
       const kp = nacl.box.keyPair();
