@@ -33,6 +33,8 @@ export interface RatchetSessionV2 {
   skippedEpochOrder?: string[];
   /** The last PEER_EPOCH_HISTORY peer ratchet keys seen, oldest first: tells an evicted epoch (UNKNOWN_OLD_MESSAGE) from an unknown one. */
   peerEpochHistory?: string[];
+  /** T3.4: the last REPLAY_WINDOW consumed message ids (`dhPub:n`), oldest first. A second copy is REPLAY_DETECTED. */
+  recentlyReceived?: string[];
 
   DHsPublicKey: string; // our current ratchet key pair (base64 X25519)
   DHsPrivateKey: string;

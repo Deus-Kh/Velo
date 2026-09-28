@@ -6,7 +6,7 @@ import type { RatchetSessionV2 } from '../types/session';
 import { ProtocolError } from '../errors';
 import { openMessage, sealMessage, type AssociatedData, type MessageEnvelope } from './envelope';
 import type { MessageHeader } from './header';
-import { MAX_MESSAGE_NUMBER, MAX_SKIP_EPOCHS, MAX_SKIP_PER_STEP, MAX_SKIP_TOTAL } from './limits';
+import { MAX_MESSAGE_NUMBER, MAX_SKIP_EPOCHS, MAX_SKIP_PER_STEP, MAX_SKIP_TOTAL, REPLAY_WINDOW } from './limits';
 
 export type { MessageHeader } from './header';
 export type { MessageEnvelope, AssociatedData } from './envelope';
@@ -93,6 +93,12 @@ export function skippedKeyId(dhPub: string, n: number): string {
   return dhPub + ':' + String(n);
 }
 
+/** T3.4: the bounded replay window, oldest first. */
+function rememberReceived(session: RatchetSessionV2, id: string): string[] {
+  const list = [...(session.recentlyReceived ?? []), id];
+  return list.length > REPLAY_WINDOW ? list.slice(list.length - REPLAY_WINDOW) : list;
+}
+
 /**
  * Pure sending step. Synchronous, no I/O, never mutates `session`.
  * `ad` binds the envelope to the sender/receiver identity pair (T2.5).
@@ -153,11 +159,16 @@ export function ratchetDecrypt(session: RatchetSessionV2, envelope: MessageEnvel
     const plaintext = openMessage({ messageKey: decodeBase64(normalizeB64(skippedKey)), envelope, ad });
     delete retained[skippedId];
     return {
-      session: { ...session, skippedKeys: retained },
+      session: { ...session, skippedKeys: retained, recentlyReceived: rememberReceived(session, skippedId) },
       plaintext,
       derivedKeys: [{ direction: 'in', dhPub: incomingDhPub, n: targetN, messageKeyB64: skippedKey }],
       consumedSkippedKeyId: skippedId,
     };
+  }
+
+  // 1b. Explicit replay window (T3.4): a second copy of a consumed message, whatever its epoch.
+  if ((session.recentlyReceived ?? []).includes(skippedId)) {
+    throw new ProtocolError('REPLAY_DETECTED', 'Message already received', { n: targetN });
   }
 
   const derivedKeys: DerivedMessageKey[] = [];
@@ -188,9 +199,10 @@ export function ratchetDecrypt(session: RatchetSessionV2, envelope: MessageEnvel
     throw new ProtocolError('STORAGE_CORRUPTION', 'Session has no receiving chain after ratchet', { what: 'chainKeyRecv' });
   }
 
-  // An old counter on the current chain with no skipped key: consumed or never retained.
+  // An old counter on the current chain with no skipped key and outside the replay window:
+  // a skipped key that was evicted, or a copy older than the window. Refused, never derived.
   if (targetN < work.Nr) {
-    throw new ProtocolError('REPLAY_DETECTED', 'Replay or unknown old message', { n: targetN, nr: work.Nr });
+    throw new ProtocolError('UNKNOWN_OLD_MESSAGE', 'Old message whose key is no longer retained', { n: targetN, nr: work.Nr });
   }
 
   // 3–4. Derive forward to the target, retaining skipped keys (bounded per step, T2.6).
@@ -221,7 +233,7 @@ export function ratchetDecrypt(session: RatchetSessionV2, envelope: MessageEnvel
 
   // 6. Commit, then prune (bounded by epochs and total, T2.6).
   return {
-    session: pruneSkippedKeys({ ...work, chainKeyRecv: encodeBase64(ck), Nr: nr, skippedKeys: retained }),
+    session: pruneSkippedKeys({ ...work, chainKeyRecv: encodeBase64(ck), Nr: nr, skippedKeys: retained, recentlyReceived: rememberReceived(work, skippedId) }),
     plaintext,
     derivedKeys,
     consumedSkippedKeyId: null,

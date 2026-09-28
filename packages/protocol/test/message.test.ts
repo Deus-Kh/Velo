@@ -3,7 +3,7 @@ import { encodeBase64, decodeBase64 } from 'tweetnacl-util';
 import { describe, expect, it } from 'vitest';
 import { initInitiatorSession, initResponderSession } from '../src/ratchet/session';
 import { pruneSkippedKeys, ratchetDecrypt, ratchetEncrypt, skippedKeyId, type MessageEnvelope } from '../src/ratchet/message';
-import { MAX_MESSAGE_NUMBER, MAX_SKIP_EPOCHS, MAX_SKIP_PER_STEP, MAX_SKIP_TOTAL } from '../src/ratchet/limits';
+import { MAX_MESSAGE_NUMBER, MAX_SKIP_EPOCHS, MAX_SKIP_PER_STEP, MAX_SKIP_TOTAL, REPLAY_WINDOW } from '../src/ratchet/limits';
 import { decryptWithMessageKey, MAC_LENGTH, type AssociatedData } from '../src/ratchet/envelope';
 import type { RatchetSessionV2 } from '../src/types/session';
 import { protocolErrorCode } from '../src/errors';
@@ -216,12 +216,14 @@ describe('ratchetEncrypt / ratchetDecrypt', () => {
     let { a, b } = pair();
     // Epoch 0..k: in each of A's epochs one message is held back (n = 0), the next (n = 1) is delivered.
     const held: MessageEnvelope[] = [];
+    const seen: MessageEnvelope[] = [];
     for (let epoch = 0; epoch <= MAX_SKIP_EPOCHS + 1; epoch += 1) {
       const e0 = ratchetEncrypt(a, 'held-' + String(epoch), AB);
       a = e0.session;
       held.push(e0.envelope);
       const e1 = ratchetEncrypt(a, 'seen-' + String(epoch), AB);
       a = e1.session;
+      seen.push(e1.envelope);
       b = ratchetDecrypt(b, e1.envelope, AB).session; // skips n = 0 of this epoch
       const reply = ratchetEncrypt(b, 'r' + String(epoch), BA);
       b = reply.session;
@@ -237,6 +239,9 @@ describe('ratchetEncrypt / ratchetDecrypt', () => {
     // The oldest epochs were evicted: a known previous epoch without keys is UNKNOWN_OLD_MESSAGE, never a ratchet backwards.
     const before = snapshot(b);
     expect(codeOf(() => ratchetDecrypt(b, held[0]!, AB))).toBe('UNKNOWN_OLD_MESSAGE');
+    expect(b).toEqual(before);
+    // T3.4: a consumed message from that same evicted epoch is a replay, not an unknown old message.
+    expect(codeOf(() => ratchetDecrypt(b, seen[0]!, AB))).toBe('REPLAY_DETECTED');
     expect(b).toEqual(before);
     // A never-seen epoch key is still treated as new (S18): ratchet attempt, then DECRYPT_FAILED.
     const alien = { ...held[0]!, header: { ...held[0]!.header, dhPub: pairB64(0x99).publicKey } };
@@ -324,5 +329,42 @@ describe('ratchetEncrypt / ratchetDecrypt', () => {
     const { a } = pair();
     expect(codeOf(() => ratchetEncrypt({ ...a, DHsPublicKey: null as unknown as string }, 'x', AB))).toBe('STORAGE_CORRUPTION');
     expect(codeOf(() => ratchetEncrypt(a, 'x', { senderIdentityKey: encodeBase64(new Uint8Array(16)), receiverIdentityKey: IK_B }))).toBe('INVALID_KEY_LENGTH');
+  });
+
+  describe('replay window (T3.4)', () => {
+    it('remembers the last REPLAY_WINDOW consumed ids; beyond it a copy reads as UNKNOWN_OLD_MESSAGE, never derives, never mutates', () => {
+      let { a, b } = pair();
+      const first = ratchetEncrypt(a, 'first', AB);
+      a = first.session;
+      b = ratchetDecrypt(b, first.envelope, AB).session;
+      expect(b.recentlyReceived).toEqual([skippedKeyId(dhsA0.publicKey, 0)]);
+      expect(codeOf(() => ratchetDecrypt(b, first.envelope, AB))).toBe('REPLAY_DETECTED');
+
+      let last = first;
+      for (let i = 0; i < REPLAY_WINDOW; i += 1) {
+        last = ratchetEncrypt(a, 'm' + String(i), AB);
+        a = last.session;
+        b = ratchetDecrypt(b, last.envelope, AB).session;
+      }
+      expect(b.recentlyReceived!.length).toBe(REPLAY_WINDOW);
+      expect(b.recentlyReceived![0]).toBe(skippedKeyId(dhsA0.publicKey, 1)); // the first id fell out of the window
+
+      const before = snapshot(b);
+      expect(codeOf(() => ratchetDecrypt(b, last.envelope, AB))).toBe('REPLAY_DETECTED');
+      expect(codeOf(() => ratchetDecrypt(b, first.envelope, AB))).toBe('UNKNOWN_OLD_MESSAGE');
+      expect(b).toEqual(before);
+    });
+
+    it('a skipped key consumed out of order enters the window too', () => {
+      let { a, b } = pair();
+      const e0 = ratchetEncrypt(a, 'm0', AB);
+      a = e0.session;
+      const e1 = ratchetEncrypt(a, 'm1', AB);
+      a = e1.session;
+      b = ratchetDecrypt(b, e1.envelope, AB).session;
+      b = ratchetDecrypt(b, e0.envelope, AB).session; // skipped-key fast path
+      expect(b.recentlyReceived).toEqual([skippedKeyId(dhsA0.publicKey, 1), skippedKeyId(dhsA0.publicKey, 0)]);
+      expect(codeOf(() => ratchetDecrypt(b, e0.envelope, AB))).toBe('REPLAY_DETECTED');
+    });
   });
 });
