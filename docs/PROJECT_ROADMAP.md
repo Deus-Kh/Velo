@@ -129,7 +129,7 @@ What a user can actually do today: 1:1 text with replies, receipts, typing, pres
 | Encrypted local store | ✅ | ✅ | ✅ | ✅ sealed AsyncStorage records (T2.14, D7 = A; SQLite when search needs it) | done |
 | Delete-on-delivery server | ✅ | ✅ | ❌ | ✅ ciphertext deleted on the recipient's ack, receipts + 30-day TTL (T3.1) | done |
 | Multi-device (Sesame) | ✅ | ✅ | ✅ | ❌ | ❌ deferred, §10 |
-| Group E2EE (Sender Keys) | ✅ | ✅ | ❌ | ❌ | ✅ Phase 6' (per-user) |
+| Group E2EE (Sender Keys) | ✅ | ✅ | ❌ | ✅ per-user Sender Keys over pairwise sessions, rotation on every membership change (T6.1–T6.5, DEVIATION-9) | done (Phase 6'; three-device gate pending) |
 | Sealed sender | ✅ | ❌ | ❌ | ❌ | ❌ documented |
 | Private contact discovery | ✅ | ❌ | ❌ | ❌ | ❌ documented |
 | Key transparency | ✅ | ⚠️ | ❌ | ❌ | ❌ documented |
@@ -151,7 +151,7 @@ What a user can actually do today: 1:1 text with replies, receipts, typing, pres
 | Images / video / files / voice notes | ✅ | ❌ | ✅ Phase 8' |
 | Disappearing messages | ✅ | ❌ | ✅ Phase 7' |
 | Avatars / profiles | ✅ encrypted | ⚠️ initials only | ✅ Phase 7' |
-| Groups | ✅ | ❌ structurally impossible (2-member limit) | ✅ Phase 6' |
+| Groups | ✅ | ✅ create, add/remove/leave, roles, group chat screen, notifications (Phase 6') | done; media, disappearing, reactions per Phases 7'/8' |
 | Block / report | ✅ | ❌ | ✅ Phase 7' |
 | Account deletion | ✅ | ❌ | ✅ Phase 7' **(legally required)** |
 | Local history survives reinstall | ✅ backup/transfer | ❌ everything becomes `[Encrypted]` | ⚠️ local DB (T2.14); backup deferred |
@@ -465,6 +465,10 @@ Extraction happens in T2.1. Secrets (`*.pem`, `*.keystore`, service-account JSON
 **6' progress — T6.4 done 2026-09-28** (two commits): the client sends and receives group messages under Sender Keys; each member's key travels over the pairwise session, is stored sealed, and is requested when a message cannot be opened; group chat screen, create-group flow, members sheet, group rows in the chat list, group notifications. Next in order: T6.5 (rotation on membership change: already wired into the client key lifecycle; the task closes with tests and a harness check).
 
 **6' progress — T6.5 done 2026-09-28** (one commit): every membership change rotates each remaining member's sender key and redistributes to the current members only; a removed member's copies are dropped without a key request and its own device wipes the group's keys; stale copies wait for the new key. Next in order: T6.6 (harness scenarios G01–G06).
+
+**6' progress — T6.6 done 2026-09-28** (one commit): the harness has groups (server model, fan-out, on-path tampering, a client that mirrors the app's key lifecycle); G01–G06 green from the first run; the known-red registry pins 34 scenario files. Next in order: T6.7 (docs).
+
+**6' progress — T6.7 done 2026-09-28** (one commit): spec §8.2 (group wire format), §8.4, DEVIATION-9; the parity rows above; `architecture.md`. **Phase 6' is code-complete.** Remaining human step: the three-device gate (an E2EE group on three real Android devices; a removed member reads nothing after rotation). Next per §11: Phase 7' (product completeness) or the owner's call.
 
 **2b progress — T2.14 done 2026-09-28** (one commit, D7 = A): plaintext stored locally in sealed records, message keys never archived, history read from the device with the server asked only for newer messages, one-time migration of the old archive. **The known-red registry is empty: every scenario the harness owns is green.** Remaining in Phase 2: T2.12 (manual two-device checklist, owner).
 

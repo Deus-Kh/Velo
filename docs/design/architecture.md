@@ -32,10 +32,10 @@ is verifiable in the code paths named. Normative protocol detail lives in
 
 | Component | Where | Notes |
 |---|---|---|
-| Protocol core | `packages/protocol/src` | Pure TypeScript, no platform imports (lint-enforced). X3DH + Double Ratchet with header encryption, identity binding, safety numbers. Consumed by the app as source (Metro/Jest/tsconfig mappings), never published. |
-| App | `chats-client/src` | React Native 0.83 (Android; iOS parked). `screens/` render, `shared/chat` orchestrates (hook, incoming path, adapter, history sync), `shared/crypto` holds the I/O wrappers around the core, `shared/storage` the sealed stores, `shared/notifications` push. |
+| Protocol core | `packages/protocol/src` | Pure TypeScript, no platform imports (lint-enforced). X3DH + Double Ratchet with header encryption, identity binding, safety numbers; Sender Keys for groups and the content envelope that carries them (Phase 6'). Consumed by the app as source (Metro/Jest/tsconfig mappings), never published. |
+| App | `chats-client/src` | React Native 0.83 (Android; iOS parked). `screens/` render, `shared/chat` orchestrates (hook, incoming path, adapter, history sync; `groupKeys` / `groupMessaging` / `useGroupChat` for groups), `shared/crypto` holds the I/O wrappers around the core, `shared/storage` the sealed stores (sessions, messages, sender keys), `shared/notifications` push. |
 | Server | `chats-server/src` | Express 5 + socket.io 4, compiled to `dist/` (T4.1), run by systemd (T4.2). Relays and briefly stores ciphertext; never sees plaintext, counters or ratchet keys (wire v4). |
-| Stores | MongoDB, Redis | Mongo: users and public keys, undelivered ciphertext with TTL, receipts, refresh-token families, conversations. Redis: rate limits, login throttle, presence, socket.io adapter. |
+| Stores | MongoDB, Redis | Mongo: users and public keys, undelivered ciphertext with TTL (one copy per recipient for groups), receipts, refresh-token families, conversations, groups (members, roles, epoch, system feed). Redis: rate limits, login throttle, presence, socket.io adapter. |
 | Ops | `deploy/` | systemd units (server, backup timer), Caddyfile, Prometheus scrape + alerts, Grafana dashboard, host runbook. |
 | CI | `.github/workflows/ci.yml` | secret scan + gitleaks, protocol tests with a coverage gate, server tests against an in-memory MongoDB, client typecheck/lint/Jest/bundle, Android debug build. |
 
@@ -91,6 +91,20 @@ message decrypts; glare converges on the lower user id with a decrypt-only
 secondary session for in-flight messages; a peer's local reset is adopted
 when its new packet decrypts (T2.11).
 
+**Groups (Phase 6').** Per-user Sender Keys: each member keeps one
+symmetric chain and one Ed25519 signing key per group and membership
+epoch; a message is encrypted once under the sender's chain and signed
+over `v ‖ keyId ‖ iteration ‖ groupId ‖ senderUserId ‖ ciphertext`
+(`group v1`, spec §8.2). The state reaches every member as control
+content inside the pairwise Double Ratchet (`{kind:'skdm'}`), never
+through the server in the clear; a member lacking a key asks the sender
+(`skdm-request`). Every add, remove or leave increments the server's
+epoch; each remaining member then makes a fresh keyId and distributes it
+to the current members only, so a removed member reads nothing after the
+change and a new member nothing before it. Replay window, skip bounds and
+zeroization are the ratchet's. Forward secrecy per message, no
+post-compromise security inside an epoch (DEVIATION-9, as Signal).
+
 ## 4. Message path (send → deliver → delete)
 
 1. **Send** (`shared/socket/messaging.ts`): ensure a session (X3DH if none),
@@ -108,6 +122,14 @@ when its new packet decrypts (T2.11).
    a metadata-only receipt so the sender learns delivery/read even if it was
    offline; receipts expire with the TTL. Ordering everywhere is `seq`; the
    sender's clock is display only.
+5. **Groups** (`group:send`, `lib/groups.ts`): the same path with one Message
+   document per recipient (`g1`, `groupId`, `epoch`, `conversationId =
+   group:<id>`, one `seq` from the group), so delivery, receipts, ordering,
+   TTL and the push wake-up are unchanged; a stale epoch or a non-member is
+   refused before anything is stored. On the device, group copies never
+   enter the pairwise paths: `chat/groupMessaging.ts` decrypts under the
+   sender's stored key, stores under the `group:<id>` slot, acks, and asks
+   for a missing or stale key over the pairwise session.
 
 ## 5. Operations
 
@@ -130,8 +152,13 @@ when its new packet decrypts (T2.11).
 ## 6. Known limits (deliberate, recorded)
 
 - Android only; iOS parked (T1.16).
-- One device per account; no groups, media, calls, backup of history
-  (Phases 6'–8').
+- One device per account; no media, calls, backup of history (Phases
+  7'–8'). Groups: `deviceId` is always 0 in the distribution record, so
+  multi-device changes nothing in the format.
+- Groups: no post-compromise security inside a membership epoch; copies in
+  flight from a member removed before they are opened are lost; the server
+  learns the group's membership, sender and timing of every message
+  (DEVIATION-9).
 - Presence of a process that died reads as online for up to two minutes.
 - Zeroization is best effort in JavaScript (DEVIATION-8); the base64 keys
   inside a session record cannot be wiped.
