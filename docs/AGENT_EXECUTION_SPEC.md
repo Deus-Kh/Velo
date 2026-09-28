@@ -529,7 +529,7 @@ Target structure and migration map as in v1 T2.1 (`primitives/`, `ratchet/`, `ha
 ---
 
 ## T2.13 — Identity binding, initiator authentication, safety number
-**Tier** CORE · **Fixes** P0-9, P2-13 · **Est** 4d · **Depends** T2.0 · **Breaks handshake** (same v3 bump)
+**Tier** CORE · **Fixes** P0-9, P2-13 · **Est** 4d · **Depends** T2.0 · **Breaks handshake** (same v3 bump) · **Status:** done 2026-09-28 (five commits)
 
 ### Changes
 1. **Binding signature.** `identity/binding.ts`: `signIdentityBinding(ikSignPriv, ikDhPub) = ed25519.sign("velo-identity-binding-v1" || ikDhPub)`; `verifyIdentityBinding`. Client publishes it via `POST /keys/identity` (extended); server stores `identityBindingSignature`, returns it in the bundle and in new `GET /keys/identity/:userId` `{identitySignPublicKey, identityDhPublicKey, identityBindingSignature, identityChangedAt}`.
@@ -541,6 +541,8 @@ Target structure and migration map as in v1 T2.1 (`primitives/`, `ratchet/`, `ha
 7. Rewrite `docs/protocol/SESSION_ESTABLISHMENT_POLICY.md` for the new states: `unverified-first-contact`, `verified`, `identity-changed-blocked`.
 
 **Acceptance:** S20 and S21 pass with `IDENTITY_MISMATCH`; first contact pins silently; fingerprint KAT matches libsignal; a peer reinstall shows the warning and blocks until accepted; `grep -n "firstWithInitPacket" chats-server/src` empty; §8.5 gains `DEVIATION-5`.
+
+**Status 2026-09-28:** done as five commits (R2): (1) package primitives — `identity/binding.ts` (`signIdentityBinding` / `verifyIdentityBinding`, domain `velo-identity-binding-v1`), `identity/trust.ts` (`checkIdentity`, `requireIdentityMatch` = the single `IDENTITY_MISMATCH` throw site; a legacy signing-key-only pin matches on the signing key because the binding vouches for the DH key), `identity/fingerprint.ts` (libsignal numeric fingerprint; T2.15 fingerprint vector green; Velo feeds `IK_sign || IK_dh`, DEVIATION-5), `PreKeyBundle.identityBindingSignature` verified inside `x3dhInitiate`; client two-key pins (record v2) and the 60-digit safety number in `VerifyContactScreen`. (2) server — `POST /keys/identity` takes both keys + binding, verifies it (`lib/identityBinding.ts`), records `identityKeyHistory` / `identityChangedAt`, **purges the user's one-time and signed prekeys on change** (S10 finding) and emits `identity:changed` to conversation peers via `lib/realtime.ts`; `GET /keys/identity/:userId` returns both keys, binding and change time; the bundle carries the binding (404 `NO_IDENTITY_BINDING` without). (3) `firstWithInitPacket` synthesis removed from `setupSocket.ts` and the harness server. (4) enforcement — client `crypto/identityTrust.ts` (`enforcePinnedIdentity` on every bundle via `prekeyBundle.ts`, `authenticateInitiator` on every `initPacket` via `sessionBootstrap.ts`, `acceptNewIdentity`), bound identity uploaded at login (`auth.store.ts`); harness `VirtualClient` mirrors it; **S20, S21 and S10 green**. (5) UI/state — `useChatE2EE` gains `sessionHealth.status = 'identity_changed'` (from `IDENTITY_MISMATCH` on send, receive or history, or the `identity:changed` socket event), sending is refused in that state, `ChatScreen` shows the security-warning class (danger tone) with **Verify** and **Accept new identity**; `SESSION_ESTABLISHMENT_POLICY.md` §3 gains the identity states. Deviations: the `initPacket` still carries `initiatorIdentityDhPublicKey` (used only for the mismatch diagnostic, as the spec allows); the server verifies the binding with `tweetnacl` (approved set) so it never stores an inconsistent identity, although clients never rely on that; legacy `/keys/identity-dh` stays for rollout. Known-red is now S12, S13, S14, S16.
 
 ---
 
@@ -784,7 +786,7 @@ Canonical list in T2.4. Each scenario file states the checklist row it automates
 | `DEVIATION-2` | X3DH omits `DH(EK_A, IK_B)` | — | **Resolved by T2.9 (D2 = fix).** |
 | `DEVIATION-3` | Message keys retained 30 days for offline history | superseded by the local store | **Removed by T2.14** (fallback only if T2.14 slips) |
 | `DEVIATION-4` | Skipped keys bounded by count *and* epoch | DoS resistance with multi-epoch tolerance | Active after T2.7 |
-| `DEVIATION-5` | Two identity keys (Ed25519 signing + X25519 DH) bound by a signature, versus Signal's single Curve25519 identity with XEdDSA | avoids a new signature scheme; binding is verified on every bundle and `initPacket` | Active after T2.13 (D10) |
+| `DEVIATION-5` | Two identity keys (Ed25519 signing + X25519 DH) bound by a signature, versus Signal's single Curve25519 identity with XEdDSA; the safety number hashes `IK_sign || IK_dh` (64 bytes, no type byte) where libsignal hashes `0x05 || key` | avoids a new signature scheme; binding is verified on every bundle and `initPacket`; the fingerprint construction itself is libsignal's and is vector-tested with libsignal's key encoding | **Active since 2026-09-28 (T2.13, D10)** |
 | `DEVIATION-6` | Random 24-byte AEAD nonce instead of a KDF-derived nonce | XChaCha nonce space makes random nonces safe; simpler | Active after T2.5 — or removed if the Signal derivation is adopted for vector parity |
 
 ## 8.6 Glossary

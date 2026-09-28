@@ -24,7 +24,8 @@ import {
 } from '../storage/pendingMessageStore';
 
 import { deleteSession, loadSession } from '../storage/sessionStore';
-import type { ProtocolErrorCode, RatchetSessionV2 } from '@velo/protocol';
+import { protocolErrorCode, type ProtocolErrorCode, type RatchetSessionV2 } from '@velo/protocol';
+import { acceptNewIdentity as acceptNewIdentityForPair } from '../crypto/identityTrust';
 import { decryptAndPersist } from './ratchetAdapter';
 import { classifyPendingMessageError } from './protocolErrors';
 import { ensureV2SessionFromIncoming } from '../crypto/sessionBootstrap';
@@ -47,7 +48,9 @@ export type UIMessage = {
 
 export type SessionHealth =
   | { status: 'healthy'; reason?: undefined }
-  | { status: 'reset_required'; reason: string };
+  | { status: 'reset_required'; reason: string }
+  /** T2.13: the peer's identity no longer matches the pin. Sending is blocked until the user verifies or accepts. */
+  | { status: 'identity_changed'; reason: string };
 
 type HistoryItem = {
   serverMessageId?: string;
@@ -180,6 +183,7 @@ async function decryptHistoryBatch(
   v2SessionIn: RatchetSessionV2 | null,
   onSessionUpdated: (s: RatchetSessionV2) => void,
   onResetRequired: (reason: string) => void,
+  onIdentityChanged: (reason: string) => void,
   options?: {
     mode?: 'live' | 'stored_keys_only';
   },
@@ -227,7 +231,11 @@ async function decryptHistoryBatch(
                 v2Session = createdSession as RatchetSessionV2;
               }
             } catch (e) {
-              console.warn('Failed to bootstrap incoming v2 session from history:', e);
+              if (protocolErrorCode(e) === 'IDENTITY_MISMATCH') {
+                onIdentityChanged('initiator identity does not match the pinned identity');
+              } else {
+                console.warn('Failed to bootstrap incoming v2 session from history:', e);
+              }
             }
           }
 
@@ -359,10 +367,16 @@ export function useChatE2EE(peerUserId: string) {
   // ---------------------------------------------------------------------------
 
   const markResetRequiredRef = useRef<(reason: string) => void>(() => {});
+  const markIdentityChangedRef = useRef<(reason: string) => void>(() => {});
+  const sessionHealthRef = useRef<SessionHealth>({ status: 'healthy' });
 
   useEffect(() => {
     messagesRef.current = messages;
   }, [messages]);
+
+  useEffect(() => {
+    sessionHealthRef.current = sessionHealth;
+  }, [sessionHealth]);
 
   const mergePendingMessages = useCallback((items: PendingMessageRecord[]) => {
     setMessages((prev) => {
@@ -464,6 +478,9 @@ export function useChatE2EE(peerUserId: string) {
       );
     } catch (e) {
       console.warn('Send failed:', e);
+      if (protocolErrorCode(e) === 'IDENTITY_MISMATCH') {
+        markIdentityChangedRef.current('peer identity does not match the pinned identity');
+      }
 
       const currentPending = (await listPendingMessages(String(myUserId))).find(
         (item) => item.clientMessageId === params.clientMessageId
@@ -533,6 +550,12 @@ export function useChatE2EE(peerUserId: string) {
     };
     markResetRequiredRef.current = markResetRequired;
 
+    const markIdentityChanged = (reason: string) => {
+      if (cancelled) return;
+      setSessionHealth((prev) => (prev.status === 'identity_changed' ? prev : { status: 'identity_changed', reason }));
+    };
+    markIdentityChangedRef.current = markIdentityChanged;
+
     setSessionHealth({ status: 'healthy' });
     oldestCreatedAtRef.current = null;
     v2SessionRef.current = null;
@@ -570,6 +593,7 @@ export function useChatE2EE(peerUserId: string) {
           v2SessionRef.current,
           (updated) => { v2SessionRef.current = updated; },
           markResetRequired,
+          markIdentityChanged,
         );
 
         if (!cancelled) {
@@ -618,7 +642,9 @@ export function useChatE2EE(peerUserId: string) {
           {
             peerUserId,
             onFailure: (reason, code) => {
-              if (isPolicyBrokenSessionReason(reason, code)) {
+              if (code === 'IDENTITY_MISMATCH') {
+                markIdentityChangedRef.current(reason);
+              } else if (isPolicyBrokenSessionReason(reason, code)) {
                 markResetRequiredRef.current(reason);
               }
             },
@@ -676,13 +702,22 @@ export function useChatE2EE(peerUserId: string) {
             }
           };
 
+          // T2.13: the server reports a peer's identity change; block until the user decides.
+          const identityHandler = (evt: { userId?: string }) => {
+            if (String(evt?.userId) === String(peerUserId)) {
+              markIdentityChangedRef.current('the server reported that this contact\u2019s identity changed');
+            }
+          };
+
           socket.on('connect', handleSocketConnect);
           socket.on('disconnect', handleSocketDisconnect);
           socket.on('message:status-changed', statusHandler);
+          socket.on('identity:changed', identityHandler);
           statusUnsubRef.current = () => {
             socket.off('connect', handleSocketConnect);
             socket.off('disconnect', handleSocketDisconnect);
             socket.off('message:status-changed', statusHandler);
+            socket.off('identity:changed', identityHandler);
           };
         } catch (e) {
           console.warn('Failed to setup message:status-changed listener:', (e as any)?.message);
@@ -745,6 +780,7 @@ export function useChatE2EE(peerUserId: string) {
         null,
         () => {},
         markResetRequiredRef.current,
+        markIdentityChangedRef.current,
         { mode: 'stored_keys_only' },
       );
 
@@ -771,6 +807,8 @@ export function useChatE2EE(peerUserId: string) {
   
 
   async function send(text: string, options?: { replyTo?: ReplyReference | null }) {
+    // Sending is blocked while the peer's identity is unverified (T2.13, §8.3).
+    if (sessionHealthRef.current.status === 'identity_changed') return;
     await sendAttempt({
       text,
       clientMessageId: genId(),
@@ -812,6 +850,21 @@ export function useChatE2EE(peerUserId: string) {
     setReloadToken((x) => x + 1);
   }
 
+  // ---------------------------------------------------------------------------
+  // Accept a changed identity (T2.13): re-pin from the server, drop the
+  // session, reload so the next message re-bootstraps on the new keys.
+  // ---------------------------------------------------------------------------
+
+  async function acceptNewIdentity() {
+    if (!myUserId) return;
+    await acceptNewIdentityForPair({ myUserId: String(myUserId), peerUserId });
+    v2SessionRef.current = null;
+    oldestCreatedAtRef.current = null;
+    setSessionHealth({ status: 'healthy' });
+    setMessages([]);
+    setReloadToken((x) => x + 1);
+  }
+
   return {
     socketReady,
     historyLoading,
@@ -823,5 +876,6 @@ export function useChatE2EE(peerUserId: string) {
     retryMessage,
     loadMore,
     resetSession,
+    acceptNewIdentity,
   };
 }

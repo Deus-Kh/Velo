@@ -117,13 +117,13 @@ What a user can actually do today: 1:1 text with replies, receipts, typing, pres
 |---|---|---|---|---|---|
 | E2EE 1:1 by default | ✅ | ✅ | ❌ | ✅ | ✅ |
 | X3DH / async handshake | ✅ | ✅ | ✅ (secret chats) | ⚠️ 3 of 4 DHs | ✅ T2.9 |
-| Initiator authentication | ✅ | ✅ | ✅ | ❌ | ✅ T2.13 |
+| Initiator authentication | ✅ | ✅ | ✅ | ✅ since T2.13 | done |
 | Double Ratchet (DH step) | ✅ | ✅ | ❌ | ❌ never fires | ✅ T2.0 |
 | Post-compromise security | ✅ | ✅ | ❌ | ❌ | ✅ T2.0 |
 | AEAD with header + identity AD | ✅ | ✅ | ✅ | ❌ | ✅ T2.5 |
 | Header encryption | ✅ | ✅ | — | ❌ | ⚠️ only if on schedule (T3.6) |
 | Forward secrecy at rest | ✅ | ✅ | ⚠️ | ❌ keys kept forever | ✅ T2.14 |
-| Safety numbers | ✅ | ✅ | ✅ | ⚠️ display-only, omits DH key | ✅ T2.13 |
+| Safety numbers | ✅ | ✅ | ✅ | ✅ libsignal numeric fingerprint over both keys, enforced (T2.13) | done |
 | Signed prekey rotation | ✅ | ✅ | — | ❌ | ✅ T2.10 |
 | Prekey drain protection | ✅ | ✅ | — | ❌ | ✅ T1.4 |
 | Encrypted local store | ✅ | ✅ | ✅ | ❌ none | ✅ T2.14 |
@@ -227,7 +227,7 @@ Fix: ownership checks, server-derived conversation ids, relationship check for p
 **P0-8 · No password policy at registration; mismatched client rules** `[CORE]` → T1.8
 **Status 2026-09-25:** resolved by T1.8. Shared zod validation module for every mutating route (auth, profile, push token, all key uploads with exact decoded key lengths); password policy = min 10 chars + zxcvbn score ≥ 3 against the user's own identifiers + HaveIBeenPwned k-anonymity breach check that fails open; usernames restricted to a safe alphabet and unique case-insensitively at the database level; field-level `400 VALIDATION` responses rendered next to the inputs; strength meter on the registration form. Verified by 79 server tests including register/login/change-password routes against an in-memory MongoDB.
 
-**P0-9 · Initiator identity unauthenticated; safety number omits the DH identity key; bundle trust unpinned** `[CORE]` *(new)*
+**P0-9 · Initiator identity unauthenticated; safety number omits the DH identity key; bundle trust unpinned** `[CORE]` *(new)* — **fixed 2026-09-28 (T2.13)**
 `x3dh.ts:130-133` uses the initiator's identity key straight from the `initPacket`. `prekeyBundleVerify.ts:5-15` verifies the SPK with the identity key from the same response. `fingerprint.ts:14-21` hashes only the Ed25519 keys; nothing binds Ed25519 to X25519. The trust store is never read by any crypto path. Result: the server, or any on-path attacker while P0-2 is open, can impersonate any sender to any victim and can swap the X25519 identity key without changing the safety number. `setupSocket.ts:481-495` (server attaches stored `initPacket`s to later messages) turns this into a first-class injection point.
 Fix: identity binding signature (Ed25519 over the X25519 identity key), pinned identities enforced on both bundle fetch and every `initPacket`, safety number over both keys using libsignal's fingerprint construction, `IDENTITY_MISMATCH` blocks the chat until acknowledged, server records identity-key history and notifies peers. → T2.13
 
@@ -421,6 +421,8 @@ Extraction happens in T2.1. Secrets (`*.pem`, `*.keystore`, service-account JSON
 **T2.1 — done 2026-09-28.** `packages/protocol` (`@velo/protocol`) holds `primitives/{base64,encoding,utf8,kdf}`, `ratchet/{chain,root,dh,session}`, `handshake/{bundle,types}`, `identity/fingerprint`, `types/session` — all `git mv`, zero behaviour change, chain/root/session KDF outputs frozen as vectors (R8). `createSessionFromX3DH` split: pure builder in the package, persistence wrapper in the client. Consumed as TypeScript source without npm workspaces: `tsconfig` `paths`, Metro `extraNodeModules` + a `resolveRequest` that pins the package's shared deps (`tweetnacl`, `tweetnacl-util`, `@noble/hashes`, `@babel/runtime`) to the app's copies (bundle source map shows one tweetnacl), Jest `moduleNameMapper`. Purity enforced twice: package `.eslintrc.js` `no-restricted-imports` and a vitest test that also forbids `await`. Still in the client after T2.1: `messageV2.ts`, `x3dh.ts`, `prekeyBundle.ts`, `sessionBootstrap.ts`, key stores.
 
 **T2.2 — done 2026-09-28.** `ratchet/message.ts` in the package: `ratchetEncrypt(session, plaintext)` and `ratchetDecrypt(session, envelope)` are synchronous, never mutate the input, and return the next session, the derived message keys and (on decrypt) the consumed skipped-key id. The only client touchpoint is `chat/ratchetAdapter.ts`, which runs the pure step and persists keys first, then the session, or nothing at all on throw (R7). `crypto/messageV2.ts` deleted. Behaviour pinned with frozen vectors; one deliberate change: message keys derived during a decrypt that then fails authentication are no longer archived (they were written before `secretbox.open` ran). The `ad` argument arrives with the AEAD in T2.5.
+
+**2b progress — T2.13 done 2026-09-28** (five commits: binding + fingerprint primitives → server identity change handling and prekey purge → initPacket synthesis removed → pin enforcement on both sides → identity-changed state and UI). S20, S21 and S10 green; libsignal fingerprint vector green; a reinstalled peer is blocked with the security-warning banner until the user verifies or accepts. Next in order: T2.5.
 
 **2b progress — T2.0 done 2026-09-28** (four commits: standard bootstrap → keep skipped keys (T2.7 core) → drain to `pn` (T2.8 core) → `WhisperRatchet`). The ratchet ratchets: S19 and S05 green, one-ratchet-step-per-direction-change property over 1000 random conversation segments, libsignal root-KDF vector green. Pre-T2.0 device sessions are discarded on load and re-bootstrap on the next message. The `protoVersion` bump to 3 lands with T2.5. Next in order: T2.13.
 

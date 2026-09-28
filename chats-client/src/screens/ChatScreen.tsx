@@ -23,7 +23,7 @@ import MessageBubble from '../components/MessageBubble';
 import StatusChip from '../components/StatusChip';
 import { conversationsApi } from '../shared/api/conversations.api';
 import { messagesApi } from '../shared/api/messages.api';
-import { useChatE2EE } from '../shared/chat/useChatE2EE';
+import { useChatE2EE, type SessionHealth } from '../shared/chat/useChatE2EE';
 import type { ReplyReference, UIMessage } from '../shared/chat/types';
 import { getSocket } from '../shared/socket/socket';
 import { useAppearanceStore } from '../store/appearance.store';
@@ -127,8 +127,16 @@ function getHeaderPresenceMeta({
   peerTyping: boolean;
   peerPresence: PresenceSnapshot;
   socketReady: boolean;
-  sessionHealth: { status: 'healthy' | 'reset_required' };
+  sessionHealth: SessionHealth;
 }): HeaderPresenceMeta {
+  if (sessionHealth.status === 'identity_changed') {
+    return {
+      subtitle: 'Safety number changed',
+      pillLabel: 'Verify identity',
+      pillTone: 'warning',
+    };
+  }
+
   if (sessionHealth.status === 'reset_required') {
     return {
       subtitle: 'Secure session needs reset',
@@ -207,18 +215,25 @@ function InlineChatNotice({
   tone,
   actionLabel,
   onAction,
+  secondaryActionLabel,
+  onSecondaryAction,
 }: {
   title: string;
   body: string;
-  tone: 'warning' | 'info';
+  tone: 'warning' | 'info' | 'danger';
   actionLabel?: string;
   onAction?: () => void;
+  secondaryActionLabel?: string;
+  onSecondaryAction?: () => void;
 }) {
+  // 'danger' is the security-warning class (spec §8.3): it must not look like a technical error.
   const toneClasses =
-    tone === 'warning'
-      ? 'border-warning/40 bg-warning/10'
-      : 'border-border bg-surface-elevated/88';
-  const titleTone = tone === 'warning' ? 'text-warning' : 'text-text';
+    tone === 'danger'
+      ? 'border-danger/50 bg-danger/10'
+      : tone === 'warning'
+        ? 'border-warning/40 bg-warning/10'
+        : 'border-border bg-surface-elevated/88';
+  const titleTone = tone === 'danger' ? 'text-danger' : tone === 'warning' ? 'text-warning' : 'text-text';
 
   return (
     <View className={`mx-3 mb-2 rounded-[20px] border px-4 py-3 ${toneClasses}`}>
@@ -230,6 +245,14 @@ function InlineChatNotice({
           className="mt-3 self-start rounded-full border border-border bg-background-alt/60 px-3.5 py-2 active:opacity-80"
         >
           <Text className="text-[13px] font-semibold text-text">{actionLabel}</Text>
+        </Pressable>
+      ) : null}
+      {secondaryActionLabel && onSecondaryAction ? (
+        <Pressable
+          onPress={onSecondaryAction}
+          className="mt-2 self-start rounded-full border border-border bg-background-alt/60 px-3.5 py-2 active:opacity-80"
+        >
+          <Text className="text-[13px] font-semibold text-text">{secondaryActionLabel}</Text>
         </Pressable>
       ) : null}
     </View>
@@ -322,6 +345,7 @@ const { keyboardShown , keyboardHeight } = useKeyboard()
     retryMessage,
     loadMore,
     resetSession,
+    acceptNewIdentity,
   } = useChatE2EE(peerUserId);
 
   const [text, setText] = useState('');
@@ -363,7 +387,9 @@ const { keyboardShown , keyboardHeight } = useKeyboard()
   const composerContainerMinHeightClass =
     interfaceDensity === 'compact' ? 'min-h-[44px]' : 'min-h-[48px]';
   const composerDisabledReason =
-    sessionHealth.status === 'reset_required'
+    sessionHealth.status === 'identity_changed'
+      ? 'Safety number changed. Verify or accept the new identity to send.'
+      : sessionHealth.status === 'reset_required'
       ? 'Reset the secure session to send new messages.'
       : !socketReady
         ? 'Reconnect to send messages. Your draft stays here.'
@@ -793,6 +819,18 @@ useEffect(() => {
         </View>
       ) : (
         <View className="relative flex-1 px-3 pb-2 pt-2">
+          {sessionHealth.status === 'identity_changed' ? (
+            <InlineChatNotice
+              title={`Safety number with ${conversationName} has changed`}
+              body="This contact's identity keys changed — a reinstall or new device, or someone interfering. Compare safety numbers before continuing. Sending is blocked until you verify or accept the new identity."
+              tone="danger"
+              actionLabel="Verify"
+              onAction={onVerify}
+              secondaryActionLabel="Accept new identity"
+              onSecondaryAction={acceptNewIdentity}
+            />
+          ) : null}
+
           {sessionHealth.status === 'reset_required' ? (
             <InlineChatNotice
               title="Secure session needs attention"
@@ -803,7 +841,7 @@ useEffect(() => {
             />
           ) : null}
 
-          {!socketReady && sessionHealth.status !== 'reset_required' ? (
+          {!socketReady && sessionHealth.status === 'healthy' ? (
             <InlineChatNotice
               title="You are offline"
               body="You can keep reading this chat. New outgoing messages will resume after reconnect."

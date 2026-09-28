@@ -65,6 +65,24 @@ A session exists but cannot be used safely because the expected decrypt/session 
 
 The app has concluded that the conversation must be re-established explicitly, rather than continuing with current local session state.
 
+### Identity states (T2.13)
+
+Orthogonal to the session states above, each peer has an identity state on this device:
+
+#### `unverified-first-contact`
+
+The peer's identity (both keys, binding verified) was pinned silently on first contact. Sessions work; the safety number has not been compared out of band.
+
+#### `verified`
+
+The user compared the safety number and marked the identity verified (VerifyContactScreen). Same crypto path as above; only the badge differs.
+
+#### `identity-changed-blocked`
+
+A bundle, an `initPacket`, or an `identity:changed` event presented an identity that does not match the pin (`IDENTITY_MISMATCH`). No session is created or used for this peer, sending is blocked, and the chat shows the security-warning class until the user either verifies out of band or accepts the new identity, which re-pins from the server (binding verified) and drops the session so the next message re-bootstraps.
+
+Rules: the pin, never the server or the packet, decides identity; first contact pins silently; a mismatch is never resolved automatically; accepting requires a user action.
+
 ---
 
 ## 4. Send Path Rules
