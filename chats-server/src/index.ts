@@ -8,6 +8,7 @@ import { configureRateLimiters } from './middleware/rateLimit';
 import { createApp } from './app';
 import { setupSocket } from './socket/setupSocket';
 import { setRealtimeServer } from './lib/realtime';
+import { createLifecycle } from './lib/lifecycle';
 
 /** Upper bound for any socket.io packet; the per-message ciphertext cap is enforced separately. */
 const SOCKET_MAX_HTTP_BUFFER_SIZE = 256 * 1024;
@@ -39,16 +40,19 @@ async function main() {
     console.log(`Server running on http://localhost:${config.PORT}`);
   });
 
-  const shutdown = async (signal: string) => {
-    console.log(`[server] ${signal} received, shutting down`);
-    server.close();
-    io.close();
-    await closeRedis();
-    await mongoose.disconnect();
-    process.exit(0);
-  };
-  process.on('SIGTERM', () => void shutdown('SIGTERM'));
-  process.on('SIGINT', () => void shutdown('SIGINT'));
+  // T4.2: one shutdown path for signals and crashes; the process manager restarts on a non-zero exit.
+  const lifecycle = createLifecycle({
+    stopAccepting: () =>
+      new Promise<void>((resolve, reject) => {
+        server.close((err) => (err ? reject(err) : resolve()));
+      }),
+    closeSockets: () => io.close(),
+    closeRedis,
+    disconnectDb: () => mongoose.disconnect(),
+    exit: (code) => process.exit(code),
+    log: (m) => console.log(m),
+  });
+  lifecycle.install(process);
 }
 
 main().catch((e) => {

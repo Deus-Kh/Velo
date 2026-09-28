@@ -52,7 +52,7 @@ npm install
 cp .env.example .env      # then fill in MONGO_URI, JWT_SECRET (>= 32 chars), FIREBASE_SERVICE_ACCOUNT_PATH
 npm run dev               # nodemon + ts-node, watches src/
 npm run build             # tsc → dist/ (T4.1)
-NODE_ENV=production npm start   # runs dist/index.js; the process manager sets NODE_ENV (requires REDIS_URL)
+NODE_ENV=production npm start   # runs dist/index.js; in production systemd does this (see deploy/README.md, T4.2)
 npm test                  # vitest: route and socket tests against an in-memory MongoDB
 ```
 

@@ -1,4 +1,5 @@
 import express from 'express';
+import mongoose from 'mongoose';
 import cors from 'cors';
 import helmet from 'helmet';
 import { globalLimiter } from './middleware/rateLimit';
@@ -35,8 +36,11 @@ export function createApp(): express.Express {
   app.use('/keys', keysRouter);
   app.use('/messages', messagesRouter);
 
-  // health
-  app.get('/health', (_req, res) => res.json({ ok: true }));
+  // Health for the reverse proxy and the process manager (T4.2): 503 until MongoDB is connected.
+  app.get('/health', (_req, res) => {
+    const mongo = mongoose.connection.readyState === 1 ? 'connected' : 'disconnected';
+    res.status(mongo === 'connected' ? 200 : 503).json({ ok: mongo === 'connected', uptime: Math.round(process.uptime()), mongo });
+  });
 
   app.use(notFoundHandler);
   app.use(errorHandler);

@@ -436,6 +436,8 @@ Extraction happens in T2.1. Secrets (`*.pem`, `*.keystore`, service-account JSON
 
 **4' progress — T4.1 done 2026-09-28** (one commit): the production process runs the compiled `dist/` build; nodemon and the TypeScript loaders are development-only; a manifest test keeps it that way. Next in order: T4.2 (process manager, graceful shutdown, restart on crash).
 
+**4' progress — T4.2 done 2026-09-28** (one commit): systemd unit under `deploy/`, hardened and restarting on crash without flapping; one in-process shutdown path for signals and crashes with a force-exit deadline; `/health` reports readiness. Host install is a human step (`deploy/README.md`). Next in order: T4.3 (Redis: socket.io adapter, presence, rate limits, refresh-token families).
+
 **2b progress — T2.14 done 2026-09-28** (one commit, D7 = A): plaintext stored locally in sealed records, message keys never archived, history read from the device with the server asked only for newer messages, one-time migration of the old archive. **The known-red registry is empty: every scenario the harness owns is green.** Remaining in Phase 2: T2.12 (manual two-device checklist, owner).
 
 **2b progress — T2.11 done 2026-09-28** (two commits): bootstrap persists only after the first message decrypts, bootstrap replay refused, glare converges on the lower user id without losing messages, a peer's local reset is adopted automatically. Next in order: T2.14.

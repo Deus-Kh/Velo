@@ -1,0 +1,63 @@
+# Velo chat server (T4.2). Install: see deploy/README.md.
+#
+#   /opt/velo            the repository checkout (git pull; npm ci; npm run build)
+#   /etc/velo/server.env the environment (copy of chats-server/.env.example, filled in; mode 0600, owner root:velo)
+#   velo                 an unprivileged system user
+#
+# Restart policy: any exit (crash, unhandled rejection, OOM kill) restarts the
+# service after 2 s; more than 5 restarts in 60 s stops the loop so a broken
+# deploy is visible instead of flapping. `systemctl reset-failed velo-server`
+# clears the counter.
+
+[Unit]
+Description=Velo chat server
+Documentation=https://github.com/Deus-Kh/Velo
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=velo
+Group=velo
+WorkingDirectory=/opt/velo/chats-server
+EnvironmentFile=/etc/velo/server.env
+Environment=NODE_ENV=production
+ExecStart=/usr/bin/node dist/index.js
+Restart=always
+RestartSec=2
+
+# Graceful stop: SIGTERM starts the in-process shutdown (stop accepting,
+# close sockets, close Redis, disconnect MongoDB; 10 s deadline inside the
+# process), then systemd's own deadline.
+KillSignal=SIGTERM
+KillMode=mixed
+TimeoutStopSec=20
+
+# Resources
+LimitNOFILE=65536
+
+# Hardening: the process needs the checkout read-only, the network, and nothing else.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+LockPersonality=true
+SystemCallArchitectures=native
+CapabilityBoundingSet=
+AmbientCapabilities=
+
+# Logs go to journald (journalctl -u velo-server); pino with redaction lands in T4.5.
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=velo-server
+
+[Install]
+WantedBy=multi-user.target
