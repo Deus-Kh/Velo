@@ -1,3 +1,4 @@
+/// <reference types="node" />
 import { readFileSync } from 'fs';
 import { join } from 'path';
 
@@ -12,7 +13,7 @@ const release = readFileSync(join(android, 'main', 'res', 'xml', 'network_securi
 const debug = readFileSync(join(android, 'debug', 'res', 'xml', 'network_security_config.xml'), 'utf8');
 const envExample = readFileSync(join(__dirname, '..', '..', '..', '..', '.env.example'), 'utf8');
 
-const pins = (xml: string) => Array.from(xml.matchAll(/<pin digest="SHA-256">([^<]+)<\/pin>/g), (m) => m[1]!);
+const pins = (xml: string) => Array.from(xml.matchAll(/<pin digest="SHA-256">([^<]+)<\/pin>/g), (m: RegExpMatchArray) => m[1]!);
 
 describe('T4.10 Android network security config', () => {
   it('release: no cleartext, system trust only, and the API host pinned with two SPKI pins', () => {
@@ -43,7 +44,7 @@ describe('T4.10 Android network security config', () => {
   it('debug: no pins, cleartext only to local development hosts', () => {
     expect(pins(debug)).toEqual([]);
     expect(debug).toMatch(/<base-config cleartextTrafficPermitted="false">/);
-    const cleartextDomains = Array.from(debug.matchAll(/<domain includeSubdomains="false">([^<]+)<\/domain>/g), (m) => m[1]!);
+    const cleartextDomains = Array.from(debug.matchAll(/<domain includeSubdomains="false">([^<]+)<\/domain>/g), (m: RegExpMatchArray) => m[1]!);
     for (const d of cleartextDomains) expect(d).toMatch(/^(localhost|127\.0\.0\.1|10\.0\.2\.2|\d{1,3}(\.\d{1,3}){3})$/);
   });
 });
