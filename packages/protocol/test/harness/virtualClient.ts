@@ -13,7 +13,7 @@ import { decodeContent, encodeContent, isControlContent, textContent, type Conte
 import type { AssociatedData } from '../../src/ratchet/envelope';
 import { glareWinner, initInitiatorSession, initResponderSession, sessionHasReceived } from '../../src/ratchet/session';
 import type { RatchetSessionV2 } from '../../src/types/session';
-import { groupDecrypt, groupEncrypt } from '../../src/senderkey/message';
+import { groupDecryptContent, groupEncryptContent } from '../../src/senderkey/message';
 import { createSenderKeyState, senderKeyDistributionMessage, senderKeyStateFromDistribution, type SenderKeyState } from '../../src/senderkey/state';
 import { FakeServer, type GroupCopyDTO, type GroupSendResult, type NewMessageDTO, type ServerIdentity } from './fakeServer';
 import { MemoryStore } from './memoryStore';
@@ -436,6 +436,11 @@ export class VirtualClient {
       this.server.ackDelivered(this.userId, dto.serverMessageId);
       return plaintext;
     }
+    if (content.kind !== 'text') {
+      // T7.1: an action (reaction, edit, delete, timer) is applied by the app's store layer (T7.2); the harness acks it.
+      this.server.ackDelivered(this.userId, dto.serverMessageId);
+      return plaintext;
+    }
     plaintext = content.text;
     this.inbox.push({ fromUserId: peerUserId, text: plaintext, serverMessageId: dto.serverMessageId });
     this.storeMessage(peerUserId, { direction: 'in', text: plaintext, createdAt: dto.createdAt, seq: dto.seq, serverMessageId: dto.serverMessageId });
@@ -515,7 +520,7 @@ export class VirtualClient {
 
   /** groupKeys.handleControlContent: keys from members only; a request is answered with our key to that member. */
   private handleControl(fromUserId: string, content: Content): void {
-    if (content.kind === 'text') return;
+    if (!isControlContent(content)) return;
     const group = this.server.getGroup(this.userId, content.groupId);
     if (!group || !group.members.includes(fromUserId)) return; // not a member (any more): ignored
     if (content.kind === 'skdm') {
@@ -577,7 +582,7 @@ export class VirtualClient {
     if (!group) throw new Error(this.userId + ' is not a member of ' + groupId);
     this.distributeSenderKey(groupId);
     const state = this.ensureOwnSenderKey(groupId, group.epoch);
-    const step = groupEncrypt(state, text, { groupId, senderUserId: this.userId });
+    const step = groupEncryptContent(state, textContent(text), { groupId, senderUserId: this.userId }); // T7.1 envelope
     this.store.setJson('sk-own:' + groupId, { epoch: group.epoch, state: step.state });
     this.msgCounter += 1;
     const clientMessageId = this.userId + '-' + randomUUID();
@@ -608,16 +613,21 @@ export class VirtualClient {
     }
     let step;
     try {
-      step = groupDecrypt(state, copy.g1, { groupId: copy.groupId, senderUserId: copy.fromUserId });
+      step = groupDecryptContent(state, copy.g1, { groupId: copy.groupId, senderUserId: copy.fromUserId });
     } catch (e) {
       if (e instanceof ProtocolError && e.code === 'SENDER_KEY_STALE') this.requestSenderKey(copy.groupId, copy.fromUserId);
       throw e;
     }
     this.store.setJson('sk-peer:' + copy.groupId + ':' + copy.fromUserId, step.state);
-    this.groupInbox.push({ groupId: copy.groupId, fromUserId: copy.fromUserId, text: step.plaintext, serverMessageId: copy.serverMessageId });
-    this.storeMessage(FakeServer.groupConversationId(copy.groupId), { direction: 'in', text: step.plaintext, createdAt: copy.createdAt, seq: copy.seq, serverMessageId: copy.serverMessageId });
+    if (step.content.kind !== 'text') {
+      this.server.ackDelivered(this.userId, copy.serverMessageId); // T7.1: actions are the store layer's (T7.2)
+      return null;
+    }
+    const text = step.content.text;
+    this.groupInbox.push({ groupId: copy.groupId, fromUserId: copy.fromUserId, text, serverMessageId: copy.serverMessageId });
+    this.storeMessage(FakeServer.groupConversationId(copy.groupId), { direction: 'in', text, createdAt: copy.createdAt, seq: copy.seq, serverMessageId: copy.serverMessageId });
     this.server.ackDelivered(this.userId, copy.serverMessageId);
-    return step.plaintext;
+    return text;
   }
 
   private requestSenderKey(groupId: string, fromUserId: string): void {

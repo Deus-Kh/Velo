@@ -169,6 +169,11 @@ export async function subscribeToMessages(onMessage: (m: {
       
       // T6.2: the plaintext is a content envelope; control messages take their own path and are still acked.
       const content = decodeContent(plaintext);
+      if (content.kind !== 'text' && !isControlContent(content)) {
+        // T7.1: message actions are applied by the store layer (T7.2); acked so the server drops the copy.
+        socket.emit('message:delivered', { serverMessageId: msg.serverMessageId }, () => {});
+        return;
+      }
       if (isControlContent(content)) {
         options?.onControl?.(content, { fromUserId: msg.fromUserId, serverMessageId: msg.serverMessageId });
         publishControlContent(content, { fromUserId: msg.fromUserId, serverMessageId: msg.serverMessageId });

@@ -98,15 +98,26 @@ export {
 } from './identity/binding';
 export { checkIdentity, requireIdentityMatch, type IdentityCheck } from './identity/trust';
 
-// Phase 6' (T6.2): the content envelope inside the pairwise ratchet
+// Phase 6' (T6.2) / Phase 7' (T7.1): the content envelope inside the pairwise ratchet and the group chain
 export {
   encodeContent,
   decodeContent,
   textContent,
   isControlContent,
+  isActionContent,
   CONTENT_VERSION,
+  MAX_REACTION_LENGTH,
+  MAX_MESSAGE_REF_LENGTH,
+  MAX_TIMER_SECONDS,
   type Content,
   type TextContent,
+  type ControlContent,
+  type ActionContent,
+  type MessageRef,
+  type ReactionContent,
+  type EditContent,
+  type DeleteContent,
+  type TimerContent,
   type SenderKeyDistributionContent,
   type SenderKeyRequestContent,
 } from './content/envelope';
@@ -124,9 +135,12 @@ export {
 export {
   groupEncrypt,
   groupDecrypt,
+  groupEncryptContent,
+  groupDecryptContent,
   groupMessageSignedBytes,
   type GroupMessage,
   type GroupAssociatedData,
   type GroupEncryptResult,
   type GroupDecryptResult,
+  type GroupDecryptContentResult,
 } from './senderkey/message';

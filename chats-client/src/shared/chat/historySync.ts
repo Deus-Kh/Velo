@@ -76,6 +76,10 @@ export async function ingestUndeliveredItems(params: {
     try {
       const r = await receiveIncoming({ myUserId, peerUserId, initPacket: it.initPacket ?? null, encrypted: envelope });
       const content = decodeContent(r.plaintext); // T6.2
+      if (content.kind !== 'text' && !isControlContent(content)) {
+        acked.push(it.serverMessageId); // T7.1: an action; applied by T7.2
+        continue;
+      }
       if (isControlContent(content)) {
         callbacks?.onControl?.(content, { fromUserId: peerUserId, serverMessageId: it.serverMessageId });
         publishControlContent(content, { fromUserId: peerUserId, serverMessageId: it.serverMessageId });

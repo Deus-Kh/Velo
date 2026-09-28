@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { isControlContent } from '@velo/protocol';
 import { useAuthStore } from '../../store/auth.store';
 import { groupPeerKey, groupsApi, type GroupView } from '../api/groups.api';
 import type { HistoryItem } from '../api/messages.api';
@@ -123,7 +124,7 @@ export function useGroupChat(groupId: string) {
         };
         // A member's key arriving over a pairwise session may unlock messages we could not open.
         unsubscribeControl = subscribeToControlContent(async (content, meta) => {
-          if (content.kind === 'text' || content.groupId !== groupId) return;
+          if (!isControlContent(content) || content.groupId !== groupId) return;
           await handleControlContent({ myUserId: String(myUserId), fromUserId: meta.fromUserId, content, loadGroup: async () => groupRef.current });
           if (content.kind === 'skdm') {
             setWaitingForKeys((prev) => prev.filter((id) => id !== meta.fromUserId));

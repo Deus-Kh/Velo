@@ -1,4 +1,4 @@
-import { groupDecrypt, groupEncrypt, protocolErrorCode, type GroupMessage } from '@velo/protocol';
+import { groupDecryptContent, groupEncryptContent, protocolErrorCode, textContent, type GroupMessage } from '@velo/protocol';
 import { groupPeerKey, type GroupView } from '../api/groups.api';
 import { messagesApi, type HistoryItem } from '../api/messages.api';
 import { ensureSocketConnected } from '../socket/socket';
@@ -26,7 +26,7 @@ export async function sendGroupMessage(params: { myUserId: string; group: GroupV
   // Members without our key get it first (best effort; a member that could not be reached retries next send).
   await distributeSenderKey({ myUserId, group });
   const { state } = await ensureOwnSenderKey({ myUserId, groupId: group.groupId, epoch: group.epoch });
-  const step = groupEncrypt(state, text, { groupId: group.groupId, senderUserId: myUserId });
+  const step = groupEncryptContent(state, textContent(text), { groupId: group.groupId, senderUserId: myUserId }); // T7.1 envelope
   await saveOwnSenderKey(myUserId, group.groupId, { epoch: group.epoch, state: step.state });
 
   const socket = await ensureSocketConnected();
@@ -104,15 +104,19 @@ export async function ingestGroupItems(params: {
       continue;
     }
     try {
-      const r = groupDecrypt(state, message, { groupId, senderUserId: fromUserId });
+      const r = groupDecryptContent(state, message, { groupId, senderUserId: fromUserId });
       await savePeerSenderKey(myUserId, groupId, fromUserId, r.state);
+      if (r.content.kind !== 'text') {
+        acked.push(it.serverMessageId); // T7.1: an action or control kind on the group chain; T7.2 applies actions
+        continue;
+      }
       const stored: StoredMessage = {
         id: it.clientMessageId || it.serverMessageId,
         clientMessageId: it.clientMessageId ?? null,
         serverMessageId: it.serverMessageId,
         direction: 'in',
         senderUserId: fromUserId,
-        text: r.plaintext,
+        text: r.content.text,
         createdAt: Number(it.createdAt ?? Date.now()),
         seq: typeof it.seq === 'number' ? it.seq : null,
         status: it.status ?? 'sent',

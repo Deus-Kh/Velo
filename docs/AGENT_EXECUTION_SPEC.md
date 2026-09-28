@@ -742,6 +742,26 @@ Written when Phase 4' closed; the roadmap (§7, D6) fixes the shape: **groups fi
 
 ---
 
+# 7c. PHASE 7' — PRODUCT COMPLETENESS (~2 weeks) — added 2026-09-28
+
+Written when Phase 6' closed; the roadmap (§7 Phase 7', §3 P2-10, §5.3) fixes the list. Everything that changes what a message *means* travels inside the authenticated session as content kinds (T6.2's envelope), never as server-side state: the server keeps relaying opaque ciphertext and learns nothing new. Server-side state is added only where the server must act on it (privacy toggles, blocks, account deletion). Storage stays D7 = A (sealed AsyncStorage records); local search scans it and is the first cut candidate (§11.3).
+
+| Task | Objective | Est | Notes |
+|---|---|---|---|
+| **T7.1** | Content kinds for message actions and timers (`packages/protocol`) | 1d | Envelope gains `reaction {target, emoji, remove?}`, `edit {target, text}`, `delete {target}` (a *request* for a tombstone), `timer {seconds \| null}` and `text.forwardedFrom {userId, createdAt}`; `target` is `{senderUserId, clientMessageId}` (both sides know it); `isActionContent` beside `isControlContent`; limits (`MAX_REACTION_LENGTH`, `MAX_MESSAGE_REF_LENGTH`, `MAX_TIMER_SECONDS`), malformed → `STORAGE_CORRUPTION`. The group plaintext becomes the envelope too (`groupEncryptContent` / `groupDecryptContent`; bare legacy text still reads). Client and harness consume action kinds without effect until T7.2. |
+| **T7.2** | Client: reactions, edit, delete, forward | 3d | `StoredMessage` gains `reactions {userId: emoji}`, `editedAt`, `deletedAt` (tombstone), `forwardedFrom`; one `chat/actions.ts applyActionContent` on every inbound path (live 1:1, undelivered ingest, push wake-up, group live/sync) that honours edit/delete only from the target's sender; send via `sendContent` (1:1) and the group chain, applied locally first; UI: reaction bar on long-press, reactions under bubbles, "edited" and "Forwarded" labels, tombstone bubble, Delete for me / for everyone, Forward picker (contacts + groups). "Delete for everyone" is a request the peer's device honours; the sheet says so. |
+| **T7.3** | Disappearing messages | 2d | Per-conversation timer agreed over the session (`{kind:'timer'}`; in groups admins only), kept in a sealed conversation-settings store; `expiresAt` per stored message (outgoing at send, incoming when stored); a sweeper on foreground, chat open and every 30 s while a chat is open deletes expired records and their notifications; header chip, system line "X set messages to disappear after …", setting in the chat sheet (off / 1 h / 1 d / 1 w). Server unchanged (delete-on-delivery + 30-day TTL already hold). |
+| **T7.4** | Privacy toggles; no presence broadcast by default | 1.5d | `User.privacy {readReceipts, typing, lastSeen, online}`, `GET/PATCH /users/me/privacy`; server enforces: `message:read` still records but the sender is told only if the reader allows; typing not forwarded when off; presence payload masked when off. Defaults are the product promise (§14): `online: false, lastSeen: false, readReceipts: true, typing: true`. Client: Settings → Privacy toggles; chat header shows what the peer allows. Closes P2-10. |
+| **T7.5** | Block and report | 2d | `Block {blockerId, blockedId}` + `POST/DELETE /users/:id/block`, `GET /users/me/blocks`; the server drops messages between a blocked pair silently (ack ok, nothing stored, no push), refuses presence/typing/bundle for the pair, skips the pair's copies at group fan-out; `Report {reporterId, reportedUserId, reason, excerpt?}` + `POST /reports` (the reporter chooses the excerpt; the server sees plaintext only there). Client: block/unblock/report in the chat sheet and contact rows, blocked list in Settings → Privacy, inbound from blocked users dropped locally too, chat list hides them. |
+| **T7.6** | Account deletion | 1.5d | `DELETE /auth/account` with password re-entry: cascade (user, prekeys, bundle issues, messages both ways, conversations, refresh-token families, push tokens, blocks; group memberships removed with an epoch bump; groups left empty deleted; reports kept without the reporter); peers get `user:deleted` and a 404 on the bundle → the chat says "account deleted". Client: Settings → Account → Delete (warning + password) → full local wipe (T1.14 + Keychain) → login. GDPR Art. 17. |
+| **T7.7** | Profile over the session: display name + avatar | 1.5d | `{kind:'profile', name, avatar?}` (JPEG ≤ 24 KB base64, under the 64 KiB ciphertext cap) sent to each contact when a session exists and on change, stored sealed; avatars in list, header, group members. The server stores no avatar (Signal's profile key indirection waits for blob storage, Phase 8'). |
+| **T7.8** | Local search | 1d | Linear scan of the sealed store (newest 2000 records per chat), per-chat search with jump and a global search in the chat list. First cut per §11.3. |
+| **T7.9** | Docs and gate | 0.5d | §8 content-kinds table, roadmap §2.2 rows, `architecture.md`; scenario S29 (actions and timer over the harness). |
+
+**Order:** T7.1 → T7.2 → T7.3 → T7.4 → T7.5 → T7.6 → T7.7 → T7.8 → T7.9.
+
+**Gate (human, two devices):** react / edit / delete / forward round-trip; a timer expires on both; a block silences both ways; account deletion leaves nothing on the server (checked by a collection count); privacy defaults hold on a fresh account.
+
 # 8. REFERENCE
 
 ## 8.1 Normative ratchet algorithm (replaces v1 §8.1)
@@ -920,6 +940,7 @@ PHASE 2 ── strictly sequential through T2.15
 PHASE 3' ── T3.1 … T3.6           (T3.6 conditional; blocks nothing in six months)
 PHASE 4' ── T4.1 … T4.11          (T4.7 CI lands early, right after T2.4)
 PHASE 6' ── T6.1 ─► T6.2 ─► T6.3 ─► T6.4 ─► T6.5 ─► T6.6 ─► T6.7   (added 2026-09-28)
+PHASE 7' ── T7.1 ─► T7.2 ─► T7.3 ─► T7.4 ─► T7.5 ─► T7.6 ─► T7.7 ─► T7.8 ─► T7.9   (added 2026-09-28)
 ```
 
 ## 9.1 Suggested execution order

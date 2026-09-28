@@ -8,6 +8,7 @@ import { chainKdf } from '../ratchet/chain';
 import { MAX_MESSAGE_NUMBER, MAX_SKIP_PER_STEP, MAX_SKIP_TOTAL, REPLAY_WINDOW } from '../ratchet/limits';
 import { expandMessageKey } from '../ratchet/messageKeys';
 import { SENDER_KEY_VERSION, type SenderKeyState } from './state';
+import { decodeContent, encodeContent, type Content } from '../content/envelope';
 
 /**
  * Group message (Sender Keys, T6.1). Wire format `group v1`:
@@ -204,4 +205,16 @@ function openWith(messageKey: Uint8Array, ciphertext: Uint8Array, iteration: num
   } finally {
     wipe(keys.cipherKey, keys.macKey, keys.nonce, plain);
   }
+}
+
+/** T7.1: the group plaintext is the content envelope too (text, actions); legacy bare text still decodes. */
+export function groupEncryptContent(state: SenderKeyState, content: Content, ad: GroupAssociatedData): GroupEncryptResult {
+  return groupEncrypt(state, encodeContent(content), ad);
+}
+
+export type GroupDecryptContentResult = { state: SenderKeyState; content: Content; consumedSkipped: boolean };
+
+export function groupDecryptContent(state: SenderKeyState, message: GroupMessage, ad: GroupAssociatedData): GroupDecryptContentResult {
+  const r = groupDecrypt(state, message, ad);
+  return { state: r.state, content: decodeContent(r.plaintext), consumedSkipped: r.consumedSkipped };
 }

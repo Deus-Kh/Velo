@@ -2,6 +2,7 @@ import {
   createSenderKeyState,
   senderKeyDistributionMessage,
   senderKeyStateFromDistribution,
+  isControlContent,
   type Content,
   type SenderKeyState,
 } from '@velo/protocol';
@@ -114,7 +115,7 @@ export async function handleControlContent(params: {
   loadGroup: (groupId: string) => Promise<GroupView | null>;
 }): Promise<{ kind: 'stored-key'; groupId: string; fromUserId: string } | { kind: 'answered-request'; groupId: string } | { kind: 'ignored'; reason: string }> {
   const { myUserId, fromUserId, content } = params;
-  if (content.kind === 'text') return { kind: 'ignored', reason: 'not control' };
+  if (!isControlContent(content)) return { kind: 'ignored', reason: 'not control' };
   const group = await params.loadGroup(content.groupId);
   if (!group || !group.members.some((m) => m.userId === fromUserId)) {
     return { kind: 'ignored', reason: 'sender is not a member of that group' };

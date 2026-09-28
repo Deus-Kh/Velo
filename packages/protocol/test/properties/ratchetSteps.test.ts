@@ -74,5 +74,5 @@ describe('property: one ratchet step per direction change', () => {
     expect(checkedReceives).toBe(SESSIONS * SEGMENTS_PER_SESSION * STEPS);
     // Roughly half of random sends change direction; make sure the property was exercised.
     expect(ratchetSteps).toBeGreaterThan(checkedReceives / 4);
-  }, 60_000);
+  });
 });

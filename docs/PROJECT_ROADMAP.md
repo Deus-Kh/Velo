@@ -523,6 +523,8 @@ Document: Sender Keys give no forward secrecy within an epoch; distribution beco
 
 ### PHASE 7' — Product completeness · weeks 18–19 · `[PARITY]`
 
+*Spec tasks T7.1–T7.9 defined 2026-09-28 (spec §7c): actions and timers as content kinds over the session; privacy toggles, blocks and account deletion as the only new server state; local search last (first cut).*
+
 Reactions; edit/delete with tombstone protocol messages ("delete for everyone" is a request, say so); forward with provenance; disappearing messages (per-conversation timer; local DB makes it trivial); block/report with a server-side block list; **account deletion** (cascade + key destruction, GDPR Art. 17); privacy toggles (read receipts, typing, last-seen) and the option to remove "online" broadcast; encrypted avatars via a profile key shared over the ratchet; local search over the SQLCipher DB.
 
 ### PHASE 8' — Media · weeks 20–21 · `[PARITY]`
