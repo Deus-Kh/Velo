@@ -428,6 +428,8 @@ Extraction happens in T2.1. Secrets (`*.pem`, `*.keystore`, service-account JSON
 
 **3' progress — T3.3 done for Android 2026-09-28** (two commits): the push is a data-only wake-up; the device fetches, decrypts, stores, acks and renders with the local contact name; taps open the chat from any app state; the preview toggle is honest. A live message for a chat that is not open now goes through the same ingest path, so delivery ticks no longer wait for the chat to be opened. iOS stays parked. Next in order: T3.4 (zeroization, replay window, mutation audit).
 
+**3' progress — T3.4 done 2026-09-28** (three commits): explicit bounded replay window with `REPLAY_DETECTED` and `UNKNOWN_OLD_MESSAGE` meaning what they say; every derived key wiped and no key material leaving a ratchet step; a frozen-input mutation audit over every refusal class plus S28 end to end. Next in order: T3.5 (PQ-readiness).
+
 **2b progress — T2.14 done 2026-09-28** (one commit, D7 = A): plaintext stored locally in sealed records, message keys never archived, history read from the device with the server asked only for newer messages, one-time migration of the old archive. **The known-red registry is empty: every scenario the harness owns is green.** Remaining in Phase 2: T2.12 (manual two-device checklist, owner).
 
 **2b progress — T2.11 done 2026-09-28** (two commits): bootstrap persists only after the first message decrypts, bootstrap replay refused, glare converges on the lower user id without losing messages, a peer's local reset is adopted automatically. Next in order: T2.14.
@@ -461,7 +463,7 @@ Extraction happens in T2.1. Secrets (`*.pem`, `*.keystore`, service-account JSON
 | T3.1 Delete-on-delivery + TTL + `GET /messages/undelivered?after=seq` | Server keeps only undelivered ciphertext (30-day TTL). **Done 2026-09-28** (cursor is `createdAtClient` until T3.2) | 2d |
 | T3.2 Server sequence numbers; compound cursor | P2-6, P2-9. **Done 2026-09-28** | 1d |
 | T3.3 Push done right | Data-only payload; background handler; notifee render; tap deep-link; iOS APNs; token-prune fix; honest preview toggle. **Done for Android 2026-09-28; iOS parked** | 3d |
-| T3.4 Key zeroization + replay window + no-mutation-before-auth audit | `fill(0)`; typed `REPLAY_DETECTED` vs `UNKNOWN_OLD_MESSAGE` | 2d |
+| T3.4 Key zeroization + replay window + no-mutation-before-auth audit | `fill(0)`; typed `REPLAY_DETECTED` vs `UNKNOWN_OLD_MESSAGE`. **Done 2026-09-28** (DEVIATION-8: best-effort in JavaScript) | 2d |
 | T3.5 PQ-readiness | Handshake IKM accepts a KEM secret without another wire bump | 1d |
 | T3.6 Header encryption (P1-8) | **Only if weeks 9–11 are on schedule**; otherwise documented | 5d |
 | T2.14 if slid | Local encrypted DB | 4d |
