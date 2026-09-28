@@ -602,11 +602,13 @@ Implement §8.1 step 2 exactly. `pn` is read in exactly one place.
 ---
 
 ## T2.10 — Signed prekey rotation
-**Tier** CORE · **Fixes** P1-6 · **Est** 2d
+**Tier** CORE · **Fixes** P1-6 · **Est** 2d · **Status:** done 2026-09-28 (two commits)
 
 `createdAt` stored with the SPK; rotate after 7 days; retain previous SPKs for 30 days keyed by `signedPreKeyId` (`getSignedPreKeySecretForKeyId`); server keeps the last N; SPK signature covers `keyId || publicKey` with a domain tag (wire v3 change, document in §8.2).
 
 **Acceptance:** rotation on next `ensurePreKeysForUser` after 7 days; a handshake against a 20-day-old SPK completes; 31-day-old → typed error; existing sessions unaffected (they copied the SPK pair in T2.0).
+
+**Status 2026-09-28:** done. `handshake/signedPrekey.ts`: signature over `"velo-signed-prekey-v1" ‖ u32be keyId ‖ publicKey` (`signSignedPreKey` / `verifySignedPreKey`; `verifySignedPreKeyBundle` checks the tagged form, a signature replayed onto another key id is refused); pure policy `rotateSignedPreKeySet` (rotate at 7 days, retain previous 30 days, drop expired; a legacy set is replaced) and `selectSignedPreKey` (current or retained by id; unknown or expired → `SESSION_RESET_REQUIRED` with the age in days). Client `crypto/prekeys.ts` stores a `SignedPreKeySet` in the Keychain (`createdAt` per key, key ids = seconds since 2020 so they increase and fit u32), rotates in `ensureSignedPreKeyForUser` on login/hydrate, uploads the current key, and `x3dhRespond` looks the pair up by the packet's `signedPreKeyId`. Server keeps the five newest keys per user after each upload. Harness: a fake clock per world; S22 covers rotation after 7 days, unaffected pre-rotation sessions, a 20-day-old key completing and a 31-day-old one refused. Deviation: rotation runs on the next key bootstrap (login, hydrate, foreground top-up) rather than a background timer; a device that never re-opens the app simply keeps serving its last key, which the 30-day retention on the responder side tolerates.
 
 ---
 
@@ -757,7 +759,7 @@ skipMessageKeys(work, dhPub, until):
 |---|---|---|---|
 | 1 | removed | legacy shared-secret | pre-history |
 | 2 | removed 2026-09-28 | `{header:{n,pn,dhPub}, nonce, ciphertext}` + optional `initPacket`; header unauthenticated; non-standard bootstrap | Open Beta 0.1 |
-| 3 | **current** | `{header:{n,pn,dhPub}, ciphertext, mac}` + optional `initPacket` on the session-creating message. Standard bootstrap (T2.0, `WhisperRatchet`), message keys expanded with `WhisperMessageKeys` into cipher key + MAC key + derived nonce (no nonce on the wire), MAC-SHA256 over `IK_sign_sender || IK_sign_receiver || canonicalHeader || ciphertext` truncated to 16 bytes, secretbox payload (D3 = C, no new primitive), identity binding in bundles and identity lookups (T2.13). Still pending in this version: SPK signature over `keyId || pub` (T2.10). **One bump, one migration: all existing sessions reset.** | T2.0–T2.13, 2026-09-28 |
+| 3 | **current** | `{header:{n,pn,dhPub}, ciphertext, mac}` + optional `initPacket` on the session-creating message. Standard bootstrap (T2.0, `WhisperRatchet`), message keys expanded with `WhisperMessageKeys` into cipher key + MAC key + derived nonce (no nonce on the wire), MAC-SHA256 over `IK_sign_sender || IK_sign_receiver || canonicalHeader || ciphertext` truncated to 16 bytes, secretbox payload (D3 = C, no new primitive), identity binding in bundles and identity lookups (T2.13). Signed-prekey signature over `keyId || pub` with a domain tag landed with T2.10. **One bump, one migration: all existing sessions reset.** | T2.0–T2.13, 2026-09-28 |
 | 4 | Phase 3' | header encrypted under `HKs`/`NHKs` (T3.6, conditional) | T3.6 |
 
 Every bump: update this table, the server validator, `Message.ts`, and the client's supported-versions constant.

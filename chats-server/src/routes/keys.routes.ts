@@ -24,6 +24,8 @@ export const keysRouter = Router();
 export const MAX_UNUSED_ONE_TIME_PREKEYS = 500;
 /** Below this many unused keys the server logs a warning; at zero an error. */
 export const ONE_TIME_PREKEY_LOW_WATERMARK = 10;
+/** Signed prekeys retained per user after rotation (T2.10); the bundle serves the newest. */
+export const MAX_SIGNED_PREKEYS_PER_USER = 5;
 
 function tooManyRequests(res: Response, retryAfterSeconds: number, code: string, error: string): Response {
   res.setHeader('Retry-After', String(retryAfterSeconds));
@@ -150,6 +152,17 @@ keysRouter.post('/signed-prekey', requireAuth, validateBody(signedPreKeySchema),
     { $set: { publicKey, signature } },
     { upsert: true }
   );
+
+  // T2.10: a rotating client must not accumulate keys server-side; keep the newest few
+  // (clients retain their own previous secrets for 30 days for in-flight bundles).
+  const stale = await SignedPreKeyModel.find({ userId: req.userId })
+    .sort({ createdAt: -1 })
+    .skip(MAX_SIGNED_PREKEYS_PER_USER)
+    .select('_id')
+    .lean();
+  if (stale.length) {
+    await SignedPreKeyModel.deleteMany({ _id: { $in: stale.map((s) => s._id) } });
+  }
 
   return res.json({ ok: true });
 });

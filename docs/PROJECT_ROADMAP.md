@@ -124,7 +124,7 @@ What a user can actually do today: 1:1 text with replies, receipts, typing, pres
 | Header encryption | ✅ | ✅ | — | ❌ | ⚠️ only if on schedule (T3.6) |
 | Forward secrecy at rest | ✅ | ✅ | ⚠️ | ❌ keys kept forever | ✅ T2.14 |
 | Safety numbers | ✅ | ✅ | ✅ | ✅ libsignal numeric fingerprint over both keys, enforced (T2.13) | done |
-| Signed prekey rotation | ✅ | ✅ | — | ❌ | ✅ T2.10 |
+| Signed prekey rotation | ✅ | ✅ | — | ✅ 7-day rotation, 30-day retention, tagged signature (T2.10) | done |
 | Prekey drain protection | ✅ | ✅ | — | ❌ | ✅ T1.4 |
 | Encrypted local store | ✅ | ✅ | ✅ | ❌ none | ✅ T2.14 |
 | Delete-on-delivery server | ✅ | ✅ | ❌ | ❌ | ✅ T3.1 |
@@ -266,7 +266,7 @@ Fix: XChaCha20-Poly1305 with `AD = IK_A || IK_B || canonicalHeader` (decision D3
 
 **P1-5 · X3DH omits `DH(EK_A, IK_B)`** `[CORE]` — decision D2 = fix. → T2.9 — **fixed 2026-09-28 (T2.9)**
 
-**P1-6 · Signed prekey never rotates** `[CORE]` (`prekeys.ts:38-55`) → T2.10
+**P1-6 · Signed prekey never rotates** `[CORE]` (`prekeys.ts:38-55`) → T2.10 — **fixed 2026-09-28 (T2.10)**
 
 **P1-7 · Message keys retained forever** — **superseded by P1-10.** The 30-day window from v1 remains only as the fallback if T2.14 slips.
 
@@ -421,6 +421,8 @@ Extraction happens in T2.1. Secrets (`*.pem`, `*.keystore`, service-account JSON
 **T2.1 — done 2026-09-28.** `packages/protocol` (`@velo/protocol`) holds `primitives/{base64,encoding,utf8,kdf}`, `ratchet/{chain,root,dh,session}`, `handshake/{bundle,types}`, `identity/fingerprint`, `types/session` — all `git mv`, zero behaviour change, chain/root/session KDF outputs frozen as vectors (R8). `createSessionFromX3DH` split: pure builder in the package, persistence wrapper in the client. Consumed as TypeScript source without npm workspaces: `tsconfig` `paths`, Metro `extraNodeModules` + a `resolveRequest` that pins the package's shared deps (`tweetnacl`, `tweetnacl-util`, `@noble/hashes`, `@babel/runtime`) to the app's copies (bundle source map shows one tweetnacl), Jest `moduleNameMapper`. Purity enforced twice: package `.eslintrc.js` `no-restricted-imports` and a vitest test that also forbids `await`. Still in the client after T2.1: `messageV2.ts`, `x3dh.ts`, `prekeyBundle.ts`, `sessionBootstrap.ts`, key stores.
 
 **T2.2 — done 2026-09-28.** `ratchet/message.ts` in the package: `ratchetEncrypt(session, plaintext)` and `ratchetDecrypt(session, envelope)` are synchronous, never mutate the input, and return the next session, the derived message keys and (on decrypt) the consumed skipped-key id. The only client touchpoint is `chat/ratchetAdapter.ts`, which runs the pure step and persists keys first, then the session, or nothing at all on throw (R7). `crypto/messageV2.ts` deleted. Behaviour pinned with frozen vectors; one deliberate change: message keys derived during a decrypt that then fails authentication are no longer archived (they were written before `secretbox.open` ran). The `ad` argument arrives with the AEAD in T2.5.
+
+**2b progress — T2.10 done 2026-09-28** (two commits): signed prekeys rotate after 7 days with 30-day retention and a signature bound to the key id; server keeps the newest five. Next in order: T2.11.
 
 **2b progress — T2.9 done 2026-09-28** (one commit, both sides): Signal's X3DH with the fourth DH; every libsignal vector is green. Next in order: T2.10.
 
