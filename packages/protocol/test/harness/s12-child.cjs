@@ -2,18 +2,8 @@
 // S12 runs the ratchet in a separate Node process so a synchronous hang can
 // be killed at the 5 s deadline (an in-process timeout cannot interrupt a
 // blocked event loop). TypeScript sources are transpiled on require.
-const fs = require('fs');
 const path = require('path');
-const ts = require('typescript');
-
-require.extensions['.ts'] = (mod, filename) => {
-  const src = fs.readFileSync(filename, 'utf8');
-  const out = ts.transpileModule(src, {
-    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, esModuleInterop: true },
-    fileName: filename,
-  }).outputText;
-  mod._compile(out, filename);
-};
+require('./ts-require.cjs');
 
 const { encodeBase64 } = require('tweetnacl-util');
 const { createSessionFromX3DH } = require(path.join(__dirname, '..', '..', 'src', 'ratchet', 'session.ts'));

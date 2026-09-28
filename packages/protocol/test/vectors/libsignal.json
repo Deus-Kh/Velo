@@ -1,0 +1,206 @@
+{
+  "generator": "packages/protocol/test/vectors/generate.ts",
+  "libsignalVersion": "0.103.0",
+  "notes": [
+    "x25519, hkdf and fingerprint values are produced by @signalapp/libsignal-client.",
+    "x3dh and ratchet values are composed over those primitives exactly as libsignal rust/protocol ratchet.rs and ratchet/keys.rs do (see generate.ts header).",
+    "libsignal 0.103 Node API builds PQXDH sessions only (Kyber prekey mandatory), so no classical end-to-end session vector exists.",
+    "Signal identity keys are single X25519 keys serialized as 0x05||32 bytes; Velo’s two-key identity (DEVIATION-5) cannot be fed to libsignal’s Fingerprint, so the fingerprint vectors pin the construction with one 32-byte key."
+  ],
+  "x25519": [
+    {
+      "privA": "1111111111111111111111111111111111111111111111111111111111111111",
+      "pubA": "7b4e909bbe7ffe44c465a220037d608ee35897d31ef972f07f74892cb0f73f13",
+      "privB": "3333333333333333333333333333333333333333333333333333333333333333",
+      "pubB": "7b0d47d93427f8311160781c7c733fd89f88970aef490d8aa0ee19a4cb8a1b14",
+      "shared": "5bf22caf31c0316785b0b9bc60e56d48582ce59435ce5b3c028052be42631e0f"
+    },
+    {
+      "privA": "2222222222222222222222222222222222222222222222222222222222222222",
+      "pubA": "0faa684ed28867b97f4a6a2dee5df8ce974e76b7018e3f22a1c4cf2678570f20",
+      "privB": "4444444444444444444444444444444444444444444444444444444444444444",
+      "pubB": "ff2ee45601ec1b67310c7790404585ae697331eee1c1f8cf2419731c1fff3e6b",
+      "shared": "d31a1338a14cf92083e61f66bf842151cf156318bcddc07e42443937c05dd640"
+    },
+    {
+      "privA": "2222222222222222222222222222222222222222222222222222222222222222",
+      "pubA": "0faa684ed28867b97f4a6a2dee5df8ce974e76b7018e3f22a1c4cf2678570f20",
+      "privB": "5555555555555555555555555555555555555555555555555555555555555555",
+      "pubB": "38ab664bd86f77d7e66bdd9ae0792913a94fd8b33a1260027e4b46c1f4884c67",
+      "shared": "25bed864771ea4f3d83d9fdaa0ebe218d9feca2ba8f9b4940d069e505ff91d31"
+    }
+  ],
+  "hkdf": [
+    {
+      "ikm": "a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0",
+      "salt": null,
+      "info": "WhisperText",
+      "length": 64,
+      "okm": "0652ac77c99e6a9861ac8d19c785925951ff4e555f48960f9cf8f4fc9915be3f88159f159312d76772a5862a0e5d148f6bf15264a38d26cca08a8794bb988496"
+    },
+    {
+      "ikm": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+      "salt": "b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0",
+      "info": "WhisperRatchet",
+      "length": 64,
+      "okm": "db2aa8ce9a1f334b891b95118e783f2599adf1c98b03a6d26c77d408a3155cb8d92384bf49fe0f06764a7a2c463f52e60b39438137ba125361a04c47e0253958"
+    },
+    {
+      "ikm": "a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2",
+      "salt": null,
+      "info": "WhisperMessageKeys",
+      "length": 80,
+      "okm": "8ad9837a97f9fd09672f5c1431bb939a557518b39c29dbf3da8b1011931cb3fffa00996d19b47237654ed2e50e4774a4fbdbd2485ab173924309262d30029d88034012e8674d3fd48fcf2dcf078ea7bb"
+    }
+  ],
+  "x3dh": [
+    {
+      "withOneTimePreKey": true,
+      "inputs": {
+        "identityA": {
+          "priv": "1111111111111111111111111111111111111111111111111111111111111111",
+          "pub": "7b4e909bbe7ffe44c465a220037d608ee35897d31ef972f07f74892cb0f73f13"
+        },
+        "ephemeralA": {
+          "priv": "2222222222222222222222222222222222222222222222222222222222222222",
+          "pub": "0faa684ed28867b97f4a6a2dee5df8ce974e76b7018e3f22a1c4cf2678570f20"
+        },
+        "identityB": {
+          "priv": "3333333333333333333333333333333333333333333333333333333333333333",
+          "pub": "7b0d47d93427f8311160781c7c733fd89f88970aef490d8aa0ee19a4cb8a1b14"
+        },
+        "signedPreKeyB": {
+          "priv": "4444444444444444444444444444444444444444444444444444444444444444",
+          "pub": "ff2ee45601ec1b67310c7790404585ae697331eee1c1f8cf2419731c1fff3e6b"
+        },
+        "oneTimePreKeyB": {
+          "priv": "5555555555555555555555555555555555555555555555555555555555555555",
+          "pub": "38ab664bd86f77d7e66bdd9ae0792913a94fd8b33a1260027e4b46c1f4884c67"
+        }
+      },
+      "dh": {
+        "dh1": "b21afd23cc289c5c693adc6d9c7198657e590320fa4dd7a0aaf606e441a2ea46",
+        "dh2": "1fdc192faa0212a9aae7bb4f41b580227fd5ad3e5d777faae230dfe973f3e805",
+        "dh3": "d31a1338a14cf92083e61f66bf842151cf156318bcddc07e42443937c05dd640",
+        "dh4": "25bed864771ea4f3d83d9fdaa0ebe218d9feca2ba8f9b4940d069e505ff91d31"
+      },
+      "ikm": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffb21afd23cc289c5c693adc6d9c7198657e590320fa4dd7a0aaf606e441a2ea461fdc192faa0212a9aae7bb4f41b580227fd5ad3e5d777faae230dfe973f3e805d31a1338a14cf92083e61f66bf842151cf156318bcddc07e42443937c05dd64025bed864771ea4f3d83d9fdaa0ebe218d9feca2ba8f9b4940d069e505ff91d31",
+      "rootKey": "c0688cd89849deb793a513585c76c4a8db9e3b5f3052bd9b693f563fd457fbf5",
+      "chainKey": "30a2c2233752170f88a99c8a4916ffa29a878b03cf3d59c6137fc3ac651a9973"
+    },
+    {
+      "withOneTimePreKey": false,
+      "inputs": {
+        "identityA": {
+          "priv": "1111111111111111111111111111111111111111111111111111111111111111",
+          "pub": "7b4e909bbe7ffe44c465a220037d608ee35897d31ef972f07f74892cb0f73f13"
+        },
+        "ephemeralA": {
+          "priv": "2222222222222222222222222222222222222222222222222222222222222222",
+          "pub": "0faa684ed28867b97f4a6a2dee5df8ce974e76b7018e3f22a1c4cf2678570f20"
+        },
+        "identityB": {
+          "priv": "3333333333333333333333333333333333333333333333333333333333333333",
+          "pub": "7b0d47d93427f8311160781c7c733fd89f88970aef490d8aa0ee19a4cb8a1b14"
+        },
+        "signedPreKeyB": {
+          "priv": "4444444444444444444444444444444444444444444444444444444444444444",
+          "pub": "ff2ee45601ec1b67310c7790404585ae697331eee1c1f8cf2419731c1fff3e6b"
+        },
+        "oneTimePreKeyB": null
+      },
+      "dh": {
+        "dh1": "b21afd23cc289c5c693adc6d9c7198657e590320fa4dd7a0aaf606e441a2ea46",
+        "dh2": "1fdc192faa0212a9aae7bb4f41b580227fd5ad3e5d777faae230dfe973f3e805",
+        "dh3": "d31a1338a14cf92083e61f66bf842151cf156318bcddc07e42443937c05dd640",
+        "dh4": null
+      },
+      "ikm": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffb21afd23cc289c5c693adc6d9c7198657e590320fa4dd7a0aaf606e441a2ea461fdc192faa0212a9aae7bb4f41b580227fd5ad3e5d777faae230dfe973f3e805d31a1338a14cf92083e61f66bf842151cf156318bcddc07e42443937c05dd640",
+      "rootKey": "8bc7bfcf7c654ec2530fd29fde6b7fde98c46044bca682be6796a2ad20bc852f",
+      "chainKey": "457a3f61d3330e279c839682da3386ca23f8396d9b1d3c4558fa7be6f0fb22f7"
+    }
+  ],
+  "ratchet": {
+    "x3dhRootKey": "c0688cd89849deb793a513585c76c4a8db9e3b5f3052bd9b693f563fd457fbf5",
+    "steps": [
+      {
+        "who": "alice-initial",
+        "ourRatchetPriv": "6666666666666666666666666666666666666666666666666666666666666666",
+        "ourRatchetPub": "219e4d800da968d2a5fcb009c784f4746c7138edb9ee4844b739e830b05cf424",
+        "theirRatchetPub": "ff2ee45601ec1b67310c7790404585ae697331eee1c1f8cf2419731c1fff3e6b",
+        "dhOut": "bef8ae582f817bd7eb1b104a83343a15770c1cf2dbc4b4207b70897b7a532209",
+        "rootKeyIn": "c0688cd89849deb793a513585c76c4a8db9e3b5f3052bd9b693f563fd457fbf5",
+        "newRootKey": "a10f8a562daa9fba22e03b115eb5270d19521d81c3e480a048fcb4ddcf590ddf",
+        "newChainKey": "79ee758217a6958096a9ed7ed80eb6e4dbd27ffa61eb223526516cd4cd8c52ce"
+      },
+      {
+        "who": "bob-first-reply",
+        "ourRatchetPriv": "7777777777777777777777777777777777777777777777777777777777777777",
+        "ourRatchetPub": "1cf579aba45a10ba1d1ef06d91fca2aa9ed0a1150515653155405d0b18cb9a67",
+        "theirRatchetPub": "219e4d800da968d2a5fcb009c784f4746c7138edb9ee4844b739e830b05cf424",
+        "dhOut": "f51374f53d26b1f83b4bccfc30b5c609abcaafbd97c3014794c7b45c42a1f059",
+        "rootKeyIn": "a10f8a562daa9fba22e03b115eb5270d19521d81c3e480a048fcb4ddcf590ddf",
+        "newRootKey": "87d59c6e25eb6db5878916d79975e1e947bef7d2589d758379d4577d5d7f0493",
+        "newChainKey": "1c614c120dcf943fefbd80da2efdf1a68fd0cd46944952d21754dce0e0c179b2"
+      }
+    ],
+    "chain": {
+      "startChainKey": "79ee758217a6958096a9ed7ed80eb6e4dbd27ffa61eb223526516cd4cd8c52ce",
+      "steps": [
+        {
+          "index": 0,
+          "chainKey": "79ee758217a6958096a9ed7ed80eb6e4dbd27ffa61eb223526516cd4cd8c52ce",
+          "messageKeySeed": "622e7ea160bba6de9a42209fda52fdd7cd0f4d0452591d2302632340d32dc238",
+          "nextChainKey": "ba00927165e50dc25f18d7ccace36ad98b903890a19e3014bb4ddb5739f634a5",
+          "cipherKey": "b0c95c13b143996c37f72a50f319d6089ac6aca2d1e5612e6ac525f4dc9c7fb7",
+          "macKey": "f063007a3995f8c12ac6429595b202ca7d47d517939a8f5e6ce42b4c1db19ff6",
+          "iv": "73cc219e44ced7483c36d166ed6b764b"
+        },
+        {
+          "index": 1,
+          "chainKey": "ba00927165e50dc25f18d7ccace36ad98b903890a19e3014bb4ddb5739f634a5",
+          "messageKeySeed": "a132877e46619635663618b66ed9c6fa0e38544d058436d02ad10c4fb02ec1d5",
+          "nextChainKey": "5ab80cce1e3778364c67931365dfc2b1af6d645a86e226e2a28683fdd46cb087",
+          "cipherKey": "df1bb5b53bbafbfd6d271210ed2224a5800601b3561b52173c2850a806437ab6",
+          "macKey": "9fcf4c09a33aca88b1ccf575f9fea9b924a49dcaff6bab7abc82d7efef29ac37",
+          "iv": "98a282376b3437159db46c8e25514e83"
+        },
+        {
+          "index": 2,
+          "chainKey": "5ab80cce1e3778364c67931365dfc2b1af6d645a86e226e2a28683fdd46cb087",
+          "messageKeySeed": "9ae11135e3fb84e75f9fbab988fe723ef1147a7f70f6535aecc2169645f0cbab",
+          "nextChainKey": "826fe7fa3197b8401d63fa93226d2662522215a241aec6e925bc76854bc68b42",
+          "cipherKey": "fa14bd22082b941596a4596eb3881c72e8a533c5635111e6770c8603439566df",
+          "macKey": "42c5d44d95ba87ef535fd01f58e3af29a12b1116abddfb4aada81f3fe44d0f8f",
+          "iv": "daafa56ff9e40f4fffb8ea18badf860d"
+        }
+      ]
+    }
+  },
+  "fingerprints": [
+    {
+      "iterations": 5200,
+      "version": 0,
+      "localIdentifier": "alice-stable-id",
+      "localKey": "7b4e909bbe7ffe44c465a220037d608ee35897d31ef972f07f74892cb0f73f13",
+      "localKeySerialized": "057b4e909bbe7ffe44c465a220037d608ee35897d31ef972f07f74892cb0f73f13",
+      "remoteIdentifier": "bob-stable-id",
+      "remoteKey": "7b0d47d93427f8311160781c7c733fd89f88970aef490d8aa0ee19a4cb8a1b14",
+      "remoteKeySerialized": "057b0d47d93427f8311160781c7c733fd89f88970aef490d8aa0ee19a4cb8a1b14",
+      "display": "116198449401683066604894847474589060530044134577513574584361",
+      "scannable": "080012220a20370acd0ce33f27b9242ea381de58335cbf9b2384b7aa9ecc94dea6861f922b691a220a20bef1e5da3a3b6cf71fb47872c5d866c375cc7ab740895637212aba2181296250"
+    },
+    {
+      "iterations": 5200,
+      "version": 0,
+      "localIdentifier": "bob-stable-id",
+      "localKey": "7b0d47d93427f8311160781c7c733fd89f88970aef490d8aa0ee19a4cb8a1b14",
+      "localKeySerialized": "057b0d47d93427f8311160781c7c733fd89f88970aef490d8aa0ee19a4cb8a1b14",
+      "remoteIdentifier": "alice-stable-id",
+      "remoteKey": "7b4e909bbe7ffe44c465a220037d608ee35897d31ef972f07f74892cb0f73f13",
+      "remoteKeySerialized": "057b4e909bbe7ffe44c465a220037d608ee35897d31ef972f07f74892cb0f73f13",
+      "display": "116198449401683066604894847474589060530044134577513574584361",
+      "scannable": "080012220a20bef1e5da3a3b6cf71fb47872c5d866c375cc7ab740895637212aba21812962501a220a20370acd0ce33f27b9242ea381de58335cbf9b2384b7aa9ecc94dea6861f922b69"
+    }
+  ]
+}

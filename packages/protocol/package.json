@@ -10,7 +10,8 @@
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src test --ext .ts",
-    "test:coverage": "vitest run --coverage"
+    "test:coverage": "vitest run --coverage",
+    "vectors:generate": "node test/vectors/run-generate.cjs"
   },
   "peerDependencies": {
     "@noble/hashes": "^2.0.1",
@@ -19,6 +20,7 @@
   },
   "devDependencies": {
     "@noble/hashes": "^2.0.1",
+    "@signalapp/libsignal-client": "^0.103.0",
     "@types/node": "^24.19.0",
     "@typescript-eslint/parser": "^8.0.0",
     "@vitest/coverage-v8": "^5.0.0",

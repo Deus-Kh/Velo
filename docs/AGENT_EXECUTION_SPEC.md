@@ -43,7 +43,7 @@ This is security-critical code. A subtle bug here does not produce a crash; it p
 3. Any deployment or change to a running server.
 4. Any change that invalidates existing sessions or stored messages — flag the blast radius and wait. (T2.0, T2.5, T2.13 all do; they ship as one wire bump.)
 5. Deleting user data or dropping a collection, even in development.
-6. **Adding a dependency that performs cryptography.** Approved set: `tweetnacl`, `tweetnacl-util`, `@noble/hashes`. Pending sign-off: `@noble/ciphers` (D3 = B). Approved **test-only** (devDependency of `packages/protocol`, never linked into the app): `@signalapp/libsignal-client` (AGPL-3.0; the licence does not reach the shipped app because nothing from it is distributed).
+6. **Adding a dependency that performs cryptography.** Approved set: `tweetnacl`, `tweetnacl-util`, `@noble/hashes`. Pending sign-off: `@noble/ciphers` (D3 = B). Approved **test-only** (devDependency of `packages/protocol`, never linked into the app): `@signalapp/libsignal-client` (AGPL-3.0; the licence does not reach the shipped app because nothing from it is distributed). Installed 2026-09-28 at 0.103.0 (T2.15).
 7. Any task whose acceptance criteria contradict the security model.
 
 ## 0.4 How to know you succeeded
@@ -498,11 +498,13 @@ Target structure and migration map as in v1 T2.1 (`primitives/`, `ratchet/`, `ha
 ---
 
 ## T2.15 — libsignal known-answer vectors
-**Tier** CORE · **Est** 2d · **Depends** T2.4 · **Dependency** `@signalapp/libsignal-client` devDependency only (§0.3-6)
+**Tier** CORE · **Est** 2d · **Depends** T2.4 · **Dependency** `@signalapp/libsignal-client` devDependency only (§0.3-6) · **Status:** done 2026-09-28 (vectors committed; 4 assertions red by design)
 
 `test/vectors/generate.ts` uses libsignal to produce, for fixed seeds: X3DH shared secrets (with and without OPK), root/chain KDF outputs for a scripted sequence, and `Fingerprint` display strings. Commit the JSON vectors. Assertions run against Velo after T2.0/T2.5/T2.13 adopt Signal's constants (§2.2). Until then the assertions are `test.failing`.
 
 **Acceptance:** vectors committed with the libsignal version recorded; after T2.9 all vector assertions pass.
+
+**Status 2026-09-28:** `@signalapp/libsignal-client@0.103.0` (devDependency of the package; prebuilt binaries for win32/linux/darwin ship in the package, nothing links into the app). `test/vectors/generate.ts` + `run-generate.cjs` (`npm run vectors:generate`, TypeScript loaded through `test/harness/ts-require.cjs`) → `test/vectors/libsignal.json` with `libsignalVersion`, `notes`, and sections `x25519`, `hkdf`, `x3dh` (with/without OPK: inputs, the four DH outputs, IKM, root and chain key), `ratchet` (X3DH root → Alice's initial `KDF_RK` step → Bob's first reply step; three `KDF_CK` steps with seed, next chain key, cipher key, mac key, iv), `fingerprints` (both directions; hash input is the 0x05-prefixed serialized key as libsignal does it). Fixed 32-byte private keys make the file reproducible; `regenerate.test.ts` deep-equals a fresh `buildVectors()` against the committed file. `libsignal.test.ts`: passing today — X25519 agreement, HKDF with Signal labels, chain KDF (Velo's HMAC 0x01/0x02 is Signal's); `it.fails` with diagnostics — X3DH (T2.9: Velo omits `DH(EK_A, IK_B)`, orders DHs differently, no `0xFF` prefix, info `x3dh-v1`), `KDF_RK` (T2.0: info `rk-v1` vs `WhisperRatchet`), message-key expansion (T2.5, if the 80-byte split is adopted; otherwise flip to a documented deviation), safety number (T2.13). Deviations: (1) the generator is TypeScript run through the transpile hook rather than a compiled script; (2) X3DH/ratchet compositions are transcribed from libsignal's Rust (`initialize_alice_session`, `RootKey::create_chain`, `ChainKey::message_keys`) over libsignal's own primitives because the 0.103 Node API only builds PQXDH sessions (Kyber prekey mandatory in `PreKeyBundle.new`) and exposes no Kyber decapsulation, so a classical session's root key cannot be recovered from a real libsignal session for cross-checking; the interop stretch needs PQXDH first; (3) Velo's two-key identity (DEVIATION-5) cannot be fed to libsignal's `Fingerprint`, so the fingerprint vectors pin the construction with one 32-byte key and T2.13 must state how the two keys are combined before hashing. Suite: 32 files, 66 passed, 14 expected-fail, 25 s.
 
 ---
 
