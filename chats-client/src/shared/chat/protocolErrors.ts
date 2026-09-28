@@ -31,6 +31,10 @@ const TABLE: Record<ProtocolErrorCode, (peerName: string) => ProtocolErrorPresen
   IDENTITY_BINDING_INVALID: (peer) => ({ userMessage: 'Invalid key data from ' + peer, recoverable: false, action: 'reset', securityWarning: false }),
   HEADER_TAMPERED: () => ({ userMessage: 'Security warning: a message was modified in transit', recoverable: false, action: 'verify', securityWarning: true }),
   IDENTITY_MISMATCH: (peer) => ({ userMessage: 'Safety number with ' + peer + ' has changed', recoverable: false, action: 'verify', securityWarning: true }),
+  // Phase 6' groups (T6.1)
+  SENDER_KEY_MISSING: (peer) => ({ userMessage: 'Waiting for ' + peer + '\u2019s group key\u2026', recoverable: true, action: 'auto-retry', securityWarning: false }),
+  SENDER_KEY_STALE: (peer) => ({ userMessage: 'Group key from ' + peer + ' is out of date', recoverable: true, action: 'auto-retry', securityWarning: false }),
+  SENDER_KEY_SIGNATURE_INVALID: (peer) => ({ userMessage: 'Security warning: a group message claiming to be from ' + peer + ' was not signed by them', recoverable: false, action: 'verify', securityWarning: true }),
 };
 
 export function presentProtocolError(code: ProtocolErrorCode, peerName = 'this contact'): ProtocolErrorPresentation {
@@ -70,6 +74,11 @@ export function classifyPendingMessageError(error: unknown): PendingMessageError
         return 'identity_mismatch';
       case 'SEND_FAILED':
         return 'send_failed';
+      case 'SENDER_KEY_MISSING':
+      case 'SENDER_KEY_STALE':
+        return 'no_session';
+      case 'SENDER_KEY_SIGNATURE_INVALID':
+        return 'decrypt_failed';
     }
   }
 

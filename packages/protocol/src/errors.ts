@@ -23,7 +23,11 @@ export type ProtocolErrorCode =
   | 'INVALID_KEY_LENGTH'
   | 'SESSION_RESET_REQUIRED'
   | 'IDENTITY_MISMATCH'
-  | 'IDENTITY_BINDING_INVALID';
+  | 'IDENTITY_BINDING_INVALID'
+  // Phase 6' groups (T6.1)
+  | 'SENDER_KEY_MISSING'
+  | 'SENDER_KEY_STALE'
+  | 'SENDER_KEY_SIGNATURE_INVALID';
 
 export const PROTOCOL_ERROR_CODES: readonly ProtocolErrorCode[] = [
   'MISSING_BOOTSTRAP',
@@ -40,6 +44,9 @@ export const PROTOCOL_ERROR_CODES: readonly ProtocolErrorCode[] = [
   'SESSION_RESET_REQUIRED',
   'IDENTITY_MISMATCH',
   'IDENTITY_BINDING_INVALID',
+  'SENDER_KEY_MISSING',
+  'SENDER_KEY_STALE',
+  'SENDER_KEY_SIGNATURE_INVALID',
 ];
 
 /** Scalars only, so key material cannot be attached by accident. */

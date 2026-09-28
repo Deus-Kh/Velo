@@ -710,6 +710,26 @@ Implement §8.1 step 2 exactly. `pn` is read in exactly one place.
 
 ---
 
+# 7b. PHASE 6' — GROUPS WITH PER-USER SENDER KEYS (~4 weeks) — added 2026-09-28
+
+Written when Phase 4' closed; the roadmap (§7, D6) fixes the shape: **groups first, per-user Sender Keys**, the distribution record carries `deviceId` (always 0) so multi-device changes nothing in the format. Sender Keys give forward secrecy per message inside an epoch but no post-compromise security until the key rotates; rotation on every membership change is mandatory (T6.5). Recorded as **DEVIATION-9** (same property as Signal's Sender Keys).
+
+| Task | Objective | Est | Notes |
+|---|---|---|---|
+| **T6.1** | Sender-key primitives in `packages/protocol` | 2d | `senderkey/state.ts` (state, distribution record, receiver state from a record), `senderkey/message.ts` (`groupEncrypt` / `groupDecrypt`: chain KDF per message, `WhisperMessageKeys` expansion, secretbox, Ed25519 signature over `u8 v \| u32 keyId \| u32 iteration \| len‖groupId \| len‖senderUserId \| ciphertext`; skipped keys, replay window and skip bounds reused from the ratchet; zeroization). New codes `SENDER_KEY_MISSING`, `SENDER_KEY_STALE`, `SENDER_KEY_SIGNATURE_INVALID`. Frozen vectors. Pure steps, R7. |
+| **T6.2** | Content envelope inside the pairwise ratchet | 1d | Plaintext of a pairwise message becomes `{v:1, kind:'text', text}` or `{v:1, kind:'skdm', groupId, skdm}` (JSON, versioned); legacy bare text still reads. This is how sender keys travel: over the existing X3DH + Double Ratchet sessions, never through the server in the clear. |
+| **T6.3** | Server: groups | 3d | `Group` model (id, name, members with roles, epoch, createdBy), routes create/get/list/add/remove/leave, system events; `group:send` stores **one document per recipient** (reuses Message: `groupId`, `conversationId = group:<id>`, per-group `seq`, TTL, delete-on-delivery and receipts unchanged) and fans out `message:new`; push wake-ups unchanged. Membership checks on every event. |
+| **T6.4** | Client: group send/receive, local store, UI | 4d | Per (group, sender) state sealed in AsyncStorage; distribute own state to every member over pairwise sessions on join/create and on request (`SENDER_KEY_MISSING` → ask); group chat screen, create group, member list. |
+| **T6.5** | Rotation on membership change | 2d | Add/remove/leave → every remaining sender generates a new keyId and redistributes; a removed member's next message is `SENDER_KEY_STALE` for everyone and its own state is deleted. |
+| **T6.6** | Harness scenarios G01–G06 | 2d | Three-member group: in order, out of order across senders, forged sender, late joiner (starts at the distribution's iteration), removed member cannot read after rotation, rotation redistributes to everyone. Known-red registry extended. |
+| **T6.7** | Docs | 1d | §8 gets the group wire format and DEVIATION-9; roadmap §2.1/§2.2 rows; `architecture.md` §3. |
+
+**Gate:** an E2EE group between three real Android devices; a removed member reads nothing after rotation; all pairwise scenarios still green.
+
+**T6.1 status 2026-09-28: done** (one commit). `senderkey/state.ts`: `createSenderKeyState` (random u32 keyId, random chain key, Ed25519 pair; injectable for vectors), `senderKeyDistributionMessage` (carries the current iteration so a late joiner starts there; `deviceId: 0`), `senderKeyStateFromDistribution` (no signing secret). `senderkey/message.ts`: group wire v1 `{v, keyId, iteration, ciphertext, signature}`; encrypt derives one message key per message with the ratchet's chain KDF, expands it with `WhisperMessageKeys`, seals with secretbox, signs the canonical bytes; decrypt verifies the signature **before** touching any key, then skipped-key fast path, replay window (256), old counter → `UNKNOWN_OLD_MESSAGE`, gap bound (100) and total bound (1000) reused from `ratchet/limits`, derive forward, open, commit; every intermediate wiped. A member cannot forge another member and a message cannot be re-attributed to another group or sender (both are in the signed bytes). Tests: distribution shape, three-member in-order and out-of-order delivery, forgery and re-attribution refusals with the state untouched, replay/stale/old/gap refusals, frozen vectors. Client taxonomy extended with the three codes (`SENDER_KEY_SIGNATURE_INVALID` is a security warning).
+
+---
+
 # 8. REFERENCE
 
 ## 8.1 Normative ratchet algorithm (replaces v1 §8.1)
@@ -831,6 +851,9 @@ Every bump: update this table, the server validator, `Message.ts`, and the clien
 | `SEND_FAILED` | "Not sent — tap to retry" | yes | Retry |
 | `STORAGE_CORRUPTION` | "Local data problem" | no | Reset local state |
 | `INVALID_KEY_LENGTH` / `IDENTITY_BINDING_INVALID` | "Invalid key data from <name>" | no | Reset |
+| `SENDER_KEY_MISSING` | "Waiting for <name>’s group key…" (T6.1) | yes | auto-retry (ask the sender for its distribution) |
+| `SENDER_KEY_STALE` | "Group key from <name> is out of date" | yes | auto-retry (the sender rotated; wait for the new distribution) |
+| `SENDER_KEY_SIGNATURE_INVALID` | "Security warning: a group message claiming to be from <name> was not signed by them" | no | verify (security-warning class) |
 | **`HEADER_TAMPERED`** | **"Security warning: a message was modified in transit"** | no | prominent warning + verify |
 | **`IDENTITY_MISMATCH`** | **"Safety number with <name> has changed"** | manual | verify or accept new identity; sending blocked until then |
 
@@ -850,6 +873,7 @@ Canonical list in T2.4. Each scenario file states the checklist row it automates
 | `DEVIATION-5` | Two identity keys (Ed25519 signing + X25519 DH) bound by a signature, versus Signal's single Curve25519 identity with XEdDSA; the safety number hashes `IK_sign || IK_dh` (64 bytes, no type byte) where libsignal hashes `0x05 || key` | avoids a new signature scheme; binding is verified on every bundle and `initPacket`; the fingerprint construction itself is libsignal's and is vector-tested with libsignal's key encoding | **Active since 2026-09-28 (T2.13, D10)** |
 | `DEVIATION-6` | Random 24-byte AEAD nonce instead of a KDF-derived nonce | — | **Removed by T2.5 (2026-09-28): the nonce is derived from the message key with `WhisperMessageKeys`, as in Signal.** |
 | `DEVIATION-7` | Glare keeps one decrypt-only secondary session on the winner's side until the peer switches, where libsignal keeps a list of previous session states per address | bounded state, deterministic tie-break (lower user id), no lost in-flight messages | **Active since 2026-09-28 (T2.11)** |
+| `DEVIATION-9` | Group messages use per-user Sender Keys: forward secrecy per message, no post-compromise security inside an epoch; rotation on every membership change | groups before multi-device (D6); Signal's Sender Keys have the same property | **Active since 2026-09-28 (T6.1)** |
 | `DEVIATION-8` | Zeroization is best effort: every intermediate byte array is wiped (`primitives/zeroize.ts`), but the keys stored base64 in a session are JavaScript strings and cannot be wiped, and the engine may hold copies of a byte array | JavaScript has no secure memory; libsignal (Rust) zeroizes on drop | **Active since 2026-09-28 (T3.4)** |
 
 ## 8.6 Glossary
@@ -877,6 +901,7 @@ PHASE 2 ── strictly sequential through T2.15
                                               ▼
 PHASE 3' ── T3.1 … T3.6           (T3.6 conditional; blocks nothing in six months)
 PHASE 4' ── T4.1 … T4.11          (T4.7 CI lands early, right after T2.4)
+PHASE 6' ── T6.1 ─► T6.2 ─► T6.3 ─► T6.4 ─► T6.5 ─► T6.6 ─► T6.7   (added 2026-09-28)
 ```
 
 ## 9.1 Suggested execution order

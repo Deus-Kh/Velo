@@ -97,3 +97,23 @@ export {
   type BoundIdentity,
 } from './identity/binding';
 export { checkIdentity, requireIdentityMatch, type IdentityCheck } from './identity/trust';
+
+// Phase 6' groups (T6.1): Sender Keys
+export {
+  createSenderKeyState,
+  senderKeyDistributionMessage,
+  senderKeyStateFromDistribution,
+  SENDER_KEY_VERSION,
+  SENDER_KEY_DEVICE_ID,
+  type SenderKeyState,
+  type SenderKeyDistributionMessage,
+} from './senderkey/state';
+export {
+  groupEncrypt,
+  groupDecrypt,
+  groupMessageSignedBytes,
+  type GroupMessage,
+  type GroupAssociatedData,
+  type GroupEncryptResult,
+  type GroupDecryptResult,
+} from './senderkey/message';
