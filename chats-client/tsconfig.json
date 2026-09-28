@@ -3,12 +3,16 @@
   "compilerOptions": {
     "types": [
       "jest"
-    ]
+    ],
+    "paths": {
+      "@velo/protocol": ["../packages/protocol/src/index.ts"]
+    }
   },
   "include": [
     "**/*.ts",
     "**/*.tsx",
-    "nativewind-env.d.ts"
+    "nativewind-env.d.ts",
+    "../packages/protocol/src/**/*.ts"
   ],
   "exclude": [
     "**/node_modules",

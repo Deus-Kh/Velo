@@ -8,7 +8,7 @@ import { useAuthStore } from '../store/auth.store';
 
 import { keysApi } from '../shared/api/keys.api';
 import { ensureIdentityKeyPairForUser } from '../shared/crypto/identityKeys';
-import { computeSafetyNumber } from '../shared/crypto/fingerprint';
+import { computeSafetyNumber } from '@velo/protocol';
 import { getTrustedIdentity, setTrustedIdentity, clearTrustedIdentity } from '../shared/storage/trustedIdentities';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'VerifyContact'>;

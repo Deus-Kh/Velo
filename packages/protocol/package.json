@@ -1,0 +1,32 @@
+{
+  "name": "@velo/protocol",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Velo protocol core: X3DH, Double Ratchet, identity. Pure TypeScript, no platform dependencies.",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src test --ext .ts"
+  },
+  "peerDependencies": {
+    "@noble/hashes": "^2.0.1",
+    "tweetnacl": "^1.0.3",
+    "tweetnacl-util": "^0.15.1"
+  },
+  "devDependencies": {
+    "@noble/hashes": "^2.0.1",
+    "@types/node": "^24.19.0",
+    "@typescript-eslint/parser": "^8.0.0",
+    "eslint": "^8.57.1",
+    "tweetnacl": "^1.0.3",
+    "tweetnacl-util": "^0.15.1",
+    "typescript": "^5.9.3",
+    "vitest": "^5.0.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

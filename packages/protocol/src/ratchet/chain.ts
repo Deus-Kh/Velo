@@ -1,4 +1,4 @@
-import { hmacSha256 } from './kdf';
+import { hmacSha256 } from '../primitives/kdf';
 
 const LABEL_MESSAGE_KEY = new Uint8Array([1]);
 const LABEL_CHAIN_KEY = new Uint8Array([2]);

@@ -1,13 +1,13 @@
 import nacl from 'tweetnacl';
 import { encodeBase64, decodeBase64 } from 'tweetnacl-util';
 
-import type { RatchetSessionV2 } from './sessionTypes';
-import { chainKdf } from './ratchetChain';
+import type { RatchetSessionV2 } from '@velo/protocol';
+import { chainKdf } from '@velo/protocol';
 import { saveSession } from '../storage/sessionStore';
-import { utf8Encode, utf8Decode } from './utf8';
-import { applyDhRatchet } from './dhRatchet';
+import { utf8Encode, utf8Decode } from '@velo/protocol';
+import { applyDhRatchet } from '@velo/protocol';
 import { putV2MessageKey } from '../storage/v2MessageKeyStore';
-import { normalizeB64 } from './base64';
+import { normalizeB64 } from '@velo/protocol';
 
 export type V2Header = {
   n: number;

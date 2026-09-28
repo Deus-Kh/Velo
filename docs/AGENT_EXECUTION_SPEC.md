@@ -71,7 +71,7 @@ velo_old/
 │       ├── screens/ components/ store/ theme/
 │       └── shared/
 │           ├── api/ chat/ notifications/ socket/ utils/
-│           ├── crypto/                     ← THE PROTOCOL. 22 files. Moves to packages/protocol in T2.1
+│           ├── crypto/                     ← impure remainder after T2.1 (messageV2, x3dh, prekeys, key stores); pure core is in packages/protocol
 │           └── storage/                    AsyncStorage + Keychain (sessions in plaintext — T1.3)
 └── chats-server/                           Express 5, Mongoose 9, Socket.io 4
     └── src/
@@ -414,7 +414,7 @@ If the app was ever uploaded to Google Play with this key: request an upload-key
 ---
 
 ## T1.16 — iOS builds, connects, and receives push
-**Tier** CORE · **Fixes** P0-2 (iOS), part of P1-9 · **Est** 1d · **Depends** T1.2
+**Tier** CORE · **Fixes** P0-2 (iOS), part of P1-9 · **Est** 1d · **Depends** T1.2 · **Status: DEFERRED by the owner (2026-09-28) — do not touch iOS until told otherwise.** Phase 1' is considered complete for Android with this task parked. When resumed: `FirebaseApp.configure()` in AppDelegate, `use_frameworks! :linkage => :static` + `$RNFirebaseAsStaticFramework = true` in the Podfile, `UIBackgroundModes: remote-notification`, `aps-environment` entitlement, a real bundle identifier (the project still carries the template `org.reactjs.native.example.*`), and the Firebase `GoogleService-Info.plist` from the console.
 
 Add `ios/client/GoogleService-Info.plist` (from Firebase console; it is a client config, may be committed), `FirebaseApp.configure()` in `AppDelegate.swift`, `UIBackgroundModes: remote-notification`, APNs key uploaded to Firebase (human), remove the empty `NSLocationWhenInUseUsageDescription`, `pod install`.
 
@@ -432,11 +432,13 @@ Add `ios/client/GoogleService-Info.plist` (from Firebase console; it is a client
 ---
 
 ## T2.1 — Extract `packages/protocol`
-**Tier** CORE · **Est** 3d · **Risk** high (large mechanical move)
+**Tier** CORE · **Est** 3d · **Risk** high (large mechanical move) · **Status:** done 2026-09-28
 
 Target structure and migration map as in v1 T2.1 (`primitives/`, `ratchet/`, `handshake/`, `identity/`, `types/`, `test/{harness,scenarios,properties,vectors}`), with one change: `storage/sessionStore.ts`'s `createSessionFromX3DH` moves to `ratchet/session.ts` as a **pure** function (the persistence wrapper stays in the client). Zero behaviour change. `git mv`. ESLint `no-restricted-imports` bans `react-native`, `@react-native-*`, `AsyncStorage`, `Keychain` under `packages/protocol/src`.
 
 **Acceptance:** `tsc --noEmit` clean in the package; `grep -rE "react-native|AsyncStorage|Keychain" packages/protocol/src` empty; the client builds and runs unchanged; renames, not delete+add.
+
+**Status 2026-09-28:** done. Package `tsc` clean, 21 vitest tests (frozen chain/root/session vectors, `applyDhRatchet` behaviour pinned incl. the P1-3 skipped-key wipe, purity), `eslint` clean; purity grep empty; client `tsc`/ESLint/Jest (56) green; Metro release bundle carries the 11 package modules from source and exactly one `tweetnacl`. Packaging decision (owner): **no npm workspaces** — the package is consumed as TS source via `tsconfig` `paths`, Metro `extraNodeModules` + `resolveRequest` (shared deps pinned to the app's `node_modules`), and Jest `moduleNameMapper`; it has its own `node_modules` only for vitest/eslint/tsc. Deviations: the v1 `test/{harness,scenarios,properties,vectors}` layout is created by T2.4, not here; `applyDhRatchet` and `verifySignedPreKeyBundle` were moved as-is and remain defective (P1-0, P0-9) until T2.0/T2.13. The default `__tests__/App.test.tsx` still fails to load `react-native-gesture-handler` under Jest — pre-existing, unrelated, tracked for T4.7.
 
 ---
 

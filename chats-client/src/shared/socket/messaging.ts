@@ -8,7 +8,7 @@ import type { ReplyReference } from '../chat/types';
 
 import { loadSession } from '../storage/sessionStore';
 import { encryptV2, decryptV2 } from '../crypto/messageV2';
-import type { RatchetSessionV2 } from '../crypto/sessionTypes';
+import type { RatchetSessionV2 } from '@velo/protocol';
 import type { X3DHInitPacket } from '../crypto/x3dh';
 import { ensureV2SessionFromIncoming } from '../crypto/sessionBootstrap';
 

@@ -1,8 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import nacl from 'tweetnacl';
-import { encodeBase64, decodeBase64 } from 'tweetnacl-util';
-import type { AnySession, RatchetSessionV2 } from '../crypto/sessionTypes';
-import { hkdfSha256 } from '../crypto/kdf';
+import type { AnySession, RatchetSessionV2 } from '@velo/protocol';
+import { createSessionFromX3DH as buildSessionFromX3DH } from '@velo/protocol';
 import { getOrCreateSessionMasterKey } from '../crypto/sessionMasterKey';
 import { looksSealed, openJson, sealJson } from './sealed';
 
@@ -83,74 +81,32 @@ export async function deleteSession(params: {
 }
 
 /**
- * Create a new v2 session from X3DH-derived keys.
- * X3DH produces one chain key. We need to derive send and recv keys from it.
+ * Create and persist a new v2 session from X3DH-derived keys.
  *
- * IMPORTANT:
- * Send/recv MUST be mirrored between peers.
- * Use a deterministic "initiator" rule so both sides agree without extra messages.
- *
- * NOTE (P1-0 / T2.0): this HKDF directional split is not the standard Double
- * Ratchet bootstrap and is the reason the DH ratchet never fires today. T2.0
- * replaces it; do not build on it.
+ * The session bytes come from the pure builder in @velo/protocol (T2.1);
+ * this wrapper only resolves the initiator rule and saves the result.
+ * When `isInitiator` is omitted a deterministic user-id comparison is used
+ * so both peers agree without extra messages.
  */
 export async function createSessionFromX3DH(params: {
   myUserId: string;
   peerUserId: string;
   rootKey: string;  // base64
-  chainKey: string; // base64 (initial - we'll expand this)
+  chainKey: string; // base64 (single X3DH chain key)
   isInitiator?: boolean;
 }): Promise<RatchetSessionV2> {
-  const chainKeyBytes = decodeBase64(params.chainKey);
-
-  // Expand the X3DH chainKey into 2 directional keys (64 bytes total)
-  const info = new Uint8Array([99, 104, 97, 105, 110, 75, 101, 121, 68, 105, 114]); // "chainKeyDir"
-  const expanded = hkdfSha256({
-    ikm: chainKeyBytes,
-    salt: new Uint8Array(32),
-    info,
-    length: 64,
-  });
-
-  const k0 = expanded.slice(0, 32);
-  const k1 = expanded.slice(32, 64);
-
-  // Deterministic initiator rule (both sides must compute same boolean)
-  const initiator =
+  const isInitiator =
     typeof params.isInitiator === 'boolean'
       ? params.isInitiator
       : String(params.myUserId) < String(params.peerUserId);
 
-  // Mirror mapping:
-  // - initiator: send=k0, recv=k1
-  // - responder: send=k1, recv=k0
-  const chainKeySendBytes = initiator ? k0 : k1;
-  const chainKeyRecvBytes = initiator ? k1 : k0;
-
-  const dhs = nacl.box.keyPair(); // X25519
-
-  const session: RatchetSessionV2 = {
-    v: 1,
-    protoVersion: 2,
+  const session = buildSessionFromX3DH({
     peerUserId: params.peerUserId,
-
     rootKey: params.rootKey,
-    chainKeySend: encodeBase64(chainKeySendBytes),
-    chainKeyRecv: encodeBase64(chainKeyRecvBytes),
+    chainKey: params.chainKey,
+    isInitiator,
+  });
 
-    Ns: 0,
-    Nr: 0,
-    PN: 0,
-
-    skippedKeys: {},
-
-    DHsPublicKey: encodeBase64(dhs.publicKey),
-    DHsPrivateKey: encodeBase64(dhs.secretKey),
-
-    // IMPORTANT: leave null for now; it will be set when first v2 header.dhPub is seen
-    // and applyDhRatchet/bootstrap logic runs in decryptV2.
-    DHrPublicKey: null,
-  };
   await saveSession({
     myUserId: params.myUserId,
     peerUserId: params.peerUserId,

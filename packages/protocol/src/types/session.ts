@@ -18,7 +18,7 @@ export interface RatchetSessionV2 {
 
   /**
    * Skipped message keys, keyed `${dhPubBase64}:${messageNumber}` (epoch-
-   * namespaced — see messageV2.ts skippedKeyId). Value: base64 message key.
+   * namespaced — see the client's messageV2.ts skippedKeyId (moves here in T2.2)). Value: base64 message key.
    */
   skippedKeys?: Record<string, string>;
 

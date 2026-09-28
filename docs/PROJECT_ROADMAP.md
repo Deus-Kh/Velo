@@ -146,7 +146,7 @@ What a user can actually do today: 1:1 text with replies, receipts, typing, pres
 | 1:1 text, reply/quote | ✅ | ✅ | ✅ |
 | Read receipts / typing / presence | ✅ with toggles (no presence) | ⚠️ always-on, no toggles, subscribable by anyone | ✅ toggles + relationship check (P2-10) |
 | Push notifications | ✅ data-only, decrypted on device | ⚠️ Android OS-rendered only; no handler; no iOS | ✅ T3.3 |
-| iOS build | ✅ | ❌ cannot connect | ✅ T1.16 |
+| iOS build | ✅ | ❌ cannot connect | ⏸ T1.16 deferred by owner (2026-09-28): Android only for now |
 | Reactions, edit, delete, forward | ✅ | ❌ | ✅ Phase 7' |
 | Images / video / files / voice notes | ✅ | ❌ | ✅ Phase 8' |
 | Disappearing messages | ✅ | ❌ | ✅ Phase 7' |
@@ -416,6 +416,8 @@ Extraction happens in T2.1. Secrets (`*.pem`, `*.keystore`, service-account JSON
 ### PHASE 2 — Protocol package, harness, correctness · weeks 4–8 · `[CORE]`
 
 **2a (weeks 4–5).** T2.1 extract `packages/protocol` (pure mechanical move); T2.2 purify encrypt/decrypt; T2.3 typed error taxonomy; T2.4 harness (`MemoryStore`, `VirtualClient`, adversarial `Network`) with scenarios S01–S21; T2.15 libsignal known-answer vectors. **Nine scenarios must fail** before any fix — that is the proof the harness works.
+
+**T2.1 — done 2026-09-28.** `packages/protocol` (`@velo/protocol`) holds `primitives/{base64,encoding,utf8,kdf}`, `ratchet/{chain,root,dh,session}`, `handshake/{bundle,types}`, `identity/fingerprint`, `types/session` — all `git mv`, zero behaviour change, chain/root/session KDF outputs frozen as vectors (R8). `createSessionFromX3DH` split: pure builder in the package, persistence wrapper in the client. Consumed as TypeScript source without npm workspaces: `tsconfig` `paths`, Metro `extraNodeModules` + a `resolveRequest` that pins the package's shared deps (`tweetnacl`, `tweetnacl-util`, `@noble/hashes`, `@babel/runtime`) to the app's copies (bundle source map shows one tweetnacl), Jest `moduleNameMapper`. Purity enforced twice: package `.eslintrc.js` `no-restricted-imports` and a vitest test that also forbids `await`. Still in the client until T2.2: `messageV2.ts`, `x3dh.ts`, `prekeyBundle.ts`, `sessionBootstrap.ts`, key stores.
 
 **2b (weeks 6–8), strictly in this order:** T2.0 standard bootstrap → T2.13 identity binding + initiator authentication + safety number → T2.5 AEAD with identity-bound AD (wire v3, one bump) → T2.6 bounded skip → T2.7 keep skipped keys → T2.8 `skipMessageKeys(pn)` → T2.9 fourth DH → T2.10 SPK rotation → T2.11 glare/reinstall handling → T2.14 local encrypted store + delete-after-use (may slide to Phase 3') → T2.12 manual 22/22 checklist.
 

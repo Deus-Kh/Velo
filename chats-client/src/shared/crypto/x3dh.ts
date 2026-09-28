@@ -1,7 +1,7 @@
 import nacl from 'tweetnacl';
 import { encodeBase64, decodeBase64 } from 'tweetnacl-util';
 
-import { hkdfSha256 } from './kdf';
+import { hkdfSha256 } from '@velo/protocol';
 import { fetchAndVerifyPreKeyBundle } from './prekeyBundle';
 import { getSignedPreKeySecretBytesForUser } from './prekeys';
 import {

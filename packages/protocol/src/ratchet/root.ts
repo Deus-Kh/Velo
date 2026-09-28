@@ -1,4 +1,4 @@
-import { hkdfSha256 } from './kdf';
+import { hkdfSha256 } from '../primitives/kdf';
 
 const INFO_RK = new Uint8Array([114, 107, 45, 118, 49]); // "rk-v1"
 

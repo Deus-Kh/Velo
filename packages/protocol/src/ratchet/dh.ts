@@ -1,8 +1,8 @@
 import nacl from 'tweetnacl';
 import { encodeBase64, decodeBase64 } from 'tweetnacl-util';
-import type { RatchetSessionV2 } from './sessionTypes';
-import { kdfRootKey } from './ratchetRoot';
-import { normalizeB64 } from './base64';
+import type { RatchetSessionV2 } from '../types/session';
+import { kdfRootKey } from './root';
+import { normalizeB64 } from '../primitives/base64';
 
 /**
  * Applies a DH ratchet step when we detect peer dhPub change.

@@ -1,6 +1,6 @@
 
 
-import { normalizeB64 } from '../crypto/base64';
+import { normalizeB64 } from '@velo/protocol';
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import nacl from 'tweetnacl';
 import { decodeBase64 } from 'tweetnacl-util';
@@ -13,7 +13,7 @@ import { messagesApi } from '../api/messages.api';
 import { useAuthStore } from '../../store/auth.store';
 
 import type { V2Encrypted } from '../crypto/messageV2';
-import { utf8Decode } from '../crypto/utf8';
+import { utf8Decode } from '@velo/protocol';
 import { deleteV2MessageKeysForPair, getV2MessageKey } from '../storage/v2MessageKeyStore';
 import {
   listPendingMessages,
@@ -25,7 +25,7 @@ import {
 } from '../storage/pendingMessageStore';
 
 import { deleteSession, loadSession } from '../storage/sessionStore';
-import type { RatchetSessionV2 } from '../crypto/sessionTypes';
+import type { RatchetSessionV2 } from '@velo/protocol';
 import { decryptV2 } from '../crypto/messageV2';
 import { ensureV2SessionFromIncoming } from '../crypto/sessionBootstrap';
 import type { X3DHInitPacket } from '../crypto/x3dh';

@@ -5,7 +5,7 @@ import { deleteOneTimePreKeySecret, getOneTimePreKeySecret, storeOneTimePreKeySe
 import { clearTrustedIdentity, getTrustedIdentity, setTrustedIdentity } from '../trustedIdentities';
 import { listPendingMessages, removePendingMessage, upsertPendingMessage } from '../pendingMessageStore';
 import { getOrCreateSessionMasterKey } from '../../crypto/sessionMasterKey';
-import type { RatchetSessionV2 } from '../../crypto/sessionTypes';
+import type { RatchetSessionV2 } from '@velo/protocol';
 import nacl from 'tweetnacl';
 import { encodeBase64 } from 'tweetnacl-util';
 
