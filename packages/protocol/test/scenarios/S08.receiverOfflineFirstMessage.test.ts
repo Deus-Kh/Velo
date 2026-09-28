@@ -1,8 +1,8 @@
 /**
  * S08 — Receiver offline for the first message.
  * Checklist: §6.1.
- * Defect covered: none (initPacket rides with the first message and later
- * messages get it attached by the server).
+ * Defect covered: none (initPacket rides with the first message; the
+ * receiver bootstraps from it and decrypts the rest in order).
  * Expected before fixes: pass. After: pass.
  */
 import { describe, expect, it } from 'vitest';
@@ -18,7 +18,7 @@ describe('S08 receiver offline for the first message', () => {
     const later = A!.send('B', 'm2');
     A!.send('B', 'm3');
     expect(first.initPacket).not.toBeNull();
-    expect(later.initPacket, 'the server attaches the first initPacket to later messages').toEqual(first.initPacket);
+    expect(later.initPacket, 'later messages carry no initPacket (synthesis removed, T2.13)').toBeNull();
 
     const results = network.release('B');
     expect(results.map((r) => r.ok)).toEqual([true, true, true]);

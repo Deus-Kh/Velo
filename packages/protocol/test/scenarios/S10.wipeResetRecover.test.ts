@@ -27,13 +27,13 @@ function wipeAndFailOnce(opts: { oneTimePreKeys: number }) {
   B!.register(); // reinstall: fresh identity, signed prekey and one-time prekeys
   expect(B!.hasSession('A')).toBe(false);
 
-  // A still has its session; the server attaches A's old initPacket, which
-  // names a one-time prekey B no longer has.
+  // A still has its session and sends without an initPacket; B has no
+  // session and (since T2.13) the server attaches nothing.
   network.hold('B');
   A!.send('B', 'lost');
   const [lost] = network.release('B');
   expect(lost!.ok).toBe(false);
-  expect(lost!.ok ? null : lost!.code, 'stale bootstrap must fail loudly, not silently').toBe('SESSION_RESET_REQUIRED');
+  expect(lost!.ok ? null : lost!.code, 'a message without a session must fail loudly, not silently').toBe('MISSING_BOOTSTRAP');
 
   A!.resetSession('B');
   B!.resetSession('A');

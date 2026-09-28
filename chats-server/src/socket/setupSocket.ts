@@ -300,19 +300,12 @@ export function setupSocket(io: Server) {
         }
         
 
-        // If current message doesn't have initPacket, try to find the first one in this pair
-        let initPacketToSend = (doc as any).initPacket ?? null;
-        if (!initPacketToSend) {
-          const firstWithInitPacket = await MessageModel.findOne({
-            conversationId: (doc as any).conversationId,
-            fromUserId: userId,
-            initPacket: { $ne: null },
-          }).sort({ createdAt: 1 });
-          
-          if (firstWithInitPacket) {
-            initPacketToSend = (firstWithInitPacket as any).initPacket;
-          }
-        }
+        // T2.13: a message carries only its own initPacket. The server no
+        // longer attaches the sender's first initPacket to later messages: that
+        // was a server-controlled session-injection point (P0-9). A receiver
+        // without a session bootstraps from the first stored message (history
+        // path) or from the live initPacket of the session-creating message.
+        const initPacketToSend = (doc as any).initPacket ?? null;
 
         io.to(dto.toUserId).emit("message:new", {
           serverMessageId: String(doc._id),

@@ -7,9 +7,9 @@ import type { V2Encrypted } from '../../src/ratchet/message';
  * the parts the protocol depends on:
  *  - GET /keys/bundle consumes the oldest unused one-time prekey and serves
  *    a bundle without one when the pool is empty (keys.routes.ts);
- *  - message:send dedupes by (sender, clientMessageId) and attaches the
- *    sender's FIRST stored initPacket to any later message that lacks one
- *    (setupSocket.ts, "firstWithInitPacket"); history returns stored docs.
+ *  - message:send dedupes by (sender, clientMessageId); a message carries
+ *    only its own initPacket (the first-initPacket synthesis was removed in
+ *    T2.13); history returns stored docs.
  *
  * `malicious` hooks model a compromised or on-path server: substituting the
  * bundle or the initPacket a client receives, or relabelling the sender.
@@ -138,7 +138,7 @@ export class FakeServer {
     return this.malicious.substituteBundle ? this.malicious.substituteBundle(bundle, requesterId) : bundle;
   }
 
-  /** message:send. Returns what the recipient is emitted (after synthesis and hooks). */
+  /** message:send. Returns what the recipient is emitted (after hooks). */
   storeMessage(fromUserId: string, dto: SendMessageDTO): NewMessageDTO {
     const existing = this.messages.find((m) => m.fromUserId === fromUserId && m.clientMessageId === dto.clientMessageId);
     const conversationId = FakeServer.conversationId(fromUserId, dto.toUserId);
@@ -156,13 +156,7 @@ export class FakeServer {
     };
     if (!existing) this.messages.push(stored);
 
-    let initPacket = stored.initPacket;
-    if (!initPacket) {
-      const first = this.messages.find((m) => m.conversationId === conversationId && m.fromUserId === fromUserId && m.initPacket);
-      initPacket = first ? first.initPacket : null;
-    }
-
-    let out: NewMessageDTO = { ...stored, initPacket };
+    let out: NewMessageDTO = { ...stored };
     if (this.malicious.substituteInitPacket) out = { ...out, initPacket: this.malicious.substituteInitPacket(out.initPacket, out) };
     if (this.malicious.relabelSender) out = { ...out, fromUserId: this.malicious.relabelSender(out.fromUserId, out) };
     return out;
