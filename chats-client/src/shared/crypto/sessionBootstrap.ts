@@ -1,5 +1,6 @@
 import { x3dhInitiate, x3dhRespond, type X3DHInitPacket } from './x3dh';
 import { loadSession, createInitiatorSession, createResponderSession } from '../storage/sessionStore';
+import { authenticateInitiator } from './identityTrust';
 
 export async function ensureV2Session(params: {
   myUserId: string;
@@ -33,6 +34,10 @@ export async function ensureV2SessionFromIncoming(params: {
     peerUserId: params.peerUserId,
   });
   if (existing) return;
+
+  // T2.13: the initiator's identity DH key must be the pinned one (fetched
+  // and pinned first on first contact). Throws IDENTITY_MISMATCH otherwise.
+  await authenticateInitiator({ myUserId: params.myUserId, peerUserId: params.peerUserId, initPacket: params.initPacket });
 
   const { sessionKeys, signedPreKey } = await x3dhRespond({
     myUserId: params.myUserId,

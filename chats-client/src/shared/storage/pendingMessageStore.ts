@@ -10,6 +10,7 @@ export type PendingMessageErrorCode =
   | 'no_session'
   | 'decrypt_failed'
   | 'storage_corruption'
+  | 'identity_mismatch'
   | 'unknown';
 
 export type PendingMessageRecord = {

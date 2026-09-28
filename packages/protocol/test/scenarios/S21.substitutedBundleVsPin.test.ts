@@ -5,7 +5,7 @@
  * but never checks later bundles against the pin. A self-consistent
  * attacker bundle (attacker's identity signs attacker's signed prekey)
  * passes signature verification and is accepted.
- * Expected before fixes: FAIL. After T2.13: pass with IDENTITY_MISMATCH.
+ * Expected before fixes: FAIL. After T2.13: pass with IDENTITY_MISMATCH. (Flipped green by T2.13.)
  */
 import nacl from 'tweetnacl';
 import { encodeBase64 } from 'tweetnacl-util';
@@ -14,7 +14,7 @@ import { codeOf, makeWorld } from '../harness';
 import { signIdentityBinding } from '../../src/identity/binding';
 
 describe('S21 substituted bundle identity vs pin', () => {
-  it.fails('A refuses a bundle whose identity keys differ from the pinned ones', () => {
+  it('A refuses a bundle whose identity keys differ from the pinned ones', () => {
     const { server, clients } = makeWorld();
     const { A } = clients;
 

@@ -21,7 +21,11 @@ export class Network {
   private tamperers: Tamperer[] = [];
   readonly log: DeliveryResult[] = [];
 
-  constructor(readonly server: FakeServer) {}
+  constructor(readonly server: FakeServer) {
+    server.emitToUser = (userId, event, payload) => {
+      this.clients.get(userId)?.onEvent(event, payload);
+    };
+  }
 
   attach(client: VirtualClient): void {
     this.clients.set(client.userId, client);

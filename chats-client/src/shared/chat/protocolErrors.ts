@@ -65,8 +65,9 @@ export function classifyPendingMessageError(error: unknown): PendingMessageError
       case 'STORAGE_CORRUPTION':
       case 'INVALID_KEY_LENGTH':
       case 'IDENTITY_BINDING_INVALID':
-      case 'IDENTITY_MISMATCH':
         return 'storage_corruption';
+      case 'IDENTITY_MISMATCH':
+        return 'identity_mismatch';
       case 'SEND_FAILED':
         return 'send_failed';
     }

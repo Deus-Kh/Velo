@@ -19,6 +19,8 @@ export type ServerIdentity = { identitySignPublicKey: string; identityDhPublicKe
 type ServerUser = {
   userId: string;
   identity: ServerIdentity | null;
+  identityHistory: ServerIdentity[];
+  identityChangedAt: number | null;
   signedPreKeys: Array<{ keyId: number; publicKey: string; signature: string; createdAt: number }>;
   oneTimePreKeys: Array<{ keyId: number; publicKey: string; used: boolean; createdAt: number }>;
 };
@@ -60,6 +62,8 @@ export class FakeServer {
   readonly messages: NewMessageDTO[] = [];
   readonly bundleIssues: Array<{ requesterId: string; targetId: string; oneTimePreKeyId: number | null }> = [];
   malicious: MaliciousHooks = {};
+  /** Set by Network: routes an event to a client's socket room. */
+  emitToUser: ((userId: string, event: string, payload: unknown) => void) | null = null;
   private seq = 0;
 
   static conversationId(a: string, b: string): string {
@@ -69,14 +73,36 @@ export class FakeServer {
   private user(userId: string): ServerUser {
     let u = this.users.get(userId);
     if (!u) {
-      u = { userId, identity: null, signedPreKeys: [], oneTimePreKeys: [] };
+      u = { userId, identity: null, identityHistory: [], identityChangedAt: null, signedPreKeys: [], oneTimePreKeys: [] };
       this.users.set(userId, u);
     }
     return u;
   }
 
+  /**
+   * POST /keys/identity (T2.13): an identity change appends the old identity
+   * to the history, purges the user's prekeys (they belonged to the old
+   * install) and notifies every peer with a conversation.
+   */
   uploadIdentityKeys(userId: string, identity: ServerIdentity): void {
-    this.user(userId).identity = { ...identity };
+    const u = this.user(userId);
+    const prev = u.identity;
+    const changed =
+      !!prev && (prev.identitySignPublicKey !== identity.identitySignPublicKey || prev.identityDhPublicKey !== identity.identityDhPublicKey);
+    u.identity = { ...identity };
+    if (!changed || !prev) return;
+
+    u.identityHistory.push(prev);
+    u.identityChangedAt = ++this.seq;
+    u.signedPreKeys = [];
+    u.oneTimePreKeys = [];
+
+    const peers = new Set<string>();
+    for (const m of this.messages) {
+      if (m.fromUserId === userId) peers.add(m.toUserId);
+      if (m.toUserId === userId) peers.add(m.fromUserId);
+    }
+    for (const peerId of peers) this.emitToUser?.(peerId, 'identity:changed', { userId, identityChangedAt: u.identityChangedAt });
   }
 
   uploadSignedPreKey(userId: string, spk: { keyId: number; publicKey: string; signature: string }): void {

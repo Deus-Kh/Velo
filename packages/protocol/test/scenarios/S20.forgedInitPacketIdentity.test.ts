@@ -5,13 +5,13 @@
  * A server (or anyone who can speak to it as "A") bootstraps a session with
  * B using its own identity key; B has A's identity pinned and still accepts.
  * Expected before fixes: FAIL — the forged message decrypts as if from A.
- * After T2.13: pass with IDENTITY_MISMATCH.
+ * After T2.13: pass with IDENTITY_MISMATCH. (Flipped green by T2.13.)
  */
 import { describe, expect, it } from 'vitest';
 import { makeWorld } from '../harness';
 
 describe('S20 forged initPacket identity', () => {
-  it.fails('B rejects a bootstrap whose initiator identity key is not the pinned key for A', () => {
+  it('B rejects a bootstrap whose initiator identity key is not the pinned key for A', () => {
     const { server, network, clients } = makeWorld(['A', 'B', 'M']);
     const { B, M } = clients;
 

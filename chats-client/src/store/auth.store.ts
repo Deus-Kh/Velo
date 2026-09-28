@@ -27,7 +27,8 @@ import { isJwtExpiring } from '../shared/auth/jwt';
 
 
 import { keysApi } from '../shared/api/keys.api';
-import { ensureIdentityKeyPairForUser } from '../shared/crypto/identityKeys';
+import { ensureIdentityKeyPairForUser, getIdentitySecretKeyBytesForUser } from '../shared/crypto/identityKeys';
+import { signIdentityBinding } from '@velo/protocol';
 import { ensurePreKeysForUser, topUpOneTimePreKeysIfNeeded } from '../shared/crypto/prekeys';
 import { getOrCreateHistoryMasterKey } from '../shared/crypto/historyMasterKey';
 import {
@@ -97,20 +98,16 @@ async function persistCredentials(userId: string, accessToken: string, refreshTo
  */
 async function bootstrapAfterAuth(userId: string, token: string) {
 
-  // 1) Identity signing key (Ed25519)
+  // 1) Bound identity (T2.13): Ed25519 signing key, X25519 DH key and the
+  //    binding signature that ties them, uploaded together.
   try {
-    const identityPub = await ensureIdentityKeyPairForUser(userId);
-    await keysApi.uploadIdentityKey(identityPub);
+    const identitySignPublicKey = await ensureIdentityKeyPairForUser(userId);
+    const identityDhPublicKey = await ensureIdentityDhKeyPairForUser(userId);
+    const identityBindingSignature = signIdentityBinding(await getIdentitySecretKeyBytesForUser(userId), identityDhPublicKey);
+    await keysApi.uploadIdentity({ identitySignPublicKey, identityDhPublicKey, identityBindingSignature });
   } catch (e) {
-    console.warn('Identity key setup failed:', e);
+    console.warn('Identity setup failed:', e);
   }
-
-  try {
-  const identityDhPub = await ensureIdentityDhKeyPairForUser(userId);
-  await keysApi.uploadIdentityDhKey(identityDhPub);
-} catch (e) {
-  console.warn('Identity DH key setup failed:', e);
-}
 
   // 1.5) History master key for at-rest protection
   try {

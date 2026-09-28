@@ -23,7 +23,7 @@ export async function x3dhInitiate(params: {
 }): Promise<{ initPacket: X3DHInitPacket; sessionKeys: X3DHSessionKeys; theirSignedPreKeyPublicKey: string }> {
   const { myUserId, peerUserId } = params;
 
-  const bundle = await fetchAndVerifyPreKeyBundle(peerUserId);
+  const bundle = await fetchAndVerifyPreKeyBundle(myUserId, peerUserId);
   const identityDhPublicKey = await ensureIdentityDhKeyPairForUser(myUserId);
   const identityDhSecretKey = await getIdentityDhSecretKeyBytesForUser(myUserId);
 

@@ -3,7 +3,8 @@ import nacl from 'tweetnacl';
 import { decodeBase64, encodeBase64 } from 'tweetnacl-util';
 import { ProtocolError } from '../../src/errors';
 import { verifySignedPreKeyBundle } from '../../src/handshake/bundle';
-import { signIdentityBinding } from '../../src/identity/binding';
+import { signIdentityBinding, verifyIdentityBinding } from '../../src/identity/binding';
+import { requireIdentityMatch } from '../../src/identity/trust';
 import { x3dhInitiate, x3dhRespond, type X3DHInitPacket } from '../../src/handshake/x3dh';
 import { normalizeB64 } from '../../src/primitives/base64';
 import { utf8Decode } from '../../src/primitives/utf8';
@@ -22,9 +23,11 @@ import type { Network } from './network';
  * (history decrypt with stored-key fallback, resetSession) and the key
  * bootstrap in prekeys.ts / identityKeys.ts / identityDhKeys.ts.
  *
- * Identity pinning mirrors today's client: NewChatScreen pins on first
- * contact (TOFU) and nothing in the crypto path checks the pin (P0-9).
- * T2.13 changes the client and this model together.
+ * Identity trust mirrors the client's crypto/identityTrust.ts (T2.13): the
+ * pin is created silently on first contact from a binding-verified
+ * identity; every bundle and every initPacket must agree with it, or the
+ * step fails with IDENTITY_MISMATCH; acceptNewIdentity re-pins and drops
+ * the session.
  *
  * Sessions use the standard Double Ratchet bootstrap (T2.0): the initiator
  * ratchets once at creation against SPK_B; the responder copies its SPK
@@ -38,6 +41,8 @@ export type ReceivedMessage = { fromUserId: string; text: string; serverMessageI
 export class VirtualClient {
   network: Network | null = null;
   readonly inbox: ReceivedMessage[] = [];
+  /** Peers the server reported an identity change for (identity:changed). */
+  readonly identityChanges: string[] = [];
   private msgCounter = 0; // orders createdAt; ids are random like the client's
 
   constructor(
@@ -112,10 +117,43 @@ export class VirtualClient {
     };
   }
 
-  // ───────── trust store (display-only today, P0-9) ─────────
+  // ───────── trust store ─────────
 
   pinIdentity(peerUserId: string, identity: ServerIdentity): void {
     this.store.setJson('trust:' + peerUserId, identity);
+  }
+
+  /** crypto/identityTrust.ts enforcePinnedIdentity: verify the binding, compare with the pin, pin on first contact. */
+  private enforcePinnedIdentity(peerUserId: string, presented: ServerIdentity): ServerIdentity {
+    verifyIdentityBinding(presented);
+    const pinned = this.trustedIdentity(peerUserId);
+    const result = requireIdentityMatch(pinned, presented, peerUserId);
+    if (result === 'first-contact') this.pinIdentity(peerUserId, presented);
+    return pinned ?? presented;
+  }
+
+  /** crypto/identityTrust.ts authenticateInitiator: the packet's DH key must be the pinned one. */
+  private authenticateInitiator(peerUserId: string, initPacket: X3DHInitPacket): void {
+    let pinned = this.trustedIdentity(peerUserId);
+    if (!pinned) pinned = this.enforcePinnedIdentity(peerUserId, this.server.getIdentity(this.userId, peerUserId));
+    requireIdentityMatch(
+      pinned,
+      { identitySignPublicKey: pinned.identitySignPublicKey, identityDhPublicKey: initPacket.initiatorIdentityDhPublicKey },
+      peerUserId,
+    );
+  }
+
+  /** The user accepted the peer's new identity: re-pin from the server and drop the session. */
+  acceptNewIdentity(peerUserId: string): void {
+    const fetched = this.server.getIdentity(this.userId, peerUserId);
+    verifyIdentityBinding(fetched);
+    this.pinIdentity(peerUserId, fetched);
+    this.resetSession(peerUserId);
+  }
+
+  /** Socket events from the server (identity:changed). */
+  onEvent(event: string, payload: unknown): void {
+    if (event === 'identity:changed') this.identityChanges.push((payload as { userId: string }).userId);
   }
 
   trustedIdentity(peerUserId: string): ServerIdentity | null {
@@ -162,15 +200,11 @@ export class VirtualClient {
 
     const bundle = this.server.getPreKeyBundle(this.userId, peerUserId);
     verifySignedPreKeyBundle(bundle);
-
-    // NewChatScreen: TOFU pin on first contact. Nothing enforces it yet (P0-9).
-    if (!this.trustedIdentity(peerUserId)) {
-      this.pinIdentity(peerUserId, {
-        identitySignPublicKey: bundle.identitySignPublicKey,
-        identityDhPublicKey: bundle.identityDhPublicKey,
-        identityBindingSignature: bundle.identityBindingSignature,
-      });
-    }
+    this.enforcePinnedIdentity(peerUserId, {
+      identitySignPublicKey: bundle.identitySignPublicKey,
+      identityDhPublicKey: bundle.identityDhPublicKey,
+      identityBindingSignature: bundle.identityBindingSignature,
+    });
 
     const dh = this.store.getJson<StoredPair>('identity-dh');
     if (!dh) throw new Error('not registered');
@@ -189,6 +223,7 @@ export class VirtualClient {
   /** ensureV2SessionFromIncoming. */
   private bootstrapFromInitPacket(peerUserId: string, initPacket: X3DHInitPacket): void {
     if (this.hasSession(peerUserId)) return;
+    this.authenticateInitiator(peerUserId, initPacket);
 
     const spk = this.store.getJson<StoredSignedPreKey>('signed-prekey');
     if (!spk) throw new ProtocolError('STORAGE_CORRUPTION', 'Signed prekey not found locally', { what: 'signedPreKey' });
