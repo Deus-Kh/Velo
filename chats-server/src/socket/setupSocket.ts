@@ -366,10 +366,9 @@ export function setupSocket(io: Server) {
         });
 
         if (!isUserOnline(String(dto.toUserId))) {
+          // T3.3: a data-only wake-up naming the message; the device fetches and decrypts it.
           await sendMessagePushToUser({
             toUserId: String(dto.toUserId),
-            fromUserId: String(userId),
-            conversationId: String((doc as any).conversationId),
             serverMessageId: String(doc._id),
           });
         }

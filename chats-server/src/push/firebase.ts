@@ -59,21 +59,66 @@ function getFirebaseAdmin() {
   }
 }
 
-export async function sendMessagePushToUser(params: {
-  toUserId: string;
-  fromUserId: string;
-  conversationId: string;
-  serverMessageId: string;
-}) {
+/**
+ * T3.3 (P1-9): the push is a data-only wake-up. It names the message the
+ * device should fetch and nothing else: no sender, no conversation, no
+ * text. The device pulls the ciphertext from `/messages/undelivered`,
+ * decrypts it, and renders the notification itself, so Google's servers
+ * never see who is talking to whom.
+ */
+export type MessagePushPayload = {
+  data: { type: "msg"; serverMessageId: string };
+  android: { priority: "high" };
+  apns: {
+    headers: { "apns-priority": "5"; "apns-push-type": "background" };
+    payload: { aps: { "content-available": 1 } };
+  };
+};
+
+export function buildMessagePush(serverMessageId: string): MessagePushPayload {
+  return {
+    data: { type: "msg", serverMessageId },
+    android: { priority: "high" },
+    // iOS is parked (T1.16); the silent-push shape is here so the iOS build needs no server change.
+    apns: {
+      headers: { "apns-priority": "5", "apns-push-type": "background" },
+      payload: { aps: { "content-available": 1 } },
+    },
+  };
+}
+
+/**
+ * Only these FCM errors mean the token is dead. Anything else (quota,
+ * internal, unavailable, a transient network failure) keeps the token: the
+ * old code pruned on any failure and silently unsubscribed devices during
+ * FCM outages.
+ */
+export const PRUNE_ERROR_CODES = new Set<string>([
+  "messaging/registration-token-not-registered",
+  "messaging/invalid-argument",
+  "messaging/invalid-registration-token",
+]);
+
+export function tokensToPrune(
+  tokens: string[],
+  responses: Array<{ success: boolean; error?: { code?: string } | null }>,
+): string[] {
+  const out: string[] = [];
+  responses.forEach((result, index) => {
+    const token = tokens[index];
+    if (!token || result.success) return;
+    const code = result.error?.code ?? "";
+    if (PRUNE_ERROR_CODES.has(code)) out.push(token);
+  });
+  return out;
+}
+
+export async function sendMessagePushToUser(params: { toUserId: string; serverMessageId: string }) {
   const admin = getFirebaseAdmin();
   if (!admin) return;
 
   const recipient = await UserModel.findById(params.toUserId).select("pushTokens");
   if (!recipient?.pushTokens?.length) return;
-
-  const sender = await UserModel.findById(params.fromUserId).select("username");
-  const title = sender?.username || "New message";
-  const body = "New encrypted message";
 
   const tokens = recipient.pushTokens
     .map((item: any) => item?.token)
@@ -84,36 +129,10 @@ export async function sendMessagePushToUser(params: {
   try {
     const response = await admin.messaging().sendEachForMulticast({
       tokens,
-      notification: {
-        title,
-        body,
-      },
-      data: {
-        type: "chat_message",
-        conversationId: params.conversationId,
-        fromUserId: params.fromUserId,
-        serverMessageId: params.serverMessageId,
-      },
-      android: {
-        priority: "high",
-        notification: {
-          priority: "high",
-        },
-      },
-      apns: {
-        payload: {
-          aps: {
-            sound: "default",
-            badge: 1,
-          },
-        },
-      },
+      ...buildMessagePush(params.serverMessageId),
     });
 
-    const invalidTokens = response.responses
-      .map((result: any, index: number) => (!result.success ? tokens[index] : null))
-      .filter((token: string | null) => token !== null);
-
+    const invalidTokens = tokensToPrune(tokens, response.responses ?? []);
     if (invalidTokens.length) {
       await UserModel.updateOne(
         { _id: params.toUserId },
@@ -127,6 +146,6 @@ export async function sendMessagePushToUser(params: {
       );
     }
   } catch (error) {
-    console.warn("[push] failed to send push notification:", error);
+    console.warn("[push] failed to send push notification:", (error as Error)?.message ?? error);
   }
 }
