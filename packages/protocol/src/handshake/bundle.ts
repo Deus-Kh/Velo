@@ -1,14 +1,15 @@
-import nacl from 'tweetnacl';
-import { decodeBase64 } from 'tweetnacl-util';
 import type { PreKeyBundle } from './types';
 import { ProtocolError } from '../errors';
+import { verifySignedPreKey } from './signedPrekey';
 
+/** The bundle's signed prekey must be signed by its identity key over the tagged (keyId, publicKey) (T2.10). */
 export function verifySignedPreKeyBundle(bundle: PreKeyBundle): void {
-  const identityPk = decodeBase64(bundle.identitySignPublicKey); // Ed25519 pub
-  const signedPreKeyPk = decodeBase64(bundle.signedPreKey.publicKey); // X25519 pub (message)
-  const signature = decodeBase64(bundle.signedPreKey.signature); // Ed25519 detached sig
-
-  const ok = nacl.sign.detached.verify(signedPreKeyPk, signature, identityPk);
+  const ok = verifySignedPreKey({
+    identitySignPublicKey: bundle.identitySignPublicKey,
+    keyId: bundle.signedPreKey.keyId,
+    publicKey: bundle.signedPreKey.publicKey,
+    signature: bundle.signedPreKey.signature,
+  });
 
   if (!ok) {
     throw new ProtocolError('IDENTITY_BINDING_INVALID', 'Invalid signedPreKey signature (possible MITM / key tampering)', {

@@ -1,67 +1,84 @@
 import nacl from 'tweetnacl';
 import * as Keychain from 'react-native-keychain';
-import { encodeBase64,decodeBase64 } from 'tweetnacl-util';
+import { encodeBase64 } from 'tweetnacl-util';
+import {
+  rotateSignedPreKeySet,
+  selectSignedPreKey,
+  signSignedPreKey,
+  type SignedPreKeyRecord,
+  type SignedPreKeySet,
+} from '@velo/protocol';
 
 import { keysApi } from '../api/keys.api';
 import { getIdentitySecretKeyBytesForUser } from './identityKeys';
 import { storeOneTimePreKeySecret } from '../storage/oneTimePreKeys';
 import { computeTopUpCount, isTopUpCheckDue } from './prekeyPolicy';
 
-
-type StoredSignedPreKey = {
-  keyId: number;
-  publicKey: string;   // base64
-  privateKey: string;  // base64 (X25519 secretKey)
-  signature: string;   // base64
-};
-
 function signedPreKeyService(userId: string) {
   return `signed-prekey:${userId}`;
 }
 
-async function getStoredSignedPreKey(userId: string): Promise<StoredSignedPreKey | null> {
+/**
+ * The stored signed-prekey set (T2.10): the current key plus retained
+ * previous ones. A pre-T2.10 record (a single key without `v`) is treated
+ * as absent: its signature format is no longer accepted, and sessions that
+ * used it copied the pair at creation, so nothing existing breaks.
+ */
+async function loadSignedPreKeySet(userId: string): Promise<SignedPreKeySet | null> {
   const creds = await Keychain.getGenericPassword({ service: signedPreKeyService(userId) });
   if (!creds) return null;
-  return JSON.parse(creds.password) as StoredSignedPreKey;
+  try {
+    const parsed = JSON.parse(creds.password) as Partial<SignedPreKeySet>;
+    return parsed && parsed.v === 2 && parsed.current ? (parsed as SignedPreKeySet) : null;
+  } catch {
+    return null;
+  }
 }
 
-async function saveSignedPreKey(userId: string, data: StoredSignedPreKey) {
-  await Keychain.setGenericPassword('signed-prekey', JSON.stringify(data), {
+async function saveSignedPreKeySet(userId: string, set: SignedPreKeySet) {
+  await Keychain.setGenericPassword('signed-prekey', JSON.stringify(set), {
     service: signedPreKeyService(userId),
     accessible: Keychain.ACCESSIBLE.WHEN_UNLOCKED_THIS_DEVICE_ONLY,
   });
 }
 
 /**
- * Ensures signed prekey exists locally and is uploaded to server.
- * Idempotent: can be called on every login/hydrate.
+ * Ensures a current signed prekey exists locally and on the server, rotating
+ * it when it is 7 days old and retaining previous keys for 30 days (T2.10).
+ * Idempotent: safe on every login / hydrate.
  */
-export async function ensureSignedPreKeyForUser(myUserId: string): Promise<void> {
-  let spk = await getStoredSignedPreKey(myUserId);
-
-  if (!spk) {
-    const keyId = Date.now(); // simple unique increasing id
+export async function ensureSignedPreKeyForUser(myUserId: string, now: number = Date.now()): Promise<{ rotated: boolean; keyId: number }> {
+  const identitySk = await getIdentitySecretKeyBytesForUser(myUserId);
+  const generate = (createdAt: number): SignedPreKeyRecord => {
     const kp = nacl.box.keyPair(); // X25519
+    // Key ids are u32 on the wire and must increase: seconds since 2020-01-01.
+    const keyId = Math.max(1, Math.floor((createdAt - Date.UTC(2020, 0, 1)) / 1000));
+    const publicKey = encodeBase64(kp.publicKey);
+    return { keyId, publicKey, privateKey: encodeBase64(kp.secretKey), signature: signSignedPreKey(identitySk, keyId, publicKey), createdAt };
+  };
 
-    const identitySk = await getIdentitySecretKeyBytesForUser(myUserId);
-    const sigBytes = nacl.sign.detached(kp.publicKey, identitySk);
+  const existing = await loadSignedPreKeySet(myUserId);
+  const { set, rotated } = rotateSignedPreKeySet(existing, now, generate);
+  if (rotated || !existing) await saveSignedPreKeySet(myUserId, set);
+  else if (set.previous.length !== existing.previous.length) await saveSignedPreKeySet(myUserId, set); // expired ones dropped
 
-    spk = {
-      keyId,
-      publicKey: encodeBase64(kp.publicKey),
-      privateKey: encodeBase64(kp.secretKey),
-      signature: encodeBase64(sigBytes),
-    };
+  // Upload (upsert) the current key; the server keeps the last few.
+  await keysApi.uploadSignedPreKey({ keyId: set.current.keyId, publicKey: set.current.publicKey, signature: set.current.signature });
+  return { rotated, keyId: set.current.keyId };
+}
 
-    await saveSignedPreKey(myUserId, spk);
-  }
-
-  // upload (upsert on server)
-  await keysApi.uploadSignedPreKey({
-    keyId: spk.keyId,
-    publicKey: spk.publicKey,
-    signature: spk.signature,
-  });
+/**
+ * The pair an initPacket names, if it is the current key or a retained one
+ * younger than 30 days; otherwise a typed SESSION_RESET_REQUIRED.
+ */
+export async function getSignedPreKeyPairForKeyId(
+  myUserId: string,
+  keyId: number,
+  now: number = Date.now(),
+): Promise<{ keyId: number; publicKey: string; privateKey: string }> {
+  const set = await loadSignedPreKeySet(myUserId);
+  const found = selectSignedPreKey(set, keyId, now);
+  return { keyId: found.keyId, publicKey: found.publicKey, privateKey: found.privateKey };
 }
 
 /**
@@ -71,13 +88,12 @@ export async function ensureSignedPreKeyForUser(myUserId: string): Promise<void>
  */
 export async function uploadOneTimePreKeysBatch(params: {
   myUserId: string;
-  count: number;          // e.g. 50
-  startKeyId?: number;    // optional for deterministic ids
+  count: number; // e.g. 50
+  startKeyId?: number; // optional for deterministic ids
 }): Promise<void> {
   const start = params.startKeyId ?? Date.now();
 
   const items: Array<{ keyId: number; publicKey: string }> = [];
-  const generatedKeyIds: number[] = [];
   for (let i = 0; i < params.count; i++) {
     const keyId = start + i;
     const kp = nacl.box.keyPair(); // X25519
@@ -93,7 +109,6 @@ export async function uploadOneTimePreKeysBatch(params: {
     });
 
     items.push({ keyId, publicKey: pub });
-    generatedKeyIds.push(keyId);
   }
 
   await keysApi.uploadOneTimePreKeys(items);
@@ -137,24 +152,10 @@ export async function topUpOneTimePreKeysIfNeeded(
 }
 
 /**
- * Login/hydrate bootstrap: ensure the signed prekey exists and is uploaded,
- * then top up the one-time pool unconditionally.
+ * Login/hydrate bootstrap: ensure the signed prekey exists (rotating when
+ * due) and is uploaded, then top up the one-time pool unconditionally.
  */
 export async function ensurePreKeysForUser(myUserId: string): Promise<void> {
   await ensureSignedPreKeyForUser(myUserId);
   await topUpOneTimePreKeysIfNeeded(myUserId, { force: true });
-}
-
-
-export async function getSignedPreKeySecretBytesForUser(myUserId: string): Promise<Uint8Array> {
-  const spk = await getStoredSignedPreKey(myUserId);
-  if (!spk) throw new Error('Signed prekey not found locally');
-  return decodeBase64(spk.privateKey); // X25519 secret key bytes
-}
-
-/** The stored signed-prekey pair; the responder session copies it (T2.0). */
-export async function getSignedPreKeyPairForUser(myUserId: string): Promise<{ keyId: number; publicKey: string; privateKey: string }> {
-  const spk = await getStoredSignedPreKey(myUserId);
-  if (!spk) throw new Error('Signed prekey not found locally');
-  return { keyId: spk.keyId, publicKey: spk.publicKey, privateKey: spk.privateKey };
 }

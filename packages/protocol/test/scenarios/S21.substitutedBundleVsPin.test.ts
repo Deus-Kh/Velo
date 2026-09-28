@@ -12,6 +12,7 @@ import { encodeBase64 } from 'tweetnacl-util';
 import { describe, expect, it } from 'vitest';
 import { codeOf, makeWorld } from '../harness';
 import { signIdentityBinding } from '../../src/identity/binding';
+import { signSignedPreKey } from '../../src/handshake/signedPrekey';
 
 describe('S21 substituted bundle identity vs pin', () => {
   it('A refuses a bundle whose identity keys differ from the pinned ones', () => {
@@ -33,7 +34,7 @@ describe('S21 substituted bundle identity vs pin', () => {
       signedPreKey: {
         keyId: 4242,
         publicKey: encodeBase64(attackerSpk.publicKey),
-        signature: encodeBase64(nacl.sign.detached(attackerSpk.publicKey, attackerSign.secretKey)),
+        signature: signSignedPreKey(attackerSign.secretKey, 4242, encodeBase64(attackerSpk.publicKey)),
       },
       oneTimePreKey: null,
     });

@@ -6,6 +6,7 @@ import { verifySignedPreKeyBundle } from '../../src/handshake/bundle';
 import { signIdentityBinding, verifyIdentityBinding } from '../../src/identity/binding';
 import { requireIdentityMatch } from '../../src/identity/trust';
 import { x3dhInitiate, x3dhRespond, type X3DHInitPacket } from '../../src/handshake/x3dh';
+import { rotateSignedPreKeySet, selectSignedPreKey, signSignedPreKey, type SignedPreKeyRecord, type SignedPreKeySet } from '../../src/handshake/signedPrekey';
 import { normalizeB64 } from '../../src/primitives/base64';
 import { ratchetDecrypt, ratchetEncrypt, type DerivedMessageKey, type MessageEnvelope } from '../../src/ratchet/message';
 import { decryptWithMessageKey, type AssociatedData } from '../../src/ratchet/envelope';
@@ -34,7 +35,6 @@ import type { Network } from './network';
  * pair and ratchets on the first inbound message.
  */
 type StoredPair = { publicKey: string; privateKey: string };
-type StoredSignedPreKey = StoredPair & { keyId: number; signature: string };
 
 export type ReceivedMessage = { fromUserId: string; text: string; serverMessageId: string };
 
@@ -49,6 +49,8 @@ export class VirtualClient {
     readonly userId: string,
     readonly server: FakeServer,
     public store: MemoryStore = new MemoryStore(),
+    /** Fake clock (ms); signed-prekey rotation and expiry depend on it. */
+    readonly now: () => number = () => Date.now(),
   ) {}
 
   // ───────── keys and registration ─────────
@@ -72,18 +74,17 @@ export class VirtualClient {
       identityBindingSignature: signIdentityBinding(decodeBase64(sign.privateKey), dh.publicKey),
     });
 
-    let spk = this.store.getJson<StoredSignedPreKey>('signed-prekey');
-    if (!spk) {
+    // crypto/prekeys.ts ensureSignedPreKeyForUser (T2.10): rotate when due, retain previous keys, upload the current one.
+    const signSk = decodeBase64(sign.privateKey);
+    const generate = (createdAt: number): SignedPreKeyRecord => {
       const kp = nacl.box.keyPair();
-      spk = {
-        keyId: this.nextKeyId(),
-        publicKey: encodeBase64(kp.publicKey),
-        privateKey: encodeBase64(kp.secretKey),
-        signature: encodeBase64(nacl.sign.detached(kp.publicKey, decodeBase64(sign.privateKey))),
-      };
-      this.store.setJson('signed-prekey', spk);
-    }
-    this.server.uploadSignedPreKey(this.userId, { keyId: spk.keyId, publicKey: spk.publicKey, signature: spk.signature });
+      const keyId = this.nextKeyId();
+      const publicKey = encodeBase64(kp.publicKey);
+      return { keyId, publicKey, privateKey: encodeBase64(kp.secretKey), signature: signSignedPreKey(signSk, keyId, publicKey), createdAt };
+    };
+    const { set } = rotateSignedPreKeySet(this.store.getJson<SignedPreKeySet>('signed-prekeys'), this.now(), generate);
+    this.store.setJson('signed-prekeys', set);
+    this.server.uploadSignedPreKey(this.userId, { keyId: set.current.keyId, publicKey: set.current.publicKey, signature: set.current.signature });
 
     this.uploadOneTimePreKeys(opts.oneTimePreKeys ?? 10);
   }
@@ -235,8 +236,8 @@ export class VirtualClient {
     if (this.hasSession(peerUserId)) return;
     this.authenticateInitiator(peerUserId, initPacket);
 
-    const spk = this.store.getJson<StoredSignedPreKey>('signed-prekey');
-    if (!spk) throw new ProtocolError('STORAGE_CORRUPTION', 'Signed prekey not found locally', { what: 'signedPreKey' });
+    // The pair the packet names: current or retained; expired or unknown is SESSION_RESET_REQUIRED (T2.10).
+    const spk = selectSignedPreKey(this.store.getJson<SignedPreKeySet>('signed-prekeys'), initPacket.signedPreKeyId, this.now());
 
     let opkSecret: Uint8Array | null = null;
     if (initPacket.oneTimePreKeyId !== null) {
@@ -368,7 +369,7 @@ export class VirtualClient {
   }
 
   /** App restart: a fresh process over the persisted store. */
-  static restore(userId: string, server: FakeServer, json: string): VirtualClient {
-    return new VirtualClient(userId, server, MemoryStore.restore(json));
+  static restore(userId: string, server: FakeServer, json: string, now?: () => number): VirtualClient {
+    return new VirtualClient(userId, server, MemoryStore.restore(json), now);
   }
 }

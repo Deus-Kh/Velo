@@ -14,6 +14,7 @@ import { encodeBase64 } from 'tweetnacl-util';
 import { describe, expect, it } from 'vitest';
 import { displayableFingerprint, fingerprintHalf } from '../../src/identity/fingerprint';
 import { signIdentityBinding } from '../../src/identity/binding';
+import { signSignedPreKey } from '../../src/handshake/signedPrekey';
 import { hkdfSha256 } from '../../src/primitives/kdf';
 import { chainKdf } from '../../src/ratchet/chain';
 import { kdfRootKey } from '../../src/ratchet/root';
@@ -76,7 +77,7 @@ describe('libsignal vectors: constructions (red until the named task)', () => {
         identitySignPublicKey: encodeBase64(ikSignB.publicKey),
         identityDhPublicKey: encodeBase64(fromHex(v.inputs.identityB.pub)),
         identityBindingSignature: signIdentityBinding(ikSignB.secretKey, encodeBase64(fromHex(v.inputs.identityB.pub))),
-        signedPreKey: { keyId: 1, publicKey: encodeBase64(spkPub), signature: encodeBase64(nacl.sign.detached(spkPub, ikSignB.secretKey)) },
+        signedPreKey: { keyId: 1, publicKey: encodeBase64(spkPub), signature: signSignedPreKey(ikSignB.secretKey, 1, encodeBase64(spkPub)) },
         oneTimePreKey: v.inputs.oneTimePreKeyB ? { keyId: 2, publicKey: encodeBase64(fromHex(v.inputs.oneTimePreKeyB.pub)) } : null,
       };
       const ephemeral = nacl.box.keyPair.fromSecretKey(fromHex(v.inputs.ephemeralA.priv));

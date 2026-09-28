@@ -7,7 +7,7 @@ import {
   type X3DHSessionKeys,
 } from '@velo/protocol';
 import { fetchAndVerifyPreKeyBundle } from './prekeyBundle';
-import { getSignedPreKeyPairForUser } from './prekeys';
+import { getSignedPreKeyPairForKeyId } from './prekeys';
 import { getOneTimePreKeySecret, deleteOneTimePreKeySecret } from '../storage/oneTimePreKeys';
 import { ensureIdentityDhKeyPairForUser, getIdentityDhSecretKeyBytesForUser } from './identityDhKeys';
 
@@ -41,7 +41,7 @@ export async function x3dhRespond(params: {
 }): Promise<{ sessionKeys: X3DHSessionKeys; signedPreKey: { publicKey: string; privateKey: string } }> {
   const { myUserId, initPacket } = params;
 
-  const spk = await getSignedPreKeyPairForUser(myUserId);
+  const spk = await getSignedPreKeyPairForKeyId(myUserId, initPacket.signedPreKeyId); // current or retained (T2.10)
   const signedPreKeySecretKey = decodeBase64(spk.privateKey);
 
   let oneTimePreKeySecretKey: Uint8Array | null = null;

@@ -26,7 +26,7 @@ describe('S19 ratchet advances', () => {
     };
 
     // B's first ratchet key is its signed prekey, replaced inside the first receive.
-    dhsB.add(B!.store.getJson<{ publicKey: string }>('signed-prekey')!.publicKey);
+    dhsB.add(B!.store.getJson<{ current: { publicKey: string } }>('signed-prekeys')!.current.publicKey);
 
     A!.send('B', 'a1');
     record();

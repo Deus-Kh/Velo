@@ -5,6 +5,7 @@ import { isProtocolError, protocolErrorCode } from '../src/errors';
 import type { PreKeyBundle } from '../src/handshake/types';
 import { x3dhInitiate, x3dhRespond } from '../src/handshake/x3dh';
 import { signIdentityBinding } from '../src/identity/binding';
+import { signSignedPreKey } from '../src/handshake/signedPrekey';
 
 const hex = (b: Uint8Array) => Array.from(b, (x) => x.toString(16).padStart(2, '0')).join('');
 
@@ -25,7 +26,7 @@ function bundle(withOpk: boolean): PreKeyBundle {
     signedPreKey: {
       keyId: 7,
       publicKey: encodeBase64(spkB.publicKey),
-      signature: encodeBase64(nacl.sign.detached(spkB.publicKey, ikSignB.secretKey)),
+      signature: signSignedPreKey(ikSignB.secretKey, 7, encodeBase64(spkB.publicKey)),
     },
     oneTimePreKey: withOpk ? { keyId: 9, publicKey: encodeBase64(opkB.publicKey) } : null,
   };

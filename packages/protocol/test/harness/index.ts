@@ -10,10 +10,14 @@ export { Network } from './network';
 export type { DeliveryResult } from './network';
 export { VirtualClient } from './virtualClient';
 
+export type Clock = { now: () => number; advance: (ms: number) => void };
+
 export type World = {
   server: FakeServer;
   network: Network;
   clients: Record<string, VirtualClient>;
+  /** Shared fake clock (signed-prekey rotation and expiry). */
+  clock: Clock;
   /** Restart a client: serialize its store and attach a fresh process over it. */
   restart: (userId: string) => VirtualClient;
 };
@@ -22,8 +26,10 @@ export function makeWorld(userIds: string[] = ['A', 'B'], opts: { oneTimePreKeys
   const server = new FakeServer();
   const network = new Network(server);
   const clients: Record<string, VirtualClient> = {};
+  let t = Date.UTC(2026, 8, 28);
+  const clock: Clock = { now: () => t, advance: (ms) => { t += ms; } };
   for (const id of userIds) {
-    const c = new VirtualClient(id, server);
+    const c = new VirtualClient(id, server, undefined, clock.now);
     network.attach(c);
     c.register({ oneTimePreKeys: opts.oneTimePreKeys ?? 10 });
     clients[id] = c;
@@ -31,12 +37,12 @@ export function makeWorld(userIds: string[] = ['A', 'B'], opts: { oneTimePreKeys
   const restart = (userId: string): VirtualClient => {
     const old = clients[userId];
     if (!old) throw new Error('no client ' + userId);
-    const fresh = VirtualClient.restore(userId, server, old.serialize());
+    const fresh = VirtualClient.restore(userId, server, old.serialize(), clock.now);
     network.attach(fresh);
     clients[userId] = fresh;
     return fresh;
   };
-  return { server, network, clients, restart };
+  return { server, network, clients, restart, clock };
 }
 
 /** The ProtocolError code a call throws, 'NOT_PROTOCOL_ERROR' for other throws, null if it returns. */

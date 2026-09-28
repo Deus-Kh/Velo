@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { verifySignedPreKeyBundle } from '../src/handshake/bundle';
 import type { PreKeyBundle } from '../src/handshake/types';
 import { signIdentityBinding, verifyIdentityBinding } from '../src/identity/binding';
+import { signSignedPreKey } from '../src/handshake/signedPrekey';
 
 function bundleFor(identity = nacl.sign.keyPair(), spk = nacl.box.keyPair(), dh = nacl.box.keyPair()): PreKeyBundle {
   return {
@@ -14,7 +15,7 @@ function bundleFor(identity = nacl.sign.keyPair(), spk = nacl.box.keyPair(), dh 
     signedPreKey: {
       keyId: 1,
       publicKey: encodeBase64(spk.publicKey),
-      signature: encodeBase64(nacl.sign.detached(spk.publicKey, identity.secretKey)),
+      signature: signSignedPreKey(identity.secretKey, 1, encodeBase64(spk.publicKey)),
     },
     oneTimePreKey: null,
   };
@@ -33,6 +34,9 @@ describe('verifySignedPreKeyBundle', () => {
     const other = nacl.sign.keyPair();
     const foreign = { ...b, signedPreKey: { ...b.signedPreKey, signature: encodeBase64(nacl.sign.detached(new Uint8Array(32), other.secretKey)) } };
     expect(() => verifySignedPreKeyBundle(foreign)).toThrow();
+    // T2.10: a signature made for another key id is refused.
+    const replayed = { ...b, signedPreKey: { ...b.signedPreKey, keyId: 2 } };
+    expect(() => verifySignedPreKeyBundle(replayed)).toThrow(/Invalid signedPreKey signature/);
   });
 
   it('is self-referential by construction: a bundle re-signed with a new identity passes the signature checks', () => {

@@ -56,6 +56,7 @@ export type MaliciousHooks = {
 };
 
 export const MAX_UNUSED_ONE_TIME_PREKEYS = 500;
+export const MAX_SIGNED_PREKEYS_PER_USER = 5;
 
 export class FakeServer {
   readonly users = new Map<string, ServerUser>();
@@ -114,6 +115,8 @@ export class FakeServer {
       return;
     }
     u.signedPreKeys.push({ ...spk, createdAt: ++this.seq });
+    // keys.routes.ts (T2.10): keep the last MAX_SIGNED_PREKEYS_PER_USER per user.
+    u.signedPreKeys = [...u.signedPreKeys].sort((a, b) => b.createdAt - a.createdAt).slice(0, MAX_SIGNED_PREKEYS_PER_USER);
   }
 
   uploadOneTimePreKeys(userId: string, items: Array<{ keyId: number; publicKey: string }>): void {
