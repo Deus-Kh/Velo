@@ -462,6 +462,8 @@ Extraction happens in T2.1. Secrets (`*.pem`, `*.keystore`, service-account JSON
 
 **6' progress — T6.3 done 2026-09-28** (one commit): groups on the server with roles, epochs, a system feed and realtime change notices; `group:send` fans out one copy per recipient so delivery, receipts, ordering and TTL work as for 1:1. Next in order: T6.4 (client: group send/receive, local store, UI).
 
+**6' progress — T6.4 done 2026-09-28** (two commits): the client sends and receives group messages under Sender Keys; each member's key travels over the pairwise session, is stored sealed, and is requested when a message cannot be opened; group chat screen, create-group flow, members sheet, group rows in the chat list, group notifications. Next in order: T6.5 (rotation on membership change: already wired into the client key lifecycle; the task closes with tests and a harness check).
+
 **2b progress — T2.14 done 2026-09-28** (one commit, D7 = A): plaintext stored locally in sealed records, message keys never archived, history read from the device with the server asked only for newer messages, one-time migration of the old archive. **The known-red registry is empty: every scenario the harness owns is green.** Remaining in Phase 2: T2.12 (manual two-device checklist, owner).
 
 **2b progress — T2.11 done 2026-09-28** (two commits): bootstrap persists only after the first message decrypts, bootstrap replay refused, glare converges on the lower user id without losing messages, a peer's local reset is adopted automatically. Next in order: T2.14.
