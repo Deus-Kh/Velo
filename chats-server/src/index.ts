@@ -13,6 +13,10 @@ import { setRealtimeServer } from './lib/realtime';
 const SOCKET_MAX_HTTP_BUFFER_SIZE = 256 * 1024;
 
 async function main() {
+  if (!config.IS_PRODUCTION) {
+    // T4.1: `npm start` runs the compiled build; the process manager sets NODE_ENV (T4.2).
+    console.warn('[server] NODE_ENV is not "production" (' + config.NODE_ENV + '): development settings are in effect');
+  }
   await mongoose.connect(config.MONGO_URI);
 
   // Rate limits and login backoff need their backing store before any route is served.

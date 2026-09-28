@@ -1,0 +1,14 @@
+{
+  // T4.1: the production build. tsconfig.json stays noEmit for type-checking;
+  // this one emits CommonJS + source maps to dist/ from src/ only (tests excluded).
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "outDir": "dist",
+    "rootDir": "src",
+    "sourceMap": true,
+    "removeComments": false
+  },
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "dist", "test"]
+}

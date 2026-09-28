@@ -686,6 +686,8 @@ Implement §8.1 step 2 exactly. `pn` is read in exactly one place.
 | T4.10 | Certificate pinning + rotation procedure | 2d |
 | T4.11 | Rewrite `docs/design/architecture.md` to match reality | 1d |
 
+**T4.1 status 2026-09-28: done** (one commit). `tsconfig.build.json` extends the type-check config and emits CommonJS with source maps from `src/` to `dist/` (tests excluded); `npm run build` = `tsc -p tsconfig.build.json`, `npm start` = `node dist/index.js` (no TypeScript loader, no watcher, no `cross-env`: the process manager sets `NODE_ENV=production`, T4.2; the server warns at boot when it is not), `npm run dev` keeps nodemon + ts-node, `npm run typecheck` is the `noEmit` pass. `nodemon` moved to devDependencies; `main` is `dist/index.js`; `engines.node >= 20`. `test/build.config.test.ts` pins the manifest so ts-node or nodemon cannot return to the production path. Verified: `npm run build` then loading `dist/app.js` with stub env succeeds; `dist/` is git-ignored.
+
 ---
 
 # 8. REFERENCE

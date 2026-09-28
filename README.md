@@ -50,8 +50,9 @@ The hook refuses commits containing connection strings, private keys, signing pa
 cd chats-server
 npm install
 cp .env.example .env      # then fill in MONGO_URI, JWT_SECRET (>= 32 chars), FIREBASE_SERVICE_ACCOUNT_PATH
-npm run dev               # nodemon
-npm start                 # production mode (NODE_ENV=production; requires REDIS_URL)
+npm run dev               # nodemon + ts-node, watches src/
+npm run build             # tsc → dist/ (T4.1)
+NODE_ENV=production npm start   # runs dist/index.js; the process manager sets NODE_ENV (requires REDIS_URL)
 npm test                  # vitest: route and socket tests against an in-memory MongoDB
 ```
 

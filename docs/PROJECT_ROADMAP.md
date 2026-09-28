@@ -100,7 +100,7 @@ What a user can actually do today: 1:1 text with replies, receipts, typing, pres
 | Product UI (behavioural) | 3/10 | Silent auth failures, no confirmations, no a11y, no i18n |
 | Feature breadth | 3/10 | No media, groups, calls, multi-device, backup, delete |
 | Test coverage | 0/10 | One default smoke test; client type-check fails |
-| Ops / deploy | 1/10 | `nodemon` in production, one process, no CI |
+| Ops / deploy | 1/10 | `nodemon` in production, one process, no CI — *compiled `dist/` build since T4.1 (2026-09-28)* |
 | Documentation | 6/10 | Thorough but was untracked and partly wrong |
 
 **Composite ~3.5/10 against "production secure messenger".** The distance is in schedulable work, but two of the items (P1-0, P0-9) are protocol-level and must come before anything else that touches sessions.
@@ -433,6 +433,8 @@ Extraction happens in T2.1. Secrets (`*.pem`, `*.keystore`, service-account JSON
 **3' progress — T3.5 done 2026-09-28** (one commit): the X3DH IKM builder takes an optional trailing KEM shared secret (PQXDH's exact shape), the bundle and init-packet schemas carry the PQ slots as `null`/absent, no wire bump. PQXDH proper stays a post-defense item (month 7). Next in order: T3.6 (header encryption) **only if weeks 9–11 are on schedule**; otherwise Phase 4'.
 
 **3' progress — T3.6 done 2026-09-28** (four commits, wire v4): header keys from the root KDF and X3DH, headers sealed on the wire, trial decryption on receipt, the server blind to counters and ratchet keys; the pre-T2.14 archive migration and the legacy history route retired with the bump. **Phase 3' is complete.** Next: Phase 4' (ops essentials), starting with T4.1.
+
+**4' progress — T4.1 done 2026-09-28** (one commit): the production process runs the compiled `dist/` build; nodemon and the TypeScript loaders are development-only; a manifest test keeps it that way. Next in order: T4.2 (process manager, graceful shutdown, restart on crash).
 
 **2b progress — T2.14 done 2026-09-28** (one commit, D7 = A): plaintext stored locally in sealed records, message keys never archived, history read from the device with the server asked only for newer messages, one-time migration of the old archive. **The known-red registry is empty: every scenario the harness owns is green.** Remaining in Phase 2: T2.12 (manual two-device checklist, owner).
 
