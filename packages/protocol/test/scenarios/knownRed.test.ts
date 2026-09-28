@@ -10,7 +10,6 @@ import { join } from 'path';
 import { describe, expect, it } from 'vitest';
 
 const KNOWN_RED: Record<string, string> = {
-  S12: 'header.n = 10_000_000 hangs — T2.6',
   S16: 'message-key archive unbounded — T2.14 (finding added by T2.4)',
 };
 

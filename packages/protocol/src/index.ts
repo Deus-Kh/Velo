@@ -46,6 +46,7 @@ export {
   type RatchetDecryptResult,
 } from './ratchet/message';
 export { canonicalHeaderBytes, decodeCanonicalHeader, WIRE_VERSION } from './ratchet/header';
+export { MAX_SKIP_PER_STEP, MAX_SKIP_TOTAL, MAX_SKIP_EPOCHS, MAX_MESSAGE_NUMBER, PEER_EPOCH_HISTORY } from './ratchet/limits';
 export { expandMessageKey, type ExpandedMessageKeys } from './ratchet/messageKeys';
 export { sealMessage, openMessage, decryptWithMessageKey, associatedDataBytes, MAC_LENGTH } from './ratchet/envelope';
 

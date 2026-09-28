@@ -3,6 +3,7 @@ import { encodeBase64, decodeBase64 } from 'tweetnacl-util';
 import { describe, expect, it } from 'vitest';
 import { initInitiatorSession, initResponderSession } from '../src/ratchet/session';
 import { MAX_SKIP, ratchetDecrypt, ratchetEncrypt, skippedKeyId, type MessageEnvelope } from '../src/ratchet/message';
+import { MAX_MESSAGE_NUMBER, MAX_SKIP_PER_STEP } from '../src/ratchet/limits';
 import { decryptWithMessageKey, MAC_LENGTH, type AssociatedData } from '../src/ratchet/envelope';
 import type { RatchetSessionV2 } from '../src/types/session';
 import { protocolErrorCode } from '../src/errors';
@@ -177,7 +178,41 @@ describe('ratchetEncrypt / ratchetDecrypt', () => {
     expect(ratchetDecrypt(b, e0.envelope, AB).plaintext).toBe('m0');
   });
 
-  it('retains at most MAX_SKIP skipped keys within an epoch (pinned; T2.6 changes the policy)', () => {
+  it('a gap of MAX_SKIP_PER_STEP - 1 is derived; MAX_SKIP_PER_STEP + 1 is TOO_MANY_SKIPPED before any derivation (T2.6)', () => {
+    let { a, b } = pair();
+    const envelopes: MessageEnvelope[] = [];
+    for (let i = 0; i < MAX_SKIP_PER_STEP + 2; i += 1) {
+      const e = ratchetEncrypt(a, 'm' + String(i), AB);
+      a = e.session;
+      envelopes.push(e.envelope);
+    }
+    const before = snapshot(b);
+    // gap 101: refused, session untouched.
+    expect(codeOf(() => ratchetDecrypt(b, envelopes[MAX_SKIP_PER_STEP + 1]!, AB))).toBe('TOO_MANY_SKIPPED');
+    expect(b).toEqual(before);
+    // gap 99: fine.
+    const ok = ratchetDecrypt(b, envelopes[MAX_SKIP_PER_STEP - 1]!, AB);
+    expect(ok.plaintext).toBe('m' + String(MAX_SKIP_PER_STEP - 1));
+    // The bound also protects the drain of the previous chain via pn.
+    b = ok.session;
+    const eb = ratchetEncrypt(b, 'b0', BA);
+    b = eb.session;
+    a = ratchetDecrypt(a, eb.envelope, BA).session; // A ratchets: new epoch
+    const next = ratchetEncrypt(a, 'a-next', AB);
+    const forgedPn = { ...next.envelope, header: { ...next.envelope.header, pn: next.envelope.header.pn + MAX_SKIP_PER_STEP + 1 } };
+    expect(codeOf(() => ratchetDecrypt(b, forgedPn, AB))).toBe('TOO_MANY_SKIPPED');
+  });
+
+  it('counters at or beyond MAX_MESSAGE_NUMBER are HEADER_TAMPERED before any derivation', () => {
+    const { a, b } = pair();
+    const e = ratchetEncrypt(a, 'x', AB);
+    for (const bad of [MAX_MESSAGE_NUMBER, 2 ** 32 - 1, -1, 1.5]) {
+      expect(codeOf(() => ratchetDecrypt(b, { ...e.envelope, header: { ...e.envelope.header, n: bad } }, AB))).toBe('HEADER_TAMPERED');
+      expect(codeOf(() => ratchetDecrypt(b, { ...e.envelope, header: { ...e.envelope.header, pn: bad } }, AB))).toBe('HEADER_TAMPERED');
+    }
+  });
+
+  it('retains at most MAX_SKIP skipped keys within an epoch (count bound; the epoch-aware prune follows)', () => {
     let { a, b } = pair();
     const envelopes: MessageEnvelope[] = [];
     for (let i = 0; i < MAX_SKIP + 10; i += 1) {
@@ -185,7 +220,7 @@ describe('ratchetEncrypt / ratchetDecrypt', () => {
       a = e.session;
       envelopes.push(e.envelope);
     }
-    const last = ratchetDecrypt(b, envelopes[envelopes.length - 1]!, AB);
+    const last = ratchetDecrypt(b, envelopes[envelopes.length - 1]!, AB); // gap 59 < MAX_SKIP_PER_STEP
     expect(Object.keys(last.session.skippedKeys ?? {}).length).toBe(MAX_SKIP);
     expect(last.derivedKeys.length).toBe(MAX_SKIP + 10);
     b = last.session;

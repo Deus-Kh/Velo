@@ -6,6 +6,7 @@ import type { RatchetSessionV2 } from '../types/session';
 import { ProtocolError } from '../errors';
 import { openMessage, sealMessage, type AssociatedData, type MessageEnvelope } from './envelope';
 import type { MessageHeader } from './header';
+import { MAX_MESSAGE_NUMBER, MAX_SKIP_PER_STEP } from './limits';
 
 export type { MessageHeader } from './header';
 export type { MessageEnvelope, AssociatedData } from './envelope';
@@ -39,8 +40,22 @@ export type RatchetDecryptResult = {
   consumedSkippedKeyId: string | null;
 };
 
-/** Bound on retained skipped keys per session. Behaviour pinned; T2.6 revisits. */
+/** Bound on retained skipped keys per session (count only; the epoch-aware policy lands with the prune step). */
 export const MAX_SKIP = 50;
+
+function requireCounter(value: number, what: string): void {
+  if (!Number.isInteger(value) || value < 0 || value >= MAX_MESSAGE_NUMBER) {
+    throw new ProtocolError('HEADER_TAMPERED', 'Header counter out of range', { what, value: String(value), limit: MAX_MESSAGE_NUMBER });
+  }
+}
+
+/** T2.6: refuse a gap larger than MAX_SKIP_PER_STEP before deriving anything. */
+function requireGap(until: number, from: number, what: string): void {
+  const gap = until - from;
+  if (gap > MAX_SKIP_PER_STEP) {
+    throw new ProtocolError('TOO_MANY_SKIPPED', 'Too many skipped messages in one step', { what, gap, limit: MAX_SKIP_PER_STEP });
+  }
+}
 
 export function skippedKeyId(dhPub: string, n: number): string {
   return dhPub + ':' + String(n);
@@ -95,6 +110,8 @@ export function ratchetEncrypt(session: RatchetSessionV2, plaintext: string, ad:
 export function ratchetDecrypt(session: RatchetSessionV2, envelope: MessageEnvelope, ad: AssociatedData): RatchetDecryptResult {
   const incomingDhPub = normalizeB64(envelope.header.dhPub);
   const targetN = envelope.header.n;
+  requireCounter(targetN, 'header.n');
+  requireCounter(envelope.header.pn, 'header.pn');
 
   // 1. Skipped-key fast path.
   const retained: Record<string, string> = { ...(session.skippedKeys || {}) };
@@ -117,6 +134,7 @@ export function ratchetDecrypt(session: RatchetSessionV2, envelope: MessageEnvel
   // 2. New peer ratchet key: drain the old chain to header.pn (T2.8), then ratchet (R13).
   if (!work.DHrPublicKey || work.DHrPublicKey !== incomingDhPub) {
     if (work.DHrPublicKey && work.chainKeyRecv) {
+      requireGap(envelope.header.pn, work.Nr, 'header.pn');
       let oldCk = decodeBase64(work.chainKeyRecv);
       let oldNr = work.Nr;
       while (oldNr < envelope.header.pn) {
@@ -141,7 +159,8 @@ export function ratchetDecrypt(session: RatchetSessionV2, envelope: MessageEnvel
     throw new ProtocolError('REPLAY_DETECTED', 'Replay or unknown old message', { n: targetN, nr: work.Nr });
   }
 
-  // 3–4. Derive forward to the target, retaining skipped keys.
+  // 3–4. Derive forward to the target, retaining skipped keys (bounded per step, T2.6).
+  requireGap(targetN, work.Nr, 'header.n');
   let ck = decodeBase64(work.chainKeyRecv);
   let nr = work.Nr;
   let messageKey: Uint8Array | null = null;

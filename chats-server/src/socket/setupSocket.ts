@@ -11,6 +11,8 @@ import { UserModel } from "../models/User";
 
 /** Maximum encrypted message body accepted over the socket (P0-5 storage-flood control). */
 const MAX_CIPHERTEXT_BYTES = 64 * 1024;
+/** Message counters are bounded far below u32 (spec T2.6); mirrors packages/protocol MAX_MESSAGE_NUMBER. */
+const MAX_MESSAGE_NUMBER = 2 ** 24;
 /** Same bound expressed as base64 characters (4 chars per 3 bytes, padded). */
 const MAX_CIPHERTEXT_B64_LENGTH = Math.ceil(MAX_CIPHERTEXT_BYTES / 3) * 4;
 
@@ -207,6 +209,8 @@ export function setupSocket(io: Server) {
           !Number.isInteger(v3.header.pn) ||
           v3.header.n < 0 ||
           v3.header.pn < 0 ||
+          v3.header.n >= MAX_MESSAGE_NUMBER ||
+          v3.header.pn >= MAX_MESSAGE_NUMBER ||
           !isNonEmptyString(v3.header.dhPub, 20) ||
           !isNonEmptyString(v3.ciphertext, 8) ||
           !isNonEmptyString(v3.mac, 8)

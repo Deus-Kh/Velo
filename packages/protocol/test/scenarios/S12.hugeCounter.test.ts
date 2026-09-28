@@ -5,6 +5,7 @@
  * the receiver derive ten million keys before it can fail.
  * Expected before fixes: FAIL — the child process is killed at the 5 s
  * deadline instead of returning TOO_MANY_SKIPPED. After T2.6: pass.
+ * (Flipped green by T2.6: the gap is refused before any derivation.)
  *
  * The ratchet runs in a child process because a synchronous hang cannot be
  * interrupted from inside the test worker.
@@ -29,17 +30,18 @@ function runChild(n: number, timeoutMs: number): Outcome | 'TIMEOUT' {
 }
 
 describe('S12 header.n = 10_000_000', () => {
-  it('control: a small forged gap returns quickly in the child', () => {
-    const r = runChild(200, 20_000);
+  it('control: a gap within the per-step bound is derived and fails only on authentication', () => {
+    const r = runChild(99, 20_000);
     expect(r).not.toBe('TIMEOUT');
-    expect((r as Outcome).outcome).toBe('threw'); // DECRYPT_FAILED: the forged message has no valid ciphertext at n=200
+    expect((r as Outcome).outcome).toBe('threw'); // DECRYPT_FAILED: the forged message has no valid ciphertext at n=99
     expect((r as Outcome).code).toBe('DECRYPT_FAILED');
   });
 
-  it.fails('a forged counter of 10_000_000 is refused with TOO_MANY_SKIPPED within 5 s', () => {
+  it('a forged counter of 10_000_000 is refused with TOO_MANY_SKIPPED in under 50 ms', () => {
     const r = runChild(10_000_000, 5_000);
-    expect(r, 'ratchetDecrypt did not return within 5 s for header.n = 10_000_000: the skip loop is unbounded (T2.6)').not.toBe('TIMEOUT');
+    expect(r, 'ratchetDecrypt did not return within 5 s for header.n = 10_000_000').not.toBe('TIMEOUT');
     expect((r as Outcome).outcome).toBe('threw');
     expect((r as Outcome).code).toBe('TOO_MANY_SKIPPED');
+    expect((r as Outcome).ms).toBeLessThan(50);
   }, 15_000);
 });
