@@ -1,8 +1,28 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  Release network policy: no cleartext anywhere, system trust anchors only.
-  The debug source set (src/debug/res/xml/network_security_config.xml) overrides
-  this file to permit cleartext to local development hosts.
+  Release network policy (T1.2, T4.10): no cleartext anywhere, system trust
+  anchors only, and certificate pinning for the API host.
+
+  Pinning (T4.10): the API host's chain must contain one of the pinned
+  SubjectPublicKeyInfo hashes below. The server's certificates come from
+  Let's Encrypt (Caddy, deploy/Caddyfile.example), whose leaf and
+  intermediate keys rotate, so the pins are the two Let's Encrypt ROOTS:
+  ISRG Root X1 (the chain in use) and ISRG Root X2 (the backup, so a root
+  switch never bricks installed apps). Two pins are the minimum: a single
+  pin has no rotation path.
+
+  BEFORE THE FIRST RELEASE (human, see deploy/README.md "TLS and pinning"):
+    1. put the real API host in <domain> (it must match API_URL in .env);
+    2. re-verify both digests with tools/spki-pin.sh against the live host
+       (the chain must end in one of them); a wrong pin makes every release
+       install unable to connect, with no remote fix.
+  The pin-set expiration is a fail-open safety net: after that date Android
+  ignores the pins (still TLS, still system trust), so an app that was never
+  updated keeps working. Move it forward with every release (rotation
+  procedure in deploy/README.md).
+
+  The debug source set (src/debug/res/xml/network_security_config.xml)
+  overrides this file: cleartext to local development hosts, no pins.
 -->
 <network-security-config>
     <base-config cleartextTrafficPermitted="false">
@@ -10,4 +30,17 @@
             <certificates src="system" />
         </trust-anchors>
     </base-config>
+
+    <domain-config cleartextTrafficPermitted="false">
+        <domain includeSubdomains="false">api.velo.example.com</domain>
+        <pin-set expiration="2027-09-28">
+            <!-- ISRG Root X1 (Let's Encrypt): SPKI SHA-256, verified 2026-09-28 against https://letsencrypt.org/certs/isrgrootx1.pem with tools/spki-pin.sh -->
+            <pin digest="SHA-256">C5+lpZ7tcVwmwQIMcRtPbsQtWLABXhQzejna0wHFr8M=</pin>
+            <!-- ISRG Root X2 (Let's Encrypt, backup root): SPKI SHA-256, verified 2026-09-28 against https://letsencrypt.org/certs/isrg-root-x2.pem -->
+            <pin digest="SHA-256">diGVwiVYbubAI3RW4hB9xU8e/CH2GnkuvVFZE8zmgzI=</pin>
+        </pin-set>
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </domain-config>
 </network-security-config>

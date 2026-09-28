@@ -107,6 +107,45 @@ anything is touched. Devices keep their sessions and history; a restore only
 rewinds what the server knew, so messages sent after the snapshot that were
 not yet delivered are lost and their senders see them as undelivered.
 
+## TLS and certificate pinning (T1.2, T4.10)
+
+Caddy terminates TLS (`deploy/Caddyfile.example` → `/etc/caddy/Caddyfile`) with
+Let's Encrypt certificates that renew themselves. The Android release build
+pins the **Let's Encrypt roots** (ISRG Root X1 in use, ISRG Root X2 as the
+backup) for the API host in
+`chats-client/android/app/src/main/res/xml/network_security_config.xml`, so a
+renewed leaf or intermediate never breaks pinning, and a compromised or
+mis-issued certificate from any other CA is refused by the app. The pin-set
+has an `expiration` (about one year out): after it Android ignores the pins
+(fail-open, still TLS with system trust), so an install that never updated
+keeps working.
+
+**Before the first release (human):**
+
+```bash
+# 1. the host in the config must be API_URL's host
+# 2. verify the pins against the live chain and the published roots
+tools/spki-pin.sh host api.velo.example.com          # prints subject + pin for every certificate in the chain
+curl -sO https://letsencrypt.org/certs/isrgrootx1.pem && tools/spki-pin.sh pem isrgrootx1.pem
+curl -sO https://letsencrypt.org/certs/isrg-root-x2.pem && tools/spki-pin.sh pem isrg-root-x2.pem
+```
+
+Both printed pins must appear in the config. A wrong pin means every release
+install fails to connect and there is no remote fix.
+
+**Rotation procedure** (moving to a different CA or root):
+
+1. Add the new root's pin to the config **while keeping the old ones**; move
+   `expiration` forward; release the app; wait until the installed base has
+   updated (the store's adoption numbers).
+2. Switch Caddy to the new CA (`tls` directive / ACME endpoint) and confirm
+   `tools/spki-pin.sh host <api host>` shows a pinned key in the chain.
+3. In a later release remove the retired pin. Never ship a single pin.
+
+**Every release:** move `expiration` to about a year ahead (the client test
+`networkSecurityConfig.test.ts` fails when it is under three months or over
+two years away). iOS pinning is parked with the rest of iOS (T1.16).
+
 ## Rollback
 
 ```bash

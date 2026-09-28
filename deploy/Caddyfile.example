@@ -1,0 +1,31 @@
+# Caddy in front of the Velo server (T1.2 TLS, T4.10 pinning notes).
+# Copy to /etc/caddy/Caddyfile, replace the host. Caddy obtains and renews the
+# certificate from Let's Encrypt (ISRG Root X1 chain) automatically; the
+# Android app pins the Let's Encrypt roots (see
+# chats-client/android/app/src/main/res/xml/network_security_config.xml), so
+# do not point this host at a certificate from another CA without a release
+# that pins the new chain first.
+
+api.velo.example.com {
+    encode zstd gzip
+
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+        X-Content-Type-Options nosniff
+        Referrer-Policy no-referrer
+        -Server
+    }
+
+    # Correlation id (T4.5): the server honours a sane inbound X-Request-Id.
+    request_body {
+        max_size 512KB
+    }
+
+    reverse_proxy 127.0.0.1:9999 {
+        # WebSocket (socket.io) upgrades pass through unchanged.
+        header_up X-Forwarded-For {remote_host}
+        header_up X-Request-Id {http.request.uuid}
+        health_uri /health
+        health_interval 30s
+    }
+}
