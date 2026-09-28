@@ -9,6 +9,7 @@ import { configureRateLimiters } from './middleware/rateLimit';
 import { createApp } from './app';
 import { setupSocket } from './socket/setupSocket';
 import { setRealtimeServer } from './lib/realtime';
+import { corsOriginCheck, parseOrigins } from './lib/corsPolicy';
 import { createLifecycle } from './lib/lifecycle';
 
 /** Upper bound for any socket.io packet; the per-message ciphertext cap is enforced separately. */
@@ -30,7 +31,7 @@ async function main() {
   const server = http.createServer(app);
 
   const io = new Server(server, {
-    cors: { origin: true, credentials: true },
+    cors: { origin: corsOriginCheck(parseOrigins(config.CORS_ORIGINS)), credentials: true }, // T4.4
     maxHttpBufferSize: SOCKET_MAX_HTTP_BUFFER_SIZE,
   });
 

@@ -4,6 +4,8 @@ import cors from 'cors';
 import helmet from 'helmet';
 import { globalLimiter } from './middleware/rateLimit';
 import { errorHandler, notFoundHandler } from './middleware/errorHandler';
+import { config } from './config';
+import { corsOriginCheck, parseOrigins } from './lib/corsPolicy';
 
 import { authRouter } from './routes/auth.routes';
 import { conversationsRouter } from './routes/conversations.routes';
@@ -25,7 +27,8 @@ export function createApp(): express.Express {
   app.set('trust proxy', 1);
 
   app.use(helmet());
-  app.use(cors({ origin: true, credentials: true })); // pinned in T4.4
+  // T4.4 (P2-7): browser origins come from CORS_ORIGINS only; the native apps send no Origin header.
+  app.use(cors({ origin: corsOriginCheck(parseOrigins(config.CORS_ORIGINS)), credentials: true }));
   app.use(express.json({ limit: '256kb' }));
   app.use(globalLimiter);
 
