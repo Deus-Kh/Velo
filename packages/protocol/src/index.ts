@@ -49,4 +49,19 @@ export { verifySignedPreKeyBundle } from './handshake/bundle';
 export type { PreKeyBundle } from './handshake/types';
 export { x3dhInitiate, x3dhRespond, INFO_X3DH_V1, type X3DHInitPacket, type X3DHSessionKeys } from './handshake/x3dh';
 
-export { computeSafetyNumber } from './identity/fingerprint';
+export {
+  computeSafetyNumber,
+  fingerprintHalf,
+  displayableFingerprint,
+  groupDigits,
+  FINGERPRINT_ITERATIONS,
+  FINGERPRINT_VERSION,
+} from './identity/fingerprint';
+export {
+  signIdentityBinding,
+  verifyIdentityBinding,
+  IDENTITY_BINDING_DOMAIN,
+  type Identity,
+  type BoundIdentity,
+} from './identity/binding';
+export { checkIdentity, requireIdentityMatch, type IdentityCheck } from './identity/trust';

@@ -3,6 +3,7 @@ import nacl from 'tweetnacl';
 import { decodeBase64, encodeBase64 } from 'tweetnacl-util';
 import { ProtocolError } from '../../src/errors';
 import { verifySignedPreKeyBundle } from '../../src/handshake/bundle';
+import { signIdentityBinding } from '../../src/identity/binding';
 import { x3dhInitiate, x3dhRespond, type X3DHInitPacket } from '../../src/handshake/x3dh';
 import { normalizeB64 } from '../../src/primitives/base64';
 import { utf8Decode } from '../../src/primitives/utf8';
@@ -60,7 +61,11 @@ export class VirtualClient {
       dh = { publicKey: encodeBase64(kp.publicKey), privateKey: encodeBase64(kp.secretKey) };
       this.store.setJson('identity-dh', dh);
     }
-    this.server.uploadIdentityKeys(this.userId, { identitySignPublicKey: sign.publicKey, identityDhPublicKey: dh.publicKey });
+    this.server.uploadIdentityKeys(this.userId, {
+      identitySignPublicKey: sign.publicKey,
+      identityDhPublicKey: dh.publicKey,
+      identityBindingSignature: signIdentityBinding(decodeBase64(sign.privateKey), dh.publicKey),
+    });
 
     let spk = this.store.getJson<StoredSignedPreKey>('signed-prekey');
     if (!spk) {
@@ -100,7 +105,11 @@ export class VirtualClient {
     const sign = this.store.getJson<StoredPair>('identity-sign');
     const dh = this.store.getJson<StoredPair>('identity-dh');
     if (!sign || !dh) throw new Error('not registered');
-    return { identitySignPublicKey: sign.publicKey, identityDhPublicKey: dh.publicKey };
+    return {
+      identitySignPublicKey: sign.publicKey,
+      identityDhPublicKey: dh.publicKey,
+      identityBindingSignature: signIdentityBinding(decodeBase64(sign.privateKey), dh.publicKey),
+    };
   }
 
   // ───────── trust store (display-only today, P0-9) ─────────
@@ -159,6 +168,7 @@ export class VirtualClient {
       this.pinIdentity(peerUserId, {
         identitySignPublicKey: bundle.identitySignPublicKey,
         identityDhPublicKey: bundle.identityDhPublicKey,
+        identityBindingSignature: bundle.identityBindingSignature,
       });
     }
 

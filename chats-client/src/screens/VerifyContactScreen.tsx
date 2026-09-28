@@ -8,20 +8,27 @@ import { useAuthStore } from '../store/auth.store';
 
 import { keysApi } from '../shared/api/keys.api';
 import { ensureIdentityKeyPairForUser } from '../shared/crypto/identityKeys';
-import { computeSafetyNumber } from '@velo/protocol';
-import { getTrustedIdentity, setTrustedIdentity, clearTrustedIdentity } from '../shared/storage/trustedIdentities';
+import { ensureIdentityDhKeyPairForUser } from '../shared/crypto/identityDhKeys';
+import { checkIdentity, computeSafetyNumber, verifyIdentityBinding, type Identity } from '@velo/protocol';
+import { getTrustedIdentity, setTrustedIdentity, clearTrustedIdentity, type TrustedIdentity } from '../shared/storage/trustedIdentities';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'VerifyContact'>;
 
+/**
+ * Safety number (T2.13): libsignal's numeric fingerprint over both identity
+ * keys of both parties, 60 digits, identical on both phones. The peer's
+ * identity comes from the server with its binding signature, which is
+ * verified before anything is shown or pinned.
+ */
 export default function VerifyContactScreen({ route, navigation }: Props) {
   const { peerUserId, peerUsername, source } = route.params;
   const insets = useSafeAreaInsets();
   const myUserId = useAuthStore((s) => s.userId);
 
   const [loading, setLoading] = useState(true);
-  const [theirIdentityPub, setTheirIdentityPub] = useState<string | null>(null);
-  const [myIdentityPub, setMyIdentityPub] = useState<string | null>(null);
-  const [trusted, setTrusted] = useState<string | null>(null);
+  const [theirIdentity, setTheirIdentity] = useState<Identity | null>(null);
+  const [myIdentity, setMyIdentity] = useState<Identity | null>(null);
+  const [trusted, setTrusted] = useState<TrustedIdentity | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -38,14 +45,27 @@ export default function VerifyContactScreen({ route, navigation }: Props) {
       setError(null);
 
       try {
-        const myPub = await ensureIdentityKeyPairForUser(myUserId);
+        const mySign = await ensureIdentityKeyPairForUser(myUserId);
+        const myDh = await ensureIdentityDhKeyPairForUser(myUserId);
         const theirRes = await keysApi.getIdentityKey(peerUserId);
         const trustedStored = await getTrustedIdentity({ myUserId, peerUserId });
 
         if (!alive) return;
 
-        setMyIdentityPub(myPub);
-        setTheirIdentityPub(theirRes.data.identitySignPublicKey);
+        const theirs = theirRes.data;
+        if (!theirs.identityDhPublicKey || !theirs.identityBindingSignature) {
+          setError('This contact has not published a bound identity yet. Ask them to update the app and sign in again.');
+          return;
+        }
+        // Throws IDENTITY_BINDING_INVALID if the server handed out inconsistent keys.
+        verifyIdentityBinding({
+          identitySignPublicKey: theirs.identitySignPublicKey,
+          identityDhPublicKey: theirs.identityDhPublicKey,
+          identityBindingSignature: theirs.identityBindingSignature,
+        });
+
+        setMyIdentity({ identitySignPublicKey: mySign, identityDhPublicKey: myDh });
+        setTheirIdentity({ identitySignPublicKey: theirs.identitySignPublicKey, identityDhPublicKey: theirs.identityDhPublicKey });
         setTrusted(trustedStored);
       } catch (e: any) {
         if (!alive) return;
@@ -62,19 +82,17 @@ export default function VerifyContactScreen({ route, navigation }: Props) {
   }, [myUserId, peerUserId]);
 
   const computed = useMemo(() => {
-    if (!myIdentityPub || !theirIdentityPub) return null;
-    return computeSafetyNumber({
-      myIdentitySignPub: myIdentityPub,
-      theirIdentitySignPub: theirIdentityPub,
-    });
-  }, [myIdentityPub, theirIdentityPub]);
+    if (!myUserId || !myIdentity || !theirIdentity) return null;
+    return computeSafetyNumber({ myUserId, myIdentity, theirUserId: peerUserId, theirIdentity });
+  }, [myUserId, myIdentity, theirIdentity, peerUserId]);
 
   const status = useMemo(() => {
-    if (!theirIdentityPub) return 'unknown';
-    if (!trusted) return 'untrusted';
-    if (trusted === theirIdentityPub) return 'verified';
+    if (!theirIdentity) return 'unknown';
+    const check = checkIdentity(trusted, theirIdentity);
+    if (check === 'first-contact') return 'untrusted';
+    if (check === 'match') return 'verified';
     return 'changed';
-  }, [trusted, theirIdentityPub]);
+  }, [trusted, theirIdentity]);
 
   const screenTitle = source === 'new-chat' ? 'Verify Before Chatting' : 'Verify Contact';
   const screenSubtitle =
@@ -87,7 +105,7 @@ export default function VerifyContactScreen({ route, navigation }: Props) {
       case 'verified':
         return 'Verified on this device';
       case 'changed':
-        return 'Identity changed';
+        return 'Safety number changed';
       case 'untrusted':
         return 'Not verified yet';
       default:
@@ -96,13 +114,14 @@ export default function VerifyContactScreen({ route, navigation }: Props) {
   }, [status]);
 
   const onTrust = async () => {
-    if (!myUserId || !theirIdentityPub) return;
+    if (!myUserId || !theirIdentity) return;
     await setTrustedIdentity({
       myUserId,
       peerUserId,
-      identitySignPublicKey: theirIdentityPub,
+      identitySignPublicKey: theirIdentity.identitySignPublicKey,
+      identityDhPublicKey: theirIdentity.identityDhPublicKey,
     });
-    setTrusted(theirIdentityPub);
+    setTrusted({ ...theirIdentity });
   };
 
   const onClearTrust = async () => {
@@ -187,8 +206,11 @@ export default function VerifyContactScreen({ route, navigation }: Props) {
         {!loading && !error && computed ? (
           <View className="mt-5 rounded-[24px] border border-border bg-surface/92 p-5">
             <Text className="text-xs font-semibold uppercase tracking-[1.4px] text-muted">Safety Number</Text>
-            <Text className="mt-3 text-2xl font-semibold text-text">
-              {computed.displayCode}
+            <Text className="mt-3 text-xl font-semibold leading-8 text-text" selectable>
+              {computed.grouped}
+            </Text>
+            <Text className="mt-2 text-xs leading-5 text-muted">
+              Both of you see the same 60 digits. They cover both identity keys of both accounts.
             </Text>
 
             <View className="mt-5 rounded-[18px] border border-border bg-background-alt/70 p-4">
@@ -203,15 +225,15 @@ export default function VerifyContactScreen({ route, navigation }: Props) {
               ) : null}
 
               {status === 'changed' ? (
-                <Text className="mt-2 text-base font-semibold text-danger">Identity changed</Text>
+                <Text className="mt-2 text-base font-semibold text-danger">Safety number changed</Text>
               ) : null}
 
               <Text className="mt-2 text-sm leading-6 text-muted">
                 {status === 'verified'
                   ? 'You marked this identity as trusted on this device.'
                   : status === 'changed'
-                    ? 'The saved identity key no longer matches. This can happen after reinstall or key rotation.'
-                    : 'Compare the safety number with your contact before trusting this key.'}
+                    ? 'The saved identity no longer matches. This happens after a reinstall or key rotation, or if someone is interfering. Compare the number before accepting.'
+                    : 'Compare the safety number with your contact before trusting this identity.'}
               </Text>
             </View>
 
@@ -222,7 +244,7 @@ export default function VerifyContactScreen({ route, navigation }: Props) {
                   className="flex-1 rounded-[18px] bg-primary px-4 py-3.5 active:opacity-80"
                 >
                   <Text className="text-center font-semibold text-background">
-                    {status === 'changed' ? 'Trust new key' : 'Trust key'}
+                    {status === 'changed' ? 'Accept new identity' : 'Mark as verified'}
                   </Text>
                 </Pressable>
               ) : (
@@ -247,7 +269,7 @@ export default function VerifyContactScreen({ route, navigation }: Props) {
             </View>
 
             <Text className="mt-4 text-xs leading-5 text-muted">
-              Tip: compare this code with your contact using another trusted channel before you trust the key.
+              Tip: compare this number with your contact over another trusted channel before you mark it verified.
             </Text>
           </View>
         ) : null}

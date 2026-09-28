@@ -132,13 +132,14 @@ describe('oneTimePreKeys', () => {
 });
 
 describe('trustedIdentities', () => {
-  it('authenticates pins and ignores tampered ones', async () => {
-    await setTrustedIdentity({ myUserId: ME, peerUserId: PEER, identitySignPublicKey: 'PEERKEY' });
-    expect(await getTrustedIdentity({ myUserId: ME, peerUserId: PEER })).toBe('PEERKEY');
+  it('pins both identity keys, authenticates the pin and ignores tampered ones', async () => {
+    await setTrustedIdentity({ myUserId: ME, peerUserId: PEER, identitySignPublicKey: 'PEERSIGN', identityDhPublicKey: 'PEERDH' });
+    expect(await getTrustedIdentity({ myUserId: ME, peerUserId: PEER })).toEqual({ identitySignPublicKey: 'PEERSIGN', identityDhPublicKey: 'PEERDH' });
 
     const key = `trusted-identity:${ME}:${PEER}`;
     const record = JSON.parse((await AsyncStorage.getItem(key))!);
-    record.identitySignPublicKey = 'ATTACKERKEY';
+    expect(record.v).toBe(2);
+    record.identityDhPublicKey = 'ATTACKERDH';
     await AsyncStorage.setItem(key, JSON.stringify(record));
     const warn = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
     expect(await getTrustedIdentity({ myUserId: ME, peerUserId: PEER })).toBeNull();
@@ -146,10 +147,10 @@ describe('trustedIdentities', () => {
     warn.mockRestore();
   });
 
-  it('migrates a legacy plaintext pin and binds it to the pair', async () => {
+  it('honours a v1 pin (signing key only) with an unknown DH key, still bound to the pair', async () => {
     const key = `trusted-identity:${ME}:${PEER}`;
     await AsyncStorage.setItem(key, 'LEGACYKEY+/==');
-    expect(await getTrustedIdentity({ myUserId: ME, peerUserId: PEER })).toBe('LEGACYKEY+/==');
+    expect(await getTrustedIdentity({ myUserId: ME, peerUserId: PEER })).toEqual({ identitySignPublicKey: 'LEGACYKEY+/==', identityDhPublicKey: null });
     const record = JSON.parse((await AsyncStorage.getItem(key))!);
     expect(record.v).toBe(1);
     expect(typeof record.mac).toBe('string');
@@ -159,6 +160,10 @@ describe('trustedIdentities', () => {
     const warn = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
     expect(await getTrustedIdentity({ myUserId: ME, peerUserId: '65f000000000000000000003' })).toBeNull();
     warn.mockRestore();
+
+    // Upgrading to a v2 pin replaces the record.
+    await setTrustedIdentity({ myUserId: ME, peerUserId: PEER, identitySignPublicKey: 'LEGACYKEY+/==', identityDhPublicKey: 'NEWDH' });
+    expect(JSON.parse((await AsyncStorage.getItem(key))!).v).toBe(2);
 
     await clearTrustedIdentity({ myUserId: ME, peerUserId: PEER });
     expect(await getTrustedIdentity({ myUserId: ME, peerUserId: PEER })).toBeNull();

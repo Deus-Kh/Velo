@@ -6,6 +6,7 @@ export interface PreKeyBundle {
   userId: string;
   identitySignPublicKey: string; // base64 (Ed25519 pub)
   identityDhPublicKey: string; // base64 (X25519 pub)
+  identityBindingSignature: string; // base64 Ed25519 signature by IK_sign over IK_dh (T2.13)
   signedPreKey: {
     keyId: number;
     publicKey: string; // base64 (X25519 pub)

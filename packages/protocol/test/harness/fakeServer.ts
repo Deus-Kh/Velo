@@ -14,7 +14,7 @@ import type { V2Encrypted } from '../../src/ratchet/message';
  * `malicious` hooks model a compromised or on-path server: substituting the
  * bundle or the initPacket a client receives, or relabelling the sender.
  */
-export type ServerIdentity = { identitySignPublicKey: string; identityDhPublicKey: string };
+export type ServerIdentity = { identitySignPublicKey: string; identityDhPublicKey: string; identityBindingSignature: string };
 
 type ServerUser = {
   userId: string;
@@ -130,6 +130,7 @@ export class FakeServer {
       userId: targetId,
       identitySignPublicKey: u.identity.identitySignPublicKey,
       identityDhPublicKey: u.identity.identityDhPublicKey,
+      identityBindingSignature: u.identity.identityBindingSignature,
       signedPreKey: { keyId: signed.keyId, publicKey: signed.publicKey, signature: signed.signature },
       oneTimePreKey: oneTime ? { keyId: oneTime.keyId, publicKey: oneTime.publicKey } : null,
       remainingOneTimePreKeys: this.unusedOneTimePreKeyCount(targetId),

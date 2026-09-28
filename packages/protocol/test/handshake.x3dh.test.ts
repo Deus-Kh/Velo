@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { isProtocolError, protocolErrorCode } from '../src/errors';
 import type { PreKeyBundle } from '../src/handshake/types';
 import { x3dhInitiate, x3dhRespond } from '../src/handshake/x3dh';
+import { signIdentityBinding } from '../src/identity/binding';
 
 const hex = (b: Uint8Array) => Array.from(b, (x) => x.toString(16).padStart(2, '0')).join('');
 
@@ -20,6 +21,7 @@ function bundle(withOpk: boolean): PreKeyBundle {
     userId: 'B',
     identitySignPublicKey: encodeBase64(ikSignB.publicKey),
     identityDhPublicKey: encodeBase64(ikDhB.publicKey),
+    identityBindingSignature: signIdentityBinding(ikSignB.secretKey, encodeBase64(ikDhB.publicKey)),
     signedPreKey: {
       keyId: 7,
       publicKey: encodeBase64(spkB.publicKey),
@@ -69,6 +71,18 @@ describe('x3dh (pure, current 3-DH construction pinned before T2.9/T2.13)', () =
 
   it('the one-time prekey changes the result (DH2 is in the KDF input)', () => {
     expect(initiate(true).sessionKeys.rootKey).not.toBe(initiate(false).sessionKeys.rootKey);
+  });
+
+  it('rejects a bundle whose identity binding does not verify', () => {
+    const forged = bundle(true);
+    forged.identityDhPublicKey = encodeBase64(nacl.box.keyPair().publicKey); // DH key swapped, binding stale
+    let code: string | null = null;
+    try {
+      x3dhInitiate({ bundle: forged, peerUserId: 'B', identityDhPublicKey: 'x', identityDhSecretKey: ikDhA.secretKey });
+    } catch (e) {
+      code = protocolErrorCode(e);
+    }
+    expect(code).toBe('IDENTITY_BINDING_INVALID');
   });
 
   it('rejects a bundle whose signed prekey is not signed by its identity key', () => {

@@ -113,6 +113,7 @@ describe('throw sites map to the taxonomy', () => {
       userId: 'u',
       identitySignPublicKey: encodeBase64(id.publicKey),
       identityDhPublicKey: encodeBase64(nacl.box.keyPair().publicKey),
+      identityBindingSignature: encodeBase64(new Uint8Array(64)),
       signedPreKey: {
         keyId: 1,
         publicKey: encodeBase64(spk.publicKey),

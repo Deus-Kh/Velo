@@ -3,13 +3,14 @@ import { encodeBase64 } from 'tweetnacl-util';
 import { describe, expect, it } from 'vitest';
 import { verifySignedPreKeyBundle } from '../src/handshake/bundle';
 import type { PreKeyBundle } from '../src/handshake/types';
-import { computeSafetyNumber } from '../src/identity/fingerprint';
+import { signIdentityBinding, verifyIdentityBinding } from '../src/identity/binding';
 
-function bundleFor(identity = nacl.sign.keyPair(), spk = nacl.box.keyPair()): PreKeyBundle {
+function bundleFor(identity = nacl.sign.keyPair(), spk = nacl.box.keyPair(), dh = nacl.box.keyPair()): PreKeyBundle {
   return {
     userId: 'u',
     identitySignPublicKey: encodeBase64(identity.publicKey),
-    identityDhPublicKey: encodeBase64(nacl.box.keyPair().publicKey),
+    identityDhPublicKey: encodeBase64(dh.publicKey),
+    identityBindingSignature: signIdentityBinding(identity.secretKey, encodeBase64(dh.publicKey)),
     signedPreKey: {
       keyId: 1,
       publicKey: encodeBase64(spk.publicKey),
@@ -34,31 +35,13 @@ describe('verifySignedPreKeyBundle', () => {
     expect(() => verifySignedPreKeyBundle(foreign)).toThrow();
   });
 
-  it('is self-referential by design today (P0-9): a bundle re-signed with a new identity passes', () => {
-    // Documents the current trust gap fixed in T2.13: the verifying key comes
-    // from the same bundle, so a server can swap identity + SPK together.
+  it('is self-referential by construction: a bundle re-signed with a new identity passes the signature checks', () => {
+    // The signature and binding checks prove internal consistency only.
+    // Trust comes from the pin (identity/trust.ts), enforced by the client
+    // and harness on every bundle and initPacket (T2.13).
     const attacker = nacl.sign.keyPair();
-    expect(() => verifySignedPreKeyBundle(bundleFor(attacker))).not.toThrow();
-  });
-});
-
-describe('computeSafetyNumber', () => {
-  it('is symmetric and formatted as 6 groups of 5 hex digits', () => {
-    const a = encodeBase64(nacl.sign.keyPair().publicKey);
-    const b = encodeBase64(nacl.sign.keyPair().publicKey);
-    const ab = computeSafetyNumber({ myIdentitySignPub: a, theirIdentitySignPub: b });
-    const ba = computeSafetyNumber({ myIdentitySignPub: b, theirIdentitySignPub: a });
-    expect(ab).toEqual(ba);
-    expect(ab.displayCode).toMatch(/^([0-9A-F]{5} ){5}[0-9A-F]{5}$/);
-    expect(ab.fingerprintHex).toHaveLength(64);
-  });
-
-  it('changes when either key changes', () => {
-    const a = encodeBase64(nacl.sign.keyPair().publicKey);
-    const b = encodeBase64(nacl.sign.keyPair().publicKey);
-    const c = encodeBase64(nacl.sign.keyPair().publicKey);
-    expect(computeSafetyNumber({ myIdentitySignPub: a, theirIdentitySignPub: b }).displayCode).not.toBe(
-      computeSafetyNumber({ myIdentitySignPub: a, theirIdentitySignPub: c }).displayCode,
-    );
+    const b = bundleFor(attacker);
+    expect(() => verifySignedPreKeyBundle(b)).not.toThrow();
+    expect(() => verifyIdentityBinding(b)).not.toThrow();
   });
 });

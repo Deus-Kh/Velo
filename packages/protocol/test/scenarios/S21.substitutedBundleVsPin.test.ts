@@ -11,6 +11,7 @@ import nacl from 'tweetnacl';
 import { encodeBase64 } from 'tweetnacl-util';
 import { describe, expect, it } from 'vitest';
 import { codeOf, makeWorld } from '../harness';
+import { signIdentityBinding } from '../../src/identity/binding';
 
 describe('S21 substituted bundle identity vs pin', () => {
   it.fails('A refuses a bundle whose identity keys differ from the pinned ones', () => {
@@ -28,6 +29,7 @@ describe('S21 substituted bundle identity vs pin', () => {
       ...bundle,
       identitySignPublicKey: encodeBase64(attackerSign.publicKey),
       identityDhPublicKey: encodeBase64(attackerDh.publicKey),
+      identityBindingSignature: signIdentityBinding(attackerSign.secretKey, encodeBase64(attackerDh.publicKey)),
       signedPreKey: {
         keyId: 4242,
         publicKey: encodeBase64(attackerSpk.publicKey),

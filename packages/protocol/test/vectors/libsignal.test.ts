@@ -7,12 +7,13 @@
  *  - X3DH            → T2.9 (DH order, 0xFF prefix, "WhisperText", fourth DH)
  *  - KDF_RK          → green since T2.0 adopted "WhisperRatchet"
  *  - message keys    → T2.5 (80-byte "WhisperMessageKeys" expansion, if adopted)
- *  - safety number   → T2.13 (libsignal numeric fingerprint)
+ *  - safety number   → green since T2.13 (libsignal numeric fingerprint)
  */
 import nacl from 'tweetnacl';
 import { encodeBase64 } from 'tweetnacl-util';
 import { describe, expect, it } from 'vitest';
-import { computeSafetyNumber } from '../../src/identity/fingerprint';
+import { displayableFingerprint, fingerprintHalf } from '../../src/identity/fingerprint';
+import { signIdentityBinding } from '../../src/identity/binding';
 import { hkdfSha256 } from '../../src/primitives/kdf';
 import { chainKdf } from '../../src/ratchet/chain';
 import { kdfRootKey } from '../../src/ratchet/root';
@@ -73,6 +74,7 @@ describe('libsignal vectors: constructions (red until the named task)', () => {
         userId: 'B',
         identitySignPublicKey: encodeBase64(ikSignB.publicKey),
         identityDhPublicKey: encodeBase64(fromHex(v.inputs.identityB.pub)),
+        identityBindingSignature: signIdentityBinding(ikSignB.secretKey, encodeBase64(fromHex(v.inputs.identityB.pub))),
         signedPreKey: { keyId: 1, publicKey: encodeBase64(spkPub), signature: encodeBase64(nacl.sign.detached(spkPub, ikSignB.secretKey)) },
         oneTimePreKey: v.inputs.oneTimePreKeyB ? { keyId: 2, publicKey: encodeBase64(fromHex(v.inputs.oneTimePreKeyB.pub)) } : null,
       };
@@ -116,13 +118,12 @@ describe('libsignal vectors: constructions (red until the named task)', () => {
     }
   });
 
-  it.fails('safety number matches libsignal’s numeric fingerprint (T2.13)', () => {
+  it('numeric fingerprint matches libsignal (T2.13; libsignal’s 0x05-serialized key as input)', () => {
+    const enc = new TextEncoder();
     for (const v of vectors.fingerprints) {
-      const velo = computeSafetyNumber({
-        myIdentitySignPub: encodeBase64(fromHex(v.localKey)),
-        theirIdentitySignPub: encodeBase64(fromHex(v.remoteKey)),
-      });
-      expect(velo.displayCode.replace(/\s/g, ''), 'Velo shows 30 hex characters of one SHA-256; Signal shows 60 decimal digits from 5200 SHA-512 iterations').toBe(v.display);
+      const local = fingerprintHalf({ identifier: enc.encode(v.localIdentifier), identityKey: fromHex(v.localKeySerialized), iterations: v.iterations, version: v.version });
+      const remote = fingerprintHalf({ identifier: enc.encode(v.remoteIdentifier), identityKey: fromHex(v.remoteKeySerialized), iterations: v.iterations, version: v.version });
+      expect(displayableFingerprint(local, remote)).toBe(v.display);
     }
   });
 });

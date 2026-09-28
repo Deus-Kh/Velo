@@ -3,6 +3,7 @@ import { decodeBase64, encodeBase64 } from 'tweetnacl-util';
 import { hkdfSha256 } from '../primitives/kdf';
 import { ProtocolError } from '../errors';
 import { verifySignedPreKeyBundle } from './bundle';
+import { verifyIdentityBinding } from '../identity/binding';
 import type { PreKeyBundle } from './types';
 
 /** "x3dh-v1" — HKDF info for the handshake. Wire-format constant (R8). */
@@ -52,8 +53,10 @@ function deriveSessionKeys(dhParts: Uint8Array[]): X3DHSessionKeys {
  *
  * Today's construction (pinned; T2.9 adds the fourth DH, T2.13 the identity
  * checks): DH1 = DH(EK_A, SPK_B), DH2 = DH(EK_A, OPK_B) when present,
- * DH3 = DH(IK_A, SPK_B). The bundle's signed-prekey signature is verified
- * again here so the pure core never trusts an unverified bundle.
+ * DH3 = DH(IK_A, SPK_B). The bundle's signed-prekey signature and its
+ * identity binding are verified here so the pure core never trusts an
+ * unverified bundle (T2.13). Comparing the identity with the pin is the
+ * caller's job (identity/trust.ts) because the pin lives in storage.
  *
  * `ephemeral` is injectable for frozen-vector tests only.
  */
@@ -66,6 +69,7 @@ export function x3dhInitiate(params: {
 }): { initPacket: X3DHInitPacket; sessionKeys: X3DHSessionKeys; theirSignedPreKeyPublicKey: string } {
   const { bundle } = params;
   verifySignedPreKeyBundle(bundle);
+  verifyIdentityBinding(bundle);
   requireLength(params.identityDhSecretKey, 32, 'identityDhSecretKey');
 
   const eph = params.ephemeral ?? nacl.box.keyPair();
