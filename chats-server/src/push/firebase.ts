@@ -3,6 +3,7 @@ import path from "path";
 import { config } from "../config";
 import { UserModel } from "../models/User";
 import { log } from '../lib/logger';
+import { metrics } from '../lib/metrics';
 
 let firebaseAdmin: any = null;
 let firebaseInitAttempted = false;
@@ -114,10 +115,16 @@ export function tokensToPrune(
 
 export async function sendMessagePushToUser(params: { toUserId: string; serverMessageId: string }) {
   const admin = getFirebaseAdmin();
-  if (!admin) return;
+  if (!admin) {
+    metrics.pushSent.inc({ result: 'disabled' });
+    return;
+  }
 
   const recipient = await UserModel.findById(params.toUserId).select("pushTokens");
-  if (!recipient?.pushTokens?.length) return;
+  if (!recipient?.pushTokens?.length) {
+    metrics.pushSent.inc({ result: 'no_token' });
+    return;
+  }
 
   const tokens = recipient.pushTokens
     .map((item: any) => item?.token)
@@ -131,7 +138,10 @@ export async function sendMessagePushToUser(params: { toUserId: string; serverMe
       ...buildMessagePush(params.serverMessageId),
     });
 
-    const invalidTokens = tokensToPrune(tokens, response.responses ?? []);
+    const responses = (response.responses ?? []) as Array<{ success: boolean; error?: { code?: string } | null }>;
+    for (const r of responses) metrics.pushSent.inc({ result: r.success ? 'ok' : 'failed' });
+    const invalidTokens = tokensToPrune(tokens, responses);
+    if (invalidTokens.length) metrics.pushTokensPruned.inc(invalidTokens.length);
     if (invalidTokens.length) {
       await UserModel.updateOne(
         { _id: params.toUserId },

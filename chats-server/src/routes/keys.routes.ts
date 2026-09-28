@@ -18,6 +18,7 @@ import {
   validateBody,
 } from '../utils/validation';
 import { log } from '../lib/logger';
+import { metrics } from '../lib/metrics';
 
 export const keysRouter = Router();
 
@@ -272,9 +273,12 @@ keysRouter.get('/bundle/:userId', requireAuth, bundleLimiter, async (req: Authed
 
   // 4) depletion visibility — the examiner's "how do you detect it" answer
   const remaining = await OneTimePreKeyModel.countDocuments({ userId: targetId, used: false });
+  metrics.bundlesIssued.inc({ with_one_time_key: oneTime ? 'true' : 'false' });
   if (remaining === 0) {
+    metrics.prekeyPoolExhausted.inc();
     log.error({ targetId, requesterId, issuedWithoutOneTimeKey: !oneTime }, '[keys] one-time prekey pool exhausted');
   } else if (remaining < ONE_TIME_PREKEY_LOW_WATERMARK) {
+    metrics.prekeyPoolLow.inc();
     log.warn({ targetId, remaining }, '[keys] one-time prekey pool low');
   }
 

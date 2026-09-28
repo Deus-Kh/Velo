@@ -7,6 +7,7 @@ import { sendMessagePushToUser } from "../push/firebase";
 import { makeConversationId } from "../utils/conversation";
 import { services } from "../lib/services";
 import { PRESENCE_HEARTBEAT_MS } from "../lib/presence";
+import { metrics } from "../lib/metrics";
 import { haveConversation } from "../lib/socketAuthz";
 import { markDelivered, messageExpiry } from "../lib/delivery";
 import { setRealtimeServer } from "../lib/realtime";
@@ -122,6 +123,7 @@ export function setupSocket(io: Server) {
   io.on("connection", (socket) => {
     const userId = String(socket.data.userId);
     socket.join(userId); // room per userId
+    metrics.socketConnections.inc();
     services.presence
       .connected(userId, socket.id)
       .then(() => emitPresence(io, userId))
@@ -175,6 +177,7 @@ export function setupSocket(io: Server) {
         const sendBudget = await services.messageSendLimiter.hit(userId);
         if (!sendBudget.allowed) {
           log.warn({ from: userId, count: sendBudget.count }, "[socket] message:send rate limited");
+          metrics.messagesRejected.inc({ reason: 'rate_limited' });
           return ack?.({
             ok: false,
             code: "RATE_LIMITED",
@@ -186,6 +189,7 @@ export function setupSocket(io: Server) {
 
         if (!dto?.toUserId || !isValidObjectIdString(dto.toUserId)) {
           log.warn({ from: userId }, "[socket] reject message: invalid toUserId");
+          metrics.messagesRejected.inc({ reason: 'invalid_recipient' });
           return ack?.({ ok: false, code: "BAD_ID", error: "Invalid toUserId" });
         }
         // Authorization: sender is always socket.data.userId; the recipient must
@@ -199,10 +203,12 @@ export function setupSocket(io: Server) {
         }
         if (!isNonEmptyString(dto.clientMessageId, 3)) {
           log.warn({ from: userId }, "[socket] reject message: invalid clientMessageId");
+          metrics.messagesRejected.inc({ reason: 'invalid_client_id' });
           return ack?.({ ok: false, error: "Invalid clientMessageId" });
         }
         if (typeof dto.createdAt !== "number") {
           log.warn({ from: userId }, "[socket] reject message: invalid createdAt");
+          metrics.messagesRejected.inc({ reason: 'invalid_created_at' });
           return ack?.({ ok: false, error: "Invalid createdAt" });
         }
 
@@ -212,6 +218,7 @@ export function setupSocket(io: Server) {
             protoVersion: dto?.protoVersion,
             from: userId,
           }, "[socket] reject message: unsupported protoVersion");
+          metrics.messagesRejected.inc({ reason: 'unsupported_version' });
           return ack?.({
             ok: false,
             code: "UNSUPPORTED_PROTO_VERSION",
@@ -233,6 +240,7 @@ export function setupSocket(io: Server) {
             cipherLen: dto.v4?.ciphertext?.length,
             macLen: dto.v4?.mac?.length,
           }, "[socket] reject message: invalid v4 payload");
+          metrics.messagesRejected.inc({ reason: 'invalid_payload' });
           return ack?.({ ok: false, error: "Invalid v4 payload" });
         }
 
@@ -241,6 +249,7 @@ export function setupSocket(io: Server) {
             from: userId,
             cipherLen: v4.ciphertext.length,
           }, "[socket] reject message: ciphertext too large");
+          metrics.messagesRejected.inc({ reason: 'too_large' });
           return ack?.({
             ok: false,
             code: "PAYLOAD_TOO_LARGE",
@@ -381,6 +390,7 @@ export function setupSocket(io: Server) {
           });
         }
 
+        metrics.messagesSent.inc({ bootstrap: dto.initPacket ? 'true' : 'false' });
         return ack?.({ ok: true, serverMessageId: String(doc._id), seq });
       } catch (e: any) {
         if (e?.code === 11000) {
@@ -487,6 +497,7 @@ export function setupSocket(io: Server) {
 
     socket.on("disconnect", () => {
       clearInterval(heartbeat);
+      metrics.socketConnections.dec();
       services.presence
         .disconnected(userId, socket.id)
         .then(() => emitPresence(io, userId))

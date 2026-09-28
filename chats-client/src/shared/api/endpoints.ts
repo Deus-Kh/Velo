@@ -20,4 +20,7 @@ export const API_ENDPOINTS = {
   CONVERSATIONS: {
     LIST: '/conversations',
   },
+  TELEMETRY: {
+    DECRYPT_FAILURE: '/telemetry/decrypt-failure',
+  },
 } as const;

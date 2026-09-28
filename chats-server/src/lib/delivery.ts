@@ -2,6 +2,7 @@ import { Types } from 'mongoose';
 import { config } from '../config';
 import { MessageModel } from '../models/Message';
 import { emitToUser } from './realtime';
+import { metrics } from './metrics';
 
 /**
  * Delete-on-delivery (T3.1, P1-10 server side).
@@ -31,7 +32,7 @@ export async function markDelivered(params: { recipientId: string; serverMessage
   const { recipientId, serverMessageId } = params;
   if (!Types.ObjectId.isValid(serverMessageId)) return { ok: false, code: 'BAD_ID' };
 
-  const doc = await MessageModel.findById(serverMessageId).select('toUserId fromUserId conversationId status v4');
+  const doc = await MessageModel.findById(serverMessageId).select('toUserId fromUserId conversationId status v4 createdAt');
   if (!doc) return { ok: false, code: 'NOT_FOUND' };
   if (String(doc.toUserId) !== String(recipientId)) return { ok: false, code: 'FORBIDDEN' };
   if (doc.status === 'read') return { ok: true, status: 'read' };
@@ -47,6 +48,9 @@ export async function markDelivered(params: { recipientId: string; serverMessage
 
   // Emit once: a repeated ack (already delivered, ciphertext already gone) changes nothing.
   if (r.modifiedCount > 0 && doc.v4) {
+    metrics.messagesDelivered.inc();
+    const receivedAt = (doc as unknown as { createdAt?: Date }).createdAt?.getTime();
+    if (receivedAt) metrics.deliveryLatency.observe(Math.max(0, (deliveredAt - receivedAt) / 1000));
     emitToUser(String(doc.fromUserId), 'message:status-changed', {
       conversationId: doc.conversationId,
       status: 'delivered',

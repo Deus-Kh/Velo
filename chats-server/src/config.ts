@@ -58,6 +58,9 @@ export const config = {
   /** T4.5: pino level (trace|debug|info|warn|error|fatal). */
   LOG_LEVEL: optionalString('LOG_LEVEL', NODE_ENV === 'test' ? 'silent' : 'info'),
 
+  /** T4.6: bearer token for GET /metrics. Empty = the endpoint does not exist. */
+  METRICS_TOKEN: optionalString('METRICS_TOKEN', ''),
+
   /** T3.1: undelivered ciphertext and delivery receipts expire after this many days (TTL index on Message.expiresAt). */
   MESSAGE_TTL_DAYS: optionalNumber('MESSAGE_TTL_DAYS', 30),
 

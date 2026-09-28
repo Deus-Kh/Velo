@@ -9,6 +9,7 @@ import type { ReplyReference } from '../chat/types';
 import { loadSession } from '../storage/sessionStore';
 import { encryptAndPersist } from '../chat/ratchetAdapter';
 import { receiveIncoming } from '../chat/incoming';
+import { reportDecryptFailure } from '../api/telemetry.api';
 import { ProtocolError, protocolErrorCode, type ProtocolErrorCode, type RatchetSessionV2 } from '@velo/protocol';
 import type { X3DHInitPacket } from '../crypto/x3dh';
 
@@ -152,6 +153,7 @@ export async function subscribeToMessages(onMessage: (m: {
       });
     } catch (e) {
       console.warn('Decrypt failed:', e);
+      reportDecryptFailure(protocolErrorCode(e)); // T4.6: the code only
       options?.onFailure?.(e instanceof Error ? e.message : 'Unknown realtime decrypt failure', protocolErrorCode(e));
     }
   };

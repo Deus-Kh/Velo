@@ -1,0 +1,69 @@
+{
+  "title": "Velo server",
+  "uid": "velo-server",
+  "schemaVersion": 39,
+  "time": { "from": "now-6h", "to": "now" },
+  "refresh": "30s",
+  "panels": [
+    {
+      "type": "timeseries", "title": "Messages per minute", "gridPos": { "x": 0, "y": 0, "w": 12, "h": 8 },
+      "targets": [
+        { "expr": "sum(rate(velo_messages_sent_total[5m])) * 60", "legendFormat": "sent" },
+        { "expr": "sum(rate(velo_messages_delivered_total[5m])) * 60", "legendFormat": "delivered" },
+        { "expr": "sum(rate(velo_messages_rejected_total[5m])) * 60", "legendFormat": "rejected" }
+      ]
+    },
+    {
+      "type": "timeseries", "title": "Delivery latency (p50 / p95)", "gridPos": { "x": 12, "y": 0, "w": 12, "h": 8 },
+      "fieldConfig": { "defaults": { "unit": "s" } },
+      "targets": [
+        { "expr": "histogram_quantile(0.5, sum(rate(velo_delivery_latency_seconds_bucket[15m])) by (le))", "legendFormat": "p50" },
+        { "expr": "histogram_quantile(0.95, sum(rate(velo_delivery_latency_seconds_bucket[15m])) by (le))", "legendFormat": "p95" }
+      ]
+    },
+    {
+      "type": "timeseries", "title": "Decrypt failures reported by devices (by code)", "gridPos": { "x": 0, "y": 8, "w": 12, "h": 8 },
+      "targets": [ { "expr": "sum(rate(velo_client_decrypt_failures_total[15m])) by (code) * 60", "legendFormat": "{{code}}" } ]
+    },
+    {
+      "type": "timeseries", "title": "Prekey depletion", "gridPos": { "x": 12, "y": 8, "w": 12, "h": 8 },
+      "targets": [
+        { "expr": "sum(rate(velo_prekey_bundles_issued_total{with_one_time_key=\"false\"}[15m])) * 60", "legendFormat": "bundles without one-time key / min" },
+        { "expr": "sum(rate(velo_prekey_pool_low_total[15m])) * 60", "legendFormat": "pool low / min" },
+        { "expr": "sum(increase(velo_prekey_pool_exhausted_total[1h]))", "legendFormat": "exhausted (1h)" }
+      ]
+    },
+    {
+      "type": "timeseries", "title": "Push wake-ups", "gridPos": { "x": 0, "y": 16, "w": 12, "h": 8 },
+      "targets": [
+        { "expr": "sum(rate(velo_push_sent_total[15m])) by (result) * 60", "legendFormat": "{{result}}" },
+        { "expr": "sum(rate(velo_push_tokens_pruned_total[15m])) * 60", "legendFormat": "tokens pruned" }
+      ]
+    },
+    {
+      "type": "timeseries", "title": "HTTP: requests by status, p95 latency", "gridPos": { "x": 12, "y": 16, "w": 12, "h": 8 },
+      "targets": [
+        { "expr": "sum(rate(velo_http_requests_total[5m])) by (status)", "legendFormat": "{{status}}" },
+        { "expr": "histogram_quantile(0.95, sum(rate(velo_http_request_duration_seconds_bucket[5m])) by (le))", "legendFormat": "p95 s" }
+      ]
+    },
+    {
+      "type": "stat", "title": "Open sockets", "gridPos": { "x": 0, "y": 24, "w": 6, "h": 5 },
+      "targets": [ { "expr": "sum(velo_socket_connections)" } ]
+    },
+    {
+      "type": "stat", "title": "Sessions bootstrapped / h", "gridPos": { "x": 6, "y": 24, "w": 6, "h": 5 },
+      "targets": [ { "expr": "sum(increase(velo_messages_sent_total{bootstrap=\"true\"}[1h]))" } ]
+    },
+    {
+      "type": "stat", "title": "Process RSS", "gridPos": { "x": 12, "y": 24, "w": 6, "h": 5 },
+      "fieldConfig": { "defaults": { "unit": "bytes" } },
+      "targets": [ { "expr": "velo_node_process_resident_memory_bytes" } ]
+    },
+    {
+      "type": "stat", "title": "Event-loop lag p99", "gridPos": { "x": 18, "y": 24, "w": 6, "h": 5 },
+      "fieldConfig": { "defaults": { "unit": "s" } },
+      "targets": [ { "expr": "velo_node_nodejs_eventloop_lag_p99_seconds" } ]
+    }
+  ]
+}

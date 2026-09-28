@@ -7,6 +7,8 @@ import { errorHandler, notFoundHandler } from './middleware/errorHandler';
 import { config } from './config';
 import { corsOriginCheck, parseOrigins } from './lib/corsPolicy';
 import { requestLogger } from './lib/logger';
+import { httpMetrics, metricsHandler } from './lib/metrics';
+import { telemetryRouter } from './routes/telemetry.routes';
 
 import { authRouter } from './routes/auth.routes';
 import { conversationsRouter } from './routes/conversations.routes';
@@ -28,6 +30,7 @@ export function createApp(): express.Express {
   app.set('trust proxy', 1);
 
   app.use(requestLogger()); // T4.5: correlation id + one access line per request
+  app.use(httpMetrics()); // T4.6: requests and latency by matched route
   app.use(helmet());
   // T4.4 (P2-7): browser origins come from CORS_ORIGINS only; the native apps send no Origin header.
   app.use(cors({ origin: corsOriginCheck(parseOrigins(config.CORS_ORIGINS)), credentials: true }));
@@ -40,6 +43,10 @@ export function createApp(): express.Express {
   app.use('/users', usersRouter);
   app.use('/keys', keysRouter);
   app.use('/messages', messagesRouter);
+  app.use('/telemetry', telemetryRouter);
+
+  // T4.6: Prometheus scrape, bearer-protected; 404 when METRICS_TOKEN is unset.
+  app.get('/metrics', metricsHandler());
 
   // Health for the reverse proxy and the process manager (T4.2): 503 until MongoDB is connected.
   app.get('/health', (_req, res) => {

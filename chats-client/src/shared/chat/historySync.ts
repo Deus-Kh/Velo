@@ -3,6 +3,7 @@ import { normalizeB64, protocolErrorCode, type MessageEnvelope } from '@velo/pro
 import { messagesApi, type HistoryItem, type ReceiptItem } from '../api/messages.api';
 import { patchStoredMessage, storedMessageId, upsertStoredMessage, type StoredMessage } from '../storage/messageStore';
 import { receiveIncoming } from './incoming';
+import { reportDecryptFailure } from '../api/telemetry.api';
 
 const SYNC_PAGE = 100;
 const MAX_PAGES = 20;
@@ -80,6 +81,7 @@ export async function ingestUndeliveredItems(params: {
       else if (code === 'MISSING_BOOTSTRAP' || code === 'SESSION_RESET_REQUIRED') callbacks?.onResetRequired?.('missing session and initPacket for inbound history item');
       else if (code === 'REPLAY_DETECTED' || code === 'UNKNOWN_OLD_MESSAGE') acked.push(it.serverMessageId); // already consumed: nothing left to fetch
       else console.warn('Ingest: message not decryptable', { serverMessageId: it.serverMessageId, code });
+      if (code !== 'REPLAY_DETECTED' && code !== 'UNKNOWN_OLD_MESSAGE') reportDecryptFailure(code); // T4.6: the code only
     }
   }
 

@@ -1,0 +1,41 @@
+# Alerting rules for the Velo server (T4.6). Thresholds are starting points.
+groups:
+  - name: velo-server
+    rules:
+      - alert: VeloDecryptFailureRate
+        expr: sum(rate(velo_client_decrypt_failures_total[15m])) / clamp_min(sum(rate(velo_messages_delivered_total[15m])), 1) > 0.02
+        for: 15m
+        labels: { severity: page }
+        annotations:
+          summary: "More than 2% of delivered messages fail to decrypt on devices"
+          description: "A protocol regression or a broken deploy. Check velo_client_decrypt_failures_total by code."
+
+      - alert: VeloPrekeyPoolExhausted
+        expr: increase(velo_prekey_pool_exhausted_total[1h]) > 0
+        for: 5m
+        labels: { severity: warn }
+        annotations:
+          summary: "A user ran out of one-time prekeys in the last hour"
+          description: "Bundles were issued without a one-time key (weaker forward secrecy for those handshakes). Check client top-up (T1.4) and the bundle budgets."
+
+      - alert: VeloPushFailures
+        expr: sum(rate(velo_push_sent_total{result="failed"}[15m])) / clamp_min(sum(rate(velo_push_sent_total[15m])), 1) > 0.2
+        for: 15m
+        labels: { severity: warn }
+        annotations:
+          summary: "More than 20% of push wake-ups fail"
+
+      - alert: VeloDeliveryLatencyHigh
+        expr: histogram_quantile(0.5, sum(rate(velo_delivery_latency_seconds_bucket[30m])) by (le)) > 300
+        for: 30m
+        labels: { severity: warn }
+        annotations:
+          summary: "Median delivery latency above five minutes"
+          description: "Devices are not acking. Push (T3.3), the socket layer, or the undelivered endpoint (T3.1)."
+
+      - alert: VeloServerDown
+        expr: up{job="velo-server"} == 0
+        for: 2m
+        labels: { severity: page }
+        annotations:
+          summary: "The Velo server is not scrapeable"

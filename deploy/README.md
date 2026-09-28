@@ -66,6 +66,13 @@ Until CI produces the build (T4.7), build with the dev dependencies present
 - **Least privilege.** Unprivileged user, read-only filesystem
   (`ProtectSystem=strict`), no capabilities, private `/tmp`.
 
+## Metrics
+
+Set `METRICS_TOKEN` (`openssl rand -hex 32`) to enable `GET /metrics`; Prometheus
+scrapes it with the same bearer token (`deploy/prometheus/prometheus.yml`,
+alert rules in `alerts.yml`). Import `deploy/grafana/velo-dashboard.json` into
+Grafana. No series carries a user or conversation identifier.
+
 ## Rollback
 
 ```bash
