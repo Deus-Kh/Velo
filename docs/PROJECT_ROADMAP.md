@@ -452,6 +452,10 @@ Extraction happens in T2.1. Secrets (`*.pem`, `*.keystore`, service-account JSON
 
 **4' progress — T4.9 done 2026-09-28** (one commit): driver-based daily snapshots with checksummed manifests and retention under systemd; verify/restore commands; the restore is rehearsed in CI on every build. Next in order: T4.10 (certificate pinning + rotation procedure).
 
+**4' progress — T4.10 done for Android 2026-09-28** (one commit): SPKI pinning of the Let's Encrypt roots (current + backup) in the Android network security config with a fail-open expiration, a pin tool, a Caddyfile, the rotation procedure, and a test that keeps the config well-formed and current. Next in order: T4.11 (rewrite `docs/design/architecture.md`).
+
+**4' progress — T4.11 done 2026-09-28** (one commit): `docs/design/architecture.md` describes the system as built; the old sketch is archived. **Phase 4' is complete.** Remaining human steps: host install (systemd units, env file), domain + Caddy TLS, pin check on the live chain, branch protection, the two-device checklist T2.12. Next: Phase 6' (groups, per-user sender keys) per §13.2, or the owner's call.
+
 **2b progress — T2.14 done 2026-09-28** (one commit, D7 = A): plaintext stored locally in sealed records, message keys never archived, history read from the device with the server asked only for newer messages, one-time migration of the old archive. **The known-red registry is empty: every scenario the harness owns is green.** Remaining in Phase 2: T2.12 (manual two-device checklist, owner).
 
 **2b progress — T2.11 done 2026-09-28** (two commits): bootstrap persists only after the first message decrypts, bootstrap replay refused, glare converges on the lower user id without losing messages, a peer's local reset is adopted automatically. Next in order: T2.14.
