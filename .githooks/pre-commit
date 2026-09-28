@@ -1,0 +1,4 @@
+#!/bin/sh
+# Pre-commit: refuse to commit anything that looks like a secret (T1.15).
+# Enable once per clone:  git config core.hooksPath .githooks
+exec node "$(git rev-parse --show-toplevel)/tools/secret-scan.js"

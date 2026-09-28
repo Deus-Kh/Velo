@@ -1,0 +1,25 @@
+# Normalise line endings: LF in the repository, native on checkout.
+# Stops the CRLF-only diffs that Windows checkouts kept producing (P3).
+* text=auto eol=lf
+
+# Windows scripts must keep CRLF.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Binaries — never normalise.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.ico binary
+*.jar binary
+*.keystore binary
+*.p12 binary
+*.pem binary
+*.apk binary
+*.aab binary
+*.ttf binary
+*.otf binary
+*.mp3 binary
+*.wav binary

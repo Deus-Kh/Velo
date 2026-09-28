@@ -298,6 +298,7 @@ Fix: after T2.0, an inbound `initPacket` whose identity matches the pin but whos
 - **P2-9 · Ordering keyed on the client clock** `[PARITY]` *(new)* — any client pins itself to the top of everyone's history. Server-assigned per-conversation sequence. → T3.2
 - **P2-10 · Presence/typing subscribable by anyone; no privacy toggles** `[PARITY]` *(new)* — relationship check; toggles for read receipts, typing, last-seen; consider dropping "online" broadcast entirely (Signal has none). → T1.7, Phase 7'
 - **P2-11 · 69 dependency advisories, 7 critical** `[CORE]` *(new)* → T1.12
+  **Status 2026-09-28:** resolved by T1.12. Server: 26 → 8 advisories, all moderate, none high or critical. Client: 43 → 1; the remaining one is `image-size` inside Metro (the bundler, pinned by `@react-native/metro-config` 0.83.1), a build-time-only dependency that never ships in the app — accepted until the next React Native upgrade. Removed unused packages: `crypto-js`, `date-fns`, `uuid`, `@react-native/new-app-screen`, `@bam.tech/react-native-make`, legacy `react-native-vector-icons` and its type shim.
 - **P2-12 · Stack traces returned to clients; no error middleware; `NODE_ENV` unset** `[CORE]` *(new)* → T1.9
   **Status 2026-09-11:** error middleware landed with T1.5 (404/400/413/503/500 as `{error, code}`, no stack); `@ts-ignore`s removed in T1.1. Remaining for T1.9: `NODE_ENV=production` in the start script and socket acks that echo `e.message`.
   **Status 2026-09-25:** closed. `npm start` runs with `NODE_ENV=production` (`npm run dev` keeps nodemon); the last socket ack echoing an internal message now returns `INTERNAL`. The `tsc` build to `dist/` remains T4.1.
@@ -406,7 +407,7 @@ Extraction happens in T2.1. Secrets (`*.pem`, `*.keystore`, service-account JSON
 | T1.12 Dependency remediation (`npm audit fix`, drop unused deps) | P2-11 | 0.5d |
 | T1.13 Keystore rotation; credentials out of `gradle.properties`; history purge | P0-10 | 0.5d + human |
 | T1.14 Logout wipes everything per user | P0-12 | 0.5d |
-| T1.15 `.gitattributes`; docs tracked (done 2026-09-07); gitleaks pre-commit | P3 | 0.5d |
+| T1.15 `.gitattributes`; docs tracked (done 2026-09-07); secret-scan pre-commit — **done 2026-09-28**: LF normalisation, dependency-free `tools/secret-scan.js` refusing connection strings, private keys, signing passwords, API keys and forbidden file types; wired via `.githooks/pre-commit` (each clone runs `git config core.hooksPath .githooks` once); CI runs `--all` in T4.7 | P3 | 0.5d |
 | T1.16 iOS builds and connects: ATS via TLS, Firebase config, `FirebaseApp.configure()`, empty usage strings removed | P0-2 | 1d |
 
 **Exit:** `/security-review` and `npm audit --audit-level=high` clean; both platforms connect over `https`/`wss`; login failure shows an error; logout leaves no user data. Write the remediation up — it is a thesis chapter.
@@ -536,7 +537,7 @@ One branch per task, merged behind the CI gate from week 5. Update §2 matrices 
 | Insertable Streams unavailable | n/a in 6 mo | — | Documented |
 | Solo burnout | High | Abandonment | Demoable milestone at every gate; cut per §11.3, never skip gates |
 | Thesis writing deferred | High | Weak dissertation | Ch. 2–4 written during Phase 2; journal from week 1 |
-| Public repo leaks a secret again | Medium | Rotation churn | gitleaks pre-commit and in CI (T1.15, T4.7) |
+| Public repo leaks a secret again | Medium | Rotation churn | secret-scan pre-commit (T1.15, done) and in CI (T4.7) |
 
 ---
 
