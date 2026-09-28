@@ -762,6 +762,8 @@ Written when Phase 6' closed; the roadmap (§7 Phase 7', §3 P2-10, §5.3) fixes
 
 **Gate (human, two devices):** react / edit / delete / forward round-trip; a timer expires on both; a block silences both ways; account deletion leaves nothing on the server (checked by a collection count); privacy defaults hold on a fresh account.
 
+**T7.1 status 2026-09-28: done** (one commit). `content/envelope.ts` carries `reaction` (one per sender per message; `remove` withdraws), `edit`, `delete` (a request for a tombstone), `timer` (`seconds | null`) and `text.forwardedFrom`; targets are `{senderUserId, clientMessageId}`, which both sides know; unknown fields are dropped, malformed content is `STORAGE_CORRUPTION`, unknown kinds still refuse (a newer peer). `isActionContent` partitions actions from `isControlContent` and text. The group chain now carries the envelope (`groupEncryptContent` / `groupDecryptContent`), so reactions, edits and timers work in groups with no wire change; bare legacy text still decodes. The client's three inbound paths and the harness consume action kinds (acked, no effect) until T7.2 applies them. Tests: every kind round-trips, eleven malformed shapes refuse, forwarded provenance survives, group text and actions decode on the other side.
+
 # 8. REFERENCE
 
 ## 8.1 Normative ratchet algorithm (replaces v1 §8.1)

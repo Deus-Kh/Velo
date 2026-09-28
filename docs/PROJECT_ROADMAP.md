@@ -470,6 +470,8 @@ Extraction happens in T2.1. Secrets (`*.pem`, `*.keystore`, service-account JSON
 
 **6' progress — T6.7 done 2026-09-28** (one commit): spec §8.2 (group wire format), §8.4, DEVIATION-9; the parity rows above; `architecture.md`. **Phase 6' is code-complete.** Remaining human step: the three-device gate (an E2EE group on three real Android devices; a removed member reads nothing after rotation). Next per §11: Phase 7' (product completeness) or the owner's call.
 
+**7' progress — T7.1 done 2026-09-28** (one commit): reactions, edits, delete requests, timers and forward provenance are content kinds inside the authenticated session; the group chain carries the same envelope. Next in order: T7.2 (client: reactions, edit, delete, forward).
+
 **2b progress — T2.14 done 2026-09-28** (one commit, D7 = A): plaintext stored locally in sealed records, message keys never archived, history read from the device with the server asked only for newer messages, one-time migration of the old archive. **The known-red registry is empty: every scenario the harness owns is green.** Remaining in Phase 2: T2.12 (manual two-device checklist, owner).
 
 **2b progress — T2.11 done 2026-09-28** (two commits): bootstrap persists only after the first message decrypts, bootstrap replay refused, glare converges on the lower user id without losing messages, a peer's local reset is adopted automatically. Next in order: T2.14.
