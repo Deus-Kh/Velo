@@ -31,6 +31,10 @@ sudo systemctl enable velo-server
 socket.io adapter (T4.3) share state through it, so two server processes
 behind the proxy behave as one.
 
+Logs are JSON lines on stdout (pino, T4.5): `journalctl -u velo-server -o cat | jq`.
+`LOG_LEVEL` (default `info`) sets the level; secrets are redacted by field name
+before anything is written.
+
 `FIREBASE_SERVICE_ACCOUNT_PATH` must point outside the checkout (for example
 `/etc/velo/firebase-admin.json`, mode 0640, owner root:velo). The service
 refuses to start when a required variable is missing.

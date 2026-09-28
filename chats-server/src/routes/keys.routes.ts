@@ -17,6 +17,7 @@ import {
   signedPreKeySchema,
   validateBody,
 } from '../utils/validation';
+import { log } from '../lib/logger';
 
 export const keysRouter = Router();
 
@@ -88,7 +89,7 @@ keysRouter.post('/identity', requireAuth, validateBody(identityUploadSchema), as
       OneTimePreKeyModel.deleteMany({ userId: req.userId }),
       SignedPreKeyModel.deleteMany({ userId: req.userId }),
     ]);
-    console.warn('[keys] identity changed; prekeys purged', { userId: String(req.userId) });
+    log.warn({ userId: String(req.userId) }, '[keys] identity changed; prekeys purged');
 
     const conversations = await ConversationModel.find({ members: req.userId }).select('members').lean();
     const me = String(req.userId);
@@ -232,13 +233,13 @@ keysRouter.get('/bundle/:userId', requireAuth, bundleLimiter, async (req: Authed
   // Budgets are charged before any lookup so probing unknown ids costs too.
   const pairBudget = await services.bundlePairLimiter.hit(`${requesterId}:${targetId}`);
   if (!pairBudget.allowed) {
-    console.warn('[keys] bundle pair limit hit', { requesterId, targetId, count: pairBudget.count });
+    log.warn({ requesterId, targetId, count: pairBudget.count }, '[keys] bundle pair limit hit');
     return tooManyRequests(res, pairBudget.retryAfterSeconds, 'BUNDLE_PAIR_LIMITED',
       'Too many prekey bundle requests for this contact. Please try again later.');
   }
   const requesterBudget = await services.bundleIssueLimiter.hit(requesterId);
   if (!requesterBudget.allowed) {
-    console.warn('[keys] bundle requester limit hit', { requesterId, count: requesterBudget.count });
+    log.warn({ requesterId, count: requesterBudget.count }, '[keys] bundle requester limit hit');
     return tooManyRequests(res, requesterBudget.retryAfterSeconds, 'BUNDLE_LIMITED',
       'Too many prekey bundle requests. Please try again later.');
   }
@@ -272,9 +273,9 @@ keysRouter.get('/bundle/:userId', requireAuth, bundleLimiter, async (req: Authed
   // 4) depletion visibility — the examiner's "how do you detect it" answer
   const remaining = await OneTimePreKeyModel.countDocuments({ userId: targetId, used: false });
   if (remaining === 0) {
-    console.error('[keys] one-time prekey pool exhausted', { targetId, requesterId, issuedWithoutOneTimeKey: !oneTime });
+    log.error({ targetId, requesterId, issuedWithoutOneTimeKey: !oneTime }, '[keys] one-time prekey pool exhausted');
   } else if (remaining < ONE_TIME_PREKEY_LOW_WATERMARK) {
-    console.warn('[keys] one-time prekey pool low', { targetId, remaining });
+    log.warn({ targetId, remaining }, '[keys] one-time prekey pool low');
   }
 
   // 5) ledger entry (never re-served; see PreKeyBundleIssue.ts)

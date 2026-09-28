@@ -11,6 +11,7 @@ import { setupSocket } from './socket/setupSocket';
 import { setRealtimeServer } from './lib/realtime';
 import { corsOriginCheck, parseOrigins } from './lib/corsPolicy';
 import { createLifecycle } from './lib/lifecycle';
+import { log } from './lib/logger';
 
 /** Upper bound for any socket.io packet; the per-message ciphertext cap is enforced separately. */
 const SOCKET_MAX_HTTP_BUFFER_SIZE = 256 * 1024;
@@ -18,7 +19,7 @@ const SOCKET_MAX_HTTP_BUFFER_SIZE = 256 * 1024;
 async function main() {
   if (!config.IS_PRODUCTION) {
     // T4.1: `npm start` runs the compiled build; the process manager sets NODE_ENV (T4.2).
-    console.warn('[server] NODE_ENV is not "production" (' + config.NODE_ENV + '): development settings are in effect');
+    log.warn('[server] NODE_ENV is not "production" (' + config.NODE_ENV + '): development settings are in effect');
   }
   await mongoose.connect(config.MONGO_URI);
 
@@ -44,7 +45,7 @@ async function main() {
   setRealtimeServer(io);
 
   server.listen(config.PORT, () => {
-    console.log(`Server running on http://localhost:${config.PORT}`);
+    log.info(`Server running on http://localhost:${config.PORT}`);
   });
 
   // T4.2: one shutdown path for signals and crashes; the process manager restarts on a non-zero exit.
@@ -60,12 +61,12 @@ async function main() {
     closeRedis,
     disconnectDb: () => mongoose.disconnect(),
     exit: (code) => process.exit(code),
-    log: (m) => console.log(m),
+    log: (m) => log.info(m),
   });
   lifecycle.install(process);
 }
 
 main().catch((e) => {
-  console.error(e);
+  log.error({ err: e }, '[server] startup failed');
   process.exit(1);
 });

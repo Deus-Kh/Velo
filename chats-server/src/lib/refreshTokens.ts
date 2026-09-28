@@ -2,6 +2,7 @@ import { createHash, randomBytes, randomUUID } from 'crypto';
 import jwt, { type SignOptions } from 'jsonwebtoken';
 import { config } from '../config';
 import { RefreshTokenModel } from '../models/RefreshToken';
+import { log } from './logger';
 
 /**
  * Session tokens (T1.10).
@@ -81,10 +82,10 @@ export async function rotateRefreshToken(presented: string, userAgent: string | 
       { family: current.family, revokedAt: null },
       { $set: { revokedAt: new Date() } },
     );
-    console.error('[auth] refresh token reuse detected; family revoked', {
+    log.error({
       userId: String(current.userId),
       family: current.family,
-    });
+    }, '[auth] refresh token reuse detected; family revoked');
     return { ok: false, code: 'REUSED' };
   }
 

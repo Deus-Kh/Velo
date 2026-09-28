@@ -442,6 +442,8 @@ Extraction happens in T2.1. Secrets (`*.pem`, `*.keystore`, service-account JSON
 
 **4' progress — T4.4 done 2026-09-28** (one commit): CORS allow-list from `CORS_ORIGINS` for Express and socket.io; no-Origin requests unaffected. Next in order: T4.5 (pino with correlation ids, redaction, zero key material).
 
+**4' progress — T4.5 done 2026-09-28** (one commit): pino everywhere, secrets redacted by field name at any depth, request ids echoed and logged, a test that forbids `console.*` in the server. Next in order: T4.6 (Prometheus metrics).
+
 **2b progress — T2.14 done 2026-09-28** (one commit, D7 = A): plaintext stored locally in sealed records, message keys never archived, history read from the device with the server asked only for newer messages, one-time migration of the old archive. **The known-red registry is empty: every scenario the harness owns is green.** Remaining in Phase 2: T2.12 (manual two-device checklist, owner).
 
 **2b progress — T2.11 done 2026-09-28** (two commits): bootstrap persists only after the first message decrypts, bootstrap replay refused, glare converges on the lower user id without losing messages, a peer's local reset is adopted automatically. Next in order: T2.14.

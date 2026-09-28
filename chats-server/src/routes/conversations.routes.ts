@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { ConversationModel } from '../models/Conversation';
 import { requireAuth, type AuthedRequest } from '../middleware/auth';
 import { makeConversationId } from '../utils/conversation';
+import { log } from '../lib/logger';
 
 export const conversationsRouter = Router();
 
@@ -63,11 +64,11 @@ conversationsRouter.post('/mark-read/:peerUserId', requireAuth, async (req: Auth
     { new: true }
   );
 
-  console.log('[mark-read]', {
+  log.info({
     me,
     conversationId,
     unreadCounts: updated?.unreadCounts,
-  });
+  }, '[mark-read]');
 
   return res.json({ ok: true, unreadCounts: updated?.unreadCounts });
 });

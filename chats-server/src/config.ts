@@ -55,6 +55,9 @@ export const config = {
 
   BCRYPT_ROUNDS: optionalNumber('BCRYPT_ROUNDS', 12),
 
+  /** T4.5: pino level (trace|debug|info|warn|error|fatal). */
+  LOG_LEVEL: optionalString('LOG_LEVEL', NODE_ENV === 'test' ? 'silent' : 'info'),
+
   /** T3.1: undelivered ciphertext and delivery receipts expire after this many days (TTL index on Message.expiresAt). */
   MESSAGE_TTL_DAYS: optionalNumber('MESSAGE_TTL_DAYS', 30),
 

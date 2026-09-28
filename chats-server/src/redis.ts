@@ -1,5 +1,6 @@
 import Redis from 'ioredis';
 import { config } from './config';
+import { log } from './lib/logger';
 
 /**
  * Shared Redis client for rate limits, login backoff, and (Phase 4') presence
@@ -23,7 +24,7 @@ export async function initRedis(timeoutMs = 2000): Promise<Redis | null> {
     if (config.IS_PRODUCTION) {
       throw new Error('REDIS_URL is required in production (rate limits must be shared and durable).');
     }
-    console.warn('[redis] REDIS_URL not set; using in-memory rate limits (development only).');
+    log.warn('[redis] REDIS_URL not set; using in-memory rate limits (development only).');
     client = null;
     return null;
   }
@@ -39,11 +40,11 @@ export async function initRedis(timeoutMs = 2000): Promise<Redis | null> {
 
   let lastState: 'up' | 'down' | null = null;
   candidate.on('error', (err) => {
-    if (lastState !== 'down') console.error('[redis] connection error:', err.message);
+    if (lastState !== 'down') log.error({ err: err.message }, '[redis] connection error');
     lastState = 'down';
   });
   candidate.on('ready', () => {
-    if (lastState !== 'up') console.log('[redis] connected');
+    if (lastState !== 'up') log.info('[redis] connected');
     lastState = 'up';
   });
 
@@ -59,17 +60,11 @@ export async function initRedis(timeoutMs = 2000): Promise<Redis | null> {
     return client;
   } catch (err) {
     if (config.IS_PRODUCTION) {
-      console.error(
-        '[redis] unreachable at boot; auth rate limiting will fail closed until it recovers:',
-        (err as Error).message,
-      );
+      log.error({ err: (err as Error).message }, '[redis] unreachable at boot; auth rate limiting will fail closed until it recovers');
       client = candidate; // keep it: ioredis will keep retrying in the background
       return client;
     }
-    console.warn(
-      '[redis] unreachable; falling back to in-memory rate limits (development only):',
-      (err as Error).message,
-    );
+    log.warn({ err: (err as Error).message }, '[redis] unreachable; falling back to in-memory rate limits (development only)');
     candidate.disconnect();
     client = null;
     return null;

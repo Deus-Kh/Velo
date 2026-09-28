@@ -3,6 +3,7 @@ import { requireAuth, type AuthedRequest } from "../middleware/auth";
 import { MessageModel } from "../models/Message";
 import { makeConversationId } from "../utils/conversation";
 import { markDelivered } from "../lib/delivery";
+import { log } from '../lib/logger';
 
 export const messagesRouter = Router();
 
@@ -131,11 +132,11 @@ messagesRouter.post(
       }
     );
 
-    console.log('[messages] mark-read', {
+    log.info({
       conversationId,
       forUser: me,
       updatedCount: result.modifiedCount,
-    });
+    }, '[messages] mark-read');
 
     return res.json({ ok: true, updatedCount: result.modifiedCount });
   }

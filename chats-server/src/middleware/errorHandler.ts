@@ -1,5 +1,6 @@
 import type { NextFunction, Request, Response } from 'express';
 import { RateLimitBackendUnavailableError } from './rateLimit';
+import { log } from '../lib/logger';
 
 /**
  * Terminal handlers. Clients only ever receive `{ error, code }`; stack traces
@@ -39,6 +40,6 @@ export function errorHandler(err: unknown, _req: Request, res: Response, _next: 
     return;
   }
 
-  console.error('[http] unhandled error:', e?.name ?? 'Error', e?.message ?? err);
+  log.error({ detail: [e?.name ?? 'Error', e?.message ?? err] }, '[http] unhandled error');
   res.status(500).json({ error: 'Internal server error', code: 'INTERNAL' });
 }

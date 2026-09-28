@@ -6,6 +6,7 @@ import { globalLimiter } from './middleware/rateLimit';
 import { errorHandler, notFoundHandler } from './middleware/errorHandler';
 import { config } from './config';
 import { corsOriginCheck, parseOrigins } from './lib/corsPolicy';
+import { requestLogger } from './lib/logger';
 
 import { authRouter } from './routes/auth.routes';
 import { conversationsRouter } from './routes/conversations.routes';
@@ -26,6 +27,7 @@ export function createApp(): express.Express {
   // would appear to come from 127.0.0.1 and IP-based limits would be a no-op.
   app.set('trust proxy', 1);
 
+  app.use(requestLogger()); // T4.5: correlation id + one access line per request
   app.use(helmet());
   // T4.4 (P2-7): browser origins come from CORS_ORIGINS only; the native apps send no Origin header.
   app.use(cors({ origin: corsOriginCheck(parseOrigins(config.CORS_ORIGINS)), credentials: true }));

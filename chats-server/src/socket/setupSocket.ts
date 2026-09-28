@@ -11,6 +11,7 @@ import { haveConversation } from "../lib/socketAuthz";
 import { markDelivered, messageExpiry } from "../lib/delivery";
 import { setRealtimeServer } from "../lib/realtime";
 import { UserModel } from "../models/User";
+import { log } from '../lib/logger';
 
 /** Maximum encrypted message body accepted over the socket (P0-5 storage-flood control). */
 const MAX_CIPHERTEXT_BYTES = 64 * 1024;
@@ -82,7 +83,7 @@ async function emitPresence(io: Server, userId: string) {
   try {
     io.to(`presence:${userId}`).emit("presence:update", await getPresencePayload(userId));
   } catch (e) {
-    console.warn('[socket] presence emit failed:', (e as Error)?.message ?? e);
+    log.warn({ err: (e as Error)?.message ?? e }, '[socket] presence emit failed');
   }
 }
 
@@ -124,7 +125,7 @@ export function setupSocket(io: Server) {
     services.presence
       .connected(userId, socket.id)
       .then(() => emitPresence(io, userId))
-      .catch((e) => console.warn('[socket] presence connect failed:', (e as Error)?.message ?? e));
+      .catch((e) => log.warn({ err: (e as Error)?.message ?? e }, '[socket] presence connect failed'));
     // Keep this socket's presence entry alive across the TTL (a dead process stops refreshing).
     const heartbeat = setInterval(() => {
       services.presence.heartbeat(userId, socket.id).catch(() => {});
@@ -135,7 +136,7 @@ export function setupSocket(io: Server) {
       const peerUserId = String(dto?.peerUserId ?? "");
       if (!isValidObjectIdString(peerUserId)) return;
       if (!(await haveConversation(userId, peerUserId))) {
-        console.warn("[socket] presence:subscribe refused (no conversation)", { userId, peerUserId });
+        log.warn({ userId, peerUserId }, "[socket] presence:subscribe refused (no conversation)");
         return;
       }
 
@@ -173,7 +174,7 @@ export function setupSocket(io: Server) {
         // spam is bounded too.
         const sendBudget = await services.messageSendLimiter.hit(userId);
         if (!sendBudget.allowed) {
-          console.warn("[socket] message:send rate limited", { from: userId, count: sendBudget.count });
+          log.warn({ from: userId, count: sendBudget.count }, "[socket] message:send rate limited");
           return ack?.({
             ok: false,
             code: "RATE_LIMITED",
@@ -184,7 +185,7 @@ export function setupSocket(io: Server) {
 
 
         if (!dto?.toUserId || !isValidObjectIdString(dto.toUserId)) {
-          console.warn("[socket] reject message: invalid toUserId", { from: userId });
+          log.warn({ from: userId }, "[socket] reject message: invalid toUserId");
           return ack?.({ ok: false, code: "BAD_ID", error: "Invalid toUserId" });
         }
         // Authorization: sender is always socket.data.userId; the recipient must
@@ -197,20 +198,20 @@ export function setupSocket(io: Server) {
           return ack?.({ ok: false, code: "NOT_FOUND", error: "Recipient not found" });
         }
         if (!isNonEmptyString(dto.clientMessageId, 3)) {
-          console.warn("[socket] reject message: invalid clientMessageId", { from: userId });
+          log.warn({ from: userId }, "[socket] reject message: invalid clientMessageId");
           return ack?.({ ok: false, error: "Invalid clientMessageId" });
         }
         if (typeof dto.createdAt !== "number") {
-          console.warn("[socket] reject message: invalid createdAt", { from: userId });
+          log.warn({ from: userId }, "[socket] reject message: invalid createdAt");
           return ack?.({ ok: false, error: "Invalid createdAt" });
         }
 
         const protoVersion = dto?.protoVersion ?? 0;
         if (protoVersion !== 4) {
-          console.warn("[socket] reject message: unsupported protoVersion", {
+          log.warn({
             protoVersion: dto?.protoVersion,
             from: userId,
-          });
+          }, "[socket] reject message: unsupported protoVersion");
           return ack?.({
             ok: false,
             code: "UNSUPPORTED_PROTO_VERSION",
@@ -226,20 +227,20 @@ export function setupSocket(io: Server) {
           !isNonEmptyString(v4.ciphertext, 8) ||
           !isNonEmptyString(v4.mac, 8)
         ) {
-          console.warn("[socket] reject message: invalid v4 payload", {
+          log.warn({
             hasV4: !!dto.v4,
             encHeaderLen: dto.v4?.encHeader?.length,
             cipherLen: dto.v4?.ciphertext?.length,
             macLen: dto.v4?.mac?.length,
-          });
+          }, "[socket] reject message: invalid v4 payload");
           return ack?.({ ok: false, error: "Invalid v4 payload" });
         }
 
         if (v4.ciphertext.length > MAX_CIPHERTEXT_B64_LENGTH) {
-          console.warn("[socket] reject message: ciphertext too large", {
+          log.warn({
             from: userId,
             cipherLen: v4.ciphertext.length,
-          });
+          }, "[socket] reject message: ciphertext too large");
           return ack?.({
             ok: false,
             code: "PAYLOAD_TOO_LARGE",
@@ -253,11 +254,11 @@ export function setupSocket(io: Server) {
         });
 
         if (existingMessage) {
-          console.log('[socket] duplicate clientMessageId, returning existing message', {
+          log.info({
             from: userId,
             clientMessageId: dto.clientMessageId,
             serverMessageId: String(existingMessage._id),
-          });
+          }, '[socket] duplicate clientMessageId, returning existing message');
 
           return ack?.({
             ok: true,
@@ -390,11 +391,11 @@ export function setupSocket(io: Server) {
             });
 
             if (existingMessage) {
-              console.warn('[socket] duplicate key hit, returning existing message', {
+              log.warn({
                 from: userId,
                 clientMessageId: dto.clientMessageId,
                 serverMessageId: String(existingMessage._id),
-              });
+              }, '[socket] duplicate key hit, returning existing message');
 
               return ack?.({
                 ok: true,
@@ -403,11 +404,11 @@ export function setupSocket(io: Server) {
               });
             }
           } catch (lookupError) {
-            console.error('[socket] duplicate recovery lookup failed:', lookupError);
+            log.error({ err: lookupError }, '[socket] duplicate recovery lookup failed');
           }
         }
 
-        console.error("[socket] message:send failed:", (e as Error)?.message ?? e);
+        log.error({ err: (e as Error)?.message ?? e }, "[socket] message:send failed");
         return ack?.({ ok: false, code: "INTERNAL", error: "Internal error" });
       }
     });
@@ -421,13 +422,13 @@ export function setupSocket(io: Server) {
         // T3.1: the ack deletes the ciphertext; lib/delivery.ts owns the rule.
         const r = await markDelivered({ recipientId: userId, serverMessageId: String(dto?.serverMessageId ?? '') });
         if (!r.ok) {
-          if (r.code === 'FORBIDDEN') console.warn('[socket] message:delivered refused (not the recipient)', { userId, serverMessageId: dto?.serverMessageId });
+          if (r.code === 'FORBIDDEN') log.warn({ userId, serverMessageId: dto?.serverMessageId }, '[socket] message:delivered refused (not the recipient)');
           const error = r.code === 'BAD_ID' ? 'Invalid serverMessageId' : r.code === 'NOT_FOUND' ? 'Message not found' : 'Forbidden';
           return ack?.({ ok: false, code: r.code, error });
         }
         return ack?.({ ok: true, status: r.status });
       } catch (e) {
-        console.error('[socket] message:delivered failed:', (e as Error)?.message ?? e);
+        log.error({ err: (e as Error)?.message ?? e }, '[socket] message:delivered failed');
         return ack?.({ ok: false, code: 'INTERNAL', error: 'Internal error' });
       }
     });
@@ -451,7 +452,7 @@ export function setupSocket(io: Server) {
           return ack?.({ ok: false, code: 'BAD_ID', error: 'Invalid peerUserId' });
         }
         if (!(await haveConversation(userId, peerUserId))) {
-          console.warn('[socket] message:read refused (no conversation)', { userId, peerUserId });
+          log.warn({ userId, peerUserId }, '[socket] message:read refused (no conversation)');
           return ack?.({ ok: false, code: 'FORBIDDEN', error: 'Forbidden' });
         }
 
@@ -479,7 +480,7 @@ export function setupSocket(io: Server) {
 
         return ack?.({ ok: true, modified: result.modifiedCount });
       } catch (e) {
-        console.error('[socket] message:read failed:', (e as Error)?.message ?? e);
+        log.error({ err: (e as Error)?.message ?? e }, '[socket] message:read failed');
         return ack?.({ ok: false, code: 'INTERNAL', error: 'Internal error' });
       }
     });
@@ -489,7 +490,7 @@ export function setupSocket(io: Server) {
       services.presence
         .disconnected(userId, socket.id)
         .then(() => emitPresence(io, userId))
-        .catch((e) => console.warn('[socket] presence disconnect failed:', (e as Error)?.message ?? e));
+        .catch((e) => log.warn({ err: (e as Error)?.message ?? e }, '[socket] presence disconnect failed'));
     });
   });
 }

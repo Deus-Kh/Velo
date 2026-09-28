@@ -120,18 +120,19 @@ describe('GET /keys/bundle/:userId', () => {
   });
 
   it('logs a warning below the low watermark and an error at exhaustion; then issues without a one-time key', async () => {
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
-    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const { log } = await import('../src/lib/logger');
+    const warn = vi.spyOn(log, 'warn').mockImplementation(() => undefined);
+    const error = vi.spyOn(log, 'error').mockImplementation(() => undefined);
     const requesters = await Promise.all([createUser(), createUser(), createUser()]);
     const target = await createUser({ oneTimePreKeys: 2 });
 
     // 2 → 1 remaining: low watermark warning
     expect((await getBundle(requesters[0].token, target.userId)).body.remainingOneTimePreKeys).toBe(1);
-    expect(warn).toHaveBeenCalledWith('[keys] one-time prekey pool low', expect.objectContaining({ remaining: 1 }));
+    expect(warn).toHaveBeenCalledWith(expect.objectContaining({ remaining: 1 }), '[keys] one-time prekey pool low');
 
     // 1 → 0 remaining: exhaustion error
     expect((await getBundle(requesters[1].token, target.userId)).body.remainingOneTimePreKeys).toBe(0);
-    expect(error).toHaveBeenCalledWith('[keys] one-time prekey pool exhausted', expect.objectContaining({ targetId: target.userId }));
+    expect(error).toHaveBeenCalledWith(expect.objectContaining({ targetId: target.userId }), '[keys] one-time prekey pool exhausted');
 
     // pool empty: bundle still issued, without a one-time key
     const dry = await getBundle(requesters[2].token, target.userId);

@@ -62,7 +62,8 @@ describe('POST /auth/refresh', () => {
   });
 
   it('reuse of a rotated-out token revokes the whole family', async () => {
-    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const { log } = await import('../src/lib/logger');
+    const error = vi.spyOn(log, 'error').mockImplementation(() => undefined);
     const first = await registerFresh();
     const second = await refresh(first.refreshToken);
     expect(second.status).toBe(200);
@@ -70,7 +71,7 @@ describe('POST /auth/refresh', () => {
     const replay = await refresh(first.refreshToken); // attacker replays the stolen, already-rotated token
     expect(replay.status).toBe(401);
     expect(replay.body.code).toBe('REFRESH_REUSED');
-    expect(error).toHaveBeenCalledWith('[auth] refresh token reuse detected; family revoked', expect.any(Object));
+    expect(error).toHaveBeenCalledWith(expect.any(Object), '[auth] refresh token reuse detected; family revoked');
 
     const victim = await refresh(second.body.refreshToken); // the legitimate successor is dead too
     expect(victim.status).toBe(401);
@@ -90,7 +91,6 @@ describe('POST /auth/refresh', () => {
   });
 
   it('two concurrent refreshes of the same token: exactly one succeeds', async () => {
-    vi.spyOn(console, 'error').mockImplementation(() => undefined);
     const body = await registerFresh();
     const results = await Promise.all([refresh(body.refreshToken), refresh(body.refreshToken)]);
     const statuses = results.map((r) => r.status).sort();

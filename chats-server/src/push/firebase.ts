@@ -2,6 +2,7 @@ import fs from "fs";
 import path from "path";
 import { config } from "../config";
 import { UserModel } from "../models/User";
+import { log } from '../lib/logger';
 
 let firebaseAdmin: any = null;
 let firebaseInitAttempted = false;
@@ -18,7 +19,7 @@ function getFirebaseAdmin() {
     // eslint-disable-next-line @typescript-eslint/no-var-requires
     firebaseAdmin = require("firebase-admin");
   } catch (error) {
-    console.warn("[push] firebase-admin is not installed; push delivery is disabled.");
+    log.warn("[push] firebase-admin is not installed; push delivery is disabled.");
     firebaseAvailable = false;
     return null;
   }
@@ -37,9 +38,7 @@ function getFirebaseAdmin() {
           // Never fall back to application-default credentials: on a misconfigured
           // host that would silently bind push to whatever project the machine
           // happens to be logged into. Disable push loudly instead.
-          console.warn(
-            `[push] service-account file not found at ${resolvedPath}; push delivery is disabled.`,
-          );
+          log.warn(`[push] service-account file not found at ${resolvedPath}; push delivery is disabled.`);
           firebaseAvailable = false;
           return null;
         }
@@ -53,7 +52,7 @@ function getFirebaseAdmin() {
     firebaseAvailable = true;
     return firebaseAdmin;
   } catch (error) {
-    console.warn("[push] failed to initialize firebase-admin:", error);
+    log.warn({ err: error }, "[push] failed to initialize firebase-admin");
     firebaseAvailable = false;
     return null;
   }
@@ -146,6 +145,6 @@ export async function sendMessagePushToUser(params: { toUserId: string; serverMe
       );
     }
   } catch (error) {
-    console.warn("[push] failed to send push notification:", (error as Error)?.message ?? error);
+    log.warn({ err: (error as Error)?.message ?? error }, "[push] failed to send push notification");
   }
 }
