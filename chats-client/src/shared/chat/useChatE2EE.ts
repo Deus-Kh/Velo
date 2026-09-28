@@ -24,8 +24,8 @@ import { deleteSession, loadSession } from '../storage/sessionStore';
 import { protocolErrorCode, type ProtocolErrorCode, type RatchetSessionV2 } from '@velo/protocol';
 import { acceptNewIdentity as acceptNewIdentityForPair } from '../crypto/identityTrust';
 import { decryptAndPersist, decryptArchived } from './ratchetAdapter';
+import { bootstrapAndDecrypt } from './incoming';
 import { classifyPendingMessageError } from './protocolErrors';
-import { ensureV2SessionFromIncoming } from '../crypto/sessionBootstrap';
 import type { X3DHInitPacket } from '../crypto/x3dh';
 import { makeConversationId } from '../utils/conversation';
 import type { ReplyReference } from './types';
@@ -218,17 +218,14 @@ async function decryptHistoryBatch(
             mac: normalizeB64(it.v3.mac),
           };
 
+          let bootstrapped: string | null = null;
           if (mode === 'live' && !mine && !v2Session && it.initPacket) {
             try {
-              await ensureV2SessionFromIncoming({
-                myUserId,
-                peerUserId,
-                initPacket: it.initPacket,
-              });
-              const createdSession = await loadSession({ myUserId, peerUserId });
-              if (createdSession && createdSession.protoVersion === 3) {
-                v2Session = createdSession as RatchetSessionV2;
-              }
+              // T2.11: the session is persisted only if this first message decrypts.
+              const r = await bootstrapAndDecrypt({ myUserId, peerUserId, initPacket: it.initPacket, encrypted: envelope });
+              v2Session = r.session;
+              onSessionUpdated(r.session);
+              bootstrapped = r.plaintext;
             } catch (e) {
               if (protocolErrorCode(e) === 'IDENTITY_MISMATCH') {
                 onIdentityChanged('initiator identity does not match the pinned identity');
@@ -238,7 +235,9 @@ async function decryptHistoryBatch(
             }
           }
 
-          if (mode === 'live' && !mine && v2Session) {
+          if (bootstrapped !== null) {
+            text = bootstrapped;
+          } else if (mode === 'live' && !mine && v2Session) {
             try {
               const r = await decryptAndPersist({ myUserId, peerUserId, session: v2Session, encrypted: envelope });
               v2Session = r.updatedSession;

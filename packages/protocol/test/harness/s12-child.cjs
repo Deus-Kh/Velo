@@ -21,6 +21,13 @@ const AD = { senderIdentityKey: encodeBase64(new Uint8Array(32).fill(1)), receiv
 const e = ratchetEncrypt(a, 'x', AD);
 const forged = { ...e.envelope, header: { ...e.envelope.header, n } };
 
+// Warm up the transpiled modules and the hash implementation so the timed call measures the bound, not module loading.
+try {
+  ratchetDecrypt(b, { ...forged, header: { ...forged.header, n: 1 } }, AD);
+} catch (_) {
+  /* expected */
+}
+
 const t0 = Date.now();
 try {
   ratchetDecrypt(b, forged, AD);

@@ -231,10 +231,27 @@ export class VirtualClient {
     return initPacket;
   }
 
-  /** ensureV2SessionFromIncoming. */
-  private bootstrapFromInitPacket(peerUserId: string, initPacket: X3DHInitPacket): void {
-    if (this.hasSession(peerUserId)) return;
+  /**
+   * chat/incoming.ts bootstrapAndDecrypt (T2.11): authenticate the initiator, refuse a replayed
+   * packet, build a candidate session and decrypt the message with it; persist only on success,
+   * then drop the one-time prekey secret and remember the packet.
+   */
+  private bootstrapAndDecrypt(peerUserId: string, initPacket: X3DHInitPacket, envelope: MessageEnvelope): { plaintext: string; session: RatchetSessionV2 } {
     this.authenticateInitiator(peerUserId, initPacket);
+    const seen = this.store.getJson<string[]>('bootstrap-seen:' + peerUserId) ?? [];
+    if (seen.includes(initPacket.ephPublicKey)) {
+      throw new ProtocolError('REPLAY_DETECTED', 'Bootstrap packet already used for this peer', { peerUserId });
+    }
+    const candidate = this.candidateSession(peerUserId, initPacket);
+    const step = ratchetDecrypt(candidate, envelope, this.associatedData(peerUserId, 'in'));
+    this.persistStep(peerUserId, step.session, step.derivedKeys);
+    if (initPacket.oneTimePreKeyId !== null) this.store.delete('opk:' + String(initPacket.oneTimePreKeyId));
+    this.store.setJson('bootstrap-seen:' + peerUserId, [...seen, initPacket.ephPublicKey].slice(-32));
+    return { plaintext: step.plaintext, session: step.session };
+  }
+
+  /** x3dhRespond + initResponderSession without persisting anything. */
+  private candidateSession(peerUserId: string, initPacket: X3DHInitPacket): RatchetSessionV2 {
 
     // The pair the packet names: current or retained; expired or unknown is SESSION_RESET_REQUIRED (T2.10).
     const spk = selectSignedPreKey(this.store.getJson<SignedPreKeySet>('signed-prekeys'), initPacket.signedPreKeyId, this.now());
@@ -253,14 +270,11 @@ export class VirtualClient {
       identityDhSecretKey: decodeBase64(identityDh.privateKey),
       oneTimePreKeySecretKey: opkSecret,
     });
-    if (initPacket.oneTimePreKeyId !== null) this.store.delete('opk:' + String(initPacket.oneTimePreKeyId));
-
-    const session = initResponderSession({
+    return initResponderSession({
       peerUserId,
       sharedSecret: sessionKeys.rootKey,
       signedPreKey: { publicKey: spk.publicKey, privateKey: spk.privateKey },
     });
-    this.saveSession(peerUserId, session);
   }
 
   // ───────── send / receive ─────────
@@ -291,21 +305,19 @@ export class VirtualClient {
   receive(dto: NewMessageDTO): string {
     if (dto.fromUserId === this.userId) throw new Error('own echo must not be delivered to the harness client');
     const peerUserId = dto.fromUserId;
-
-    if (!this.hasSession(peerUserId) && dto.initPacket) {
-      this.bootstrapFromInitPacket(peerUserId, dto.initPacket);
-    }
     const session = this.sessionState(peerUserId);
-    if (!session) {
-      throw dto.initPacket
-        ? new ProtocolError('SESSION_RESET_REQUIRED', 'Failed to establish v2 session from incoming initPacket')
-        : new ProtocolError('MISSING_BOOTSTRAP', 'Missing v2 session and initPacket for incoming message');
-    }
 
-    const step = ratchetDecrypt(session, dto.v3, this.associatedData(peerUserId, 'in'));
-    this.persistStep(peerUserId, step.session, step.derivedKeys);
-    this.inbox.push({ fromUserId: peerUserId, text: step.plaintext, serverMessageId: dto.serverMessageId });
-    return step.plaintext;
+    let plaintext: string;
+    if (!session) {
+      if (!dto.initPacket) throw new ProtocolError('MISSING_BOOTSTRAP', 'Missing v2 session and initPacket for incoming message');
+      plaintext = this.bootstrapAndDecrypt(peerUserId, dto.initPacket, dto.v3).plaintext;
+    } else {
+      const step = ratchetDecrypt(session, dto.v3, this.associatedData(peerUserId, 'in'));
+      this.persistStep(peerUserId, step.session, step.derivedKeys);
+      plaintext = step.plaintext;
+    }
+    this.inbox.push({ fromUserId: peerUserId, text: plaintext, serverMessageId: dto.serverMessageId });
+    return plaintext;
   }
 
   /** useChatE2EE history load in 'live' mode, oldest first. */
@@ -318,9 +330,11 @@ export class VirtualClient {
 
       if (!mine && !this.hasSession(peerUserId) && it.initPacket) {
         try {
-          this.bootstrapFromInitPacket(peerUserId, it.initPacket);
+          text = this.bootstrapAndDecrypt(peerUserId, it.initPacket, it.v3).plaintext;
+          out.push({ mine, text });
+          continue;
         } catch {
-          /* mirrors the client: warn and fall through */
+          /* mirrors the client: warn and fall through to the archived key */
         }
       }
 

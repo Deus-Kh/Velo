@@ -7,10 +7,10 @@ import { useAuthStore } from '../../store/auth.store';
 import type { ReplyReference } from '../chat/types';
 
 import { loadSession } from '../storage/sessionStore';
-import { decryptAndPersist, encryptAndPersist } from '../chat/ratchetAdapter';
+import { encryptAndPersist } from '../chat/ratchetAdapter';
+import { receiveIncoming } from '../chat/incoming';
 import { ProtocolError, protocolErrorCode, type ProtocolErrorCode, type RatchetSessionV2 } from '@velo/protocol';
 import type { X3DHInitPacket } from '../crypto/x3dh';
-import { ensureV2SessionFromIncoming } from '../crypto/sessionBootstrap';
 
 function requireMyUserId(): string {
   const myUserId = useAuthStore.getState().userId;
@@ -107,34 +107,11 @@ export async function subscribeToMessages(onMessage: (m: {
 
       if (!msg.v3) throw new Error('Missing v3 payload');
 
-      let session = await loadSession({
+      // T2.11: bootstrap (if needed) and decrypt; nothing is persisted unless the message decrypts.
+      const { plaintext } = await receiveIncoming({
         myUserId,
         peerUserId: msg.fromUserId,
-      });
-
-      if ((!session || session.protoVersion !== 3) && msg.initPacket) {
-        await ensureV2SessionFromIncoming({
-          myUserId,
-          peerUserId: msg.fromUserId,
-          initPacket: msg.initPacket,
-        });
-
-        session = await loadSession({
-          myUserId,
-          peerUserId: msg.fromUserId,
-        });
-      }
-
-      if (!session || session.protoVersion !== 3) {
-        throw msg.initPacket
-          ? new ProtocolError('SESSION_RESET_REQUIRED', 'Failed to establish v2 session from incoming initPacket')
-          : new ProtocolError('MISSING_BOOTSTRAP', 'Missing v2 session and initPacket for incoming message');
-      }
-
-      const { plaintext } = await decryptAndPersist({
-        myUserId,
-        peerUserId: msg.fromUserId,
-        session: session as RatchetSessionV2,
+        initPacket: msg.initPacket ?? null,
         encrypted: msg.v3,
       });
       

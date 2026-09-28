@@ -1,6 +1,5 @@
-import { x3dhInitiate, x3dhRespond, type X3DHInitPacket } from './x3dh';
-import { loadSession, createInitiatorSession, createResponderSession } from '../storage/sessionStore';
-import { authenticateInitiator } from './identityTrust';
+import { x3dhInitiate, type X3DHInitPacket } from './x3dh';
+import { loadSession, createInitiatorSession } from '../storage/sessionStore';
 
 export async function ensureV2Session(params: {
   myUserId: string;
@@ -24,30 +23,5 @@ export async function ensureV2Session(params: {
   return { created: true, initPacket };
 }
 
-export async function ensureV2SessionFromIncoming(params: {
-  myUserId: string;
-  peerUserId: string;
-  initPacket: X3DHInitPacket;
-}): Promise<void> {
-  const existing = await loadSession({
-    myUserId: params.myUserId,
-    peerUserId: params.peerUserId,
-  });
-  if (existing) return;
-
-  // T2.13: the initiator's identity DH key must be the pinned one (fetched
-  // and pinned first on first contact). Throws IDENTITY_MISMATCH otherwise.
-  await authenticateInitiator({ myUserId: params.myUserId, peerUserId: params.peerUserId, initPacket: params.initPacket });
-
-  const { sessionKeys, signedPreKey } = await x3dhRespond({
-    myUserId: params.myUserId,
-    initPacket: params.initPacket,
-  });
-
-  await createResponderSession({
-    myUserId: params.myUserId,
-    peerUserId: params.peerUserId,
-    sharedSecret: sessionKeys.rootKey,
-    signedPreKey,
-  });
-}
+// The inbound bootstrap (ensureV2SessionFromIncoming) moved to chat/incoming.ts in T2.11:
+// the session is persisted only after the first message decrypts (R7).

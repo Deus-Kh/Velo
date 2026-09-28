@@ -16,7 +16,7 @@ import { getV2MessageKey, putV2MessageKey } from '../storage/v2MessageKeyStore';
  * the canonical header; the adapter supplies that associated data from
  * the Keychain and the trust pin.
  */
-async function persistStep(params: {
+export async function persistStep(params: {
   myUserId: string;
   peerUserId: string;
   session: RatchetSessionV2;

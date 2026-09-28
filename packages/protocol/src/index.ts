@@ -30,7 +30,7 @@ export { sha256Bytes, hmacSha256, hkdfSha256 } from './primitives/kdf';
 export { chainKdf, type ChainStep } from './ratchet/chain';
 export { kdfRootKey } from './ratchet/root';
 export { dhRatchet } from './ratchet/dh';
-export { initInitiatorSession, initResponderSession, type DhKeyPairB64 } from './ratchet/session';
+export { initInitiatorSession, initResponderSession, sessionHasReceived, glareWinner, type DhKeyPairB64 } from './ratchet/session';
 export {
   ratchetEncrypt,
   ratchetDecrypt,

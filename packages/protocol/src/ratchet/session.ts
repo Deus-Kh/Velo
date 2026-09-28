@@ -5,6 +5,20 @@ import { normalizeB64 } from '../primitives/base64';
 import type { RatchetSessionV2 } from '../types/session';
 import { kdfRootKey } from './root';
 
+/** True once the session has decrypted anything from the peer (a receiving chain exists). */
+export function sessionHasReceived(session: RatchetSessionV2): boolean {
+  return session.chainKeyRecv !== null;
+}
+
+/**
+ * Glare tie-break (T2.11): when both sides bootstrapped at once, the lower
+ * user id's session wins and the other side adopts it. Deterministic and
+ * identical on both sides.
+ */
+export function glareWinner(myUserId: string, peerUserId: string): boolean {
+  return String(myUserId) < String(peerUserId);
+}
+
 /** X25519 pair as base64; injectable so tests can pin the session bytes. */
 export interface DhKeyPairB64 {
   publicKey: string;

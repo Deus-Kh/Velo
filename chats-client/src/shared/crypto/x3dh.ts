@@ -8,7 +8,7 @@ import {
 } from '@velo/protocol';
 import { fetchAndVerifyPreKeyBundle } from './prekeyBundle';
 import { getSignedPreKeyPairForKeyId } from './prekeys';
-import { getOneTimePreKeySecret, deleteOneTimePreKeySecret } from '../storage/oneTimePreKeys';
+import { getOneTimePreKeySecret } from '../storage/oneTimePreKeys';
 import { ensureIdentityDhKeyPairForUser, getIdentityDhSecretKeyBytesForUser } from './identityDhKeys';
 
 export type { X3DHInitPacket, X3DHSessionKeys };
@@ -32,13 +32,15 @@ export async function x3dhInitiate(params: {
 
 /**
  * Responder wrapper: loads the signed-prekey pair and the named one-time
- * prekey secret, runs the pure handshake, then deletes the one-time secret.
+ * prekey secret and runs the pure handshake. It does NOT delete the one-time
+ * secret: the caller does that only after the session is persisted (T2.11),
+ * so a failed or bogus bootstrap cannot burn the pool.
  * Returns the signed-prekey pair too: the responder session copies it (T2.0).
  */
 export async function x3dhRespond(params: {
   myUserId: string;
   initPacket: X3DHInitPacket;
-}): Promise<{ sessionKeys: X3DHSessionKeys; signedPreKey: { publicKey: string; privateKey: string } }> {
+}): Promise<{ sessionKeys: X3DHSessionKeys; signedPreKey: { publicKey: string; privateKey: string }; oneTimePreKeyId: number | null }> {
   const { myUserId, initPacket } = params;
 
   const spk = await getSignedPreKeyPairForKeyId(myUserId, initPacket.signedPreKeyId); // current or retained (T2.10)
@@ -53,9 +55,5 @@ export async function x3dhRespond(params: {
   const identityDhSecretKey = await getIdentityDhSecretKeyBytesForUser(myUserId); // IK_B for the fourth DH (T2.9)
   const sessionKeys = respond({ initPacket, signedPreKeySecretKey, identityDhSecretKey, oneTimePreKeySecretKey });
 
-  if (initPacket.oneTimePreKeyId !== null) {
-    await deleteOneTimePreKeySecret({ myUserId, keyId: initPacket.oneTimePreKeyId });
-  }
-
-  return { sessionKeys, signedPreKey: { publicKey: spk.publicKey, privateKey: spk.privateKey } };
+  return { sessionKeys, signedPreKey: { publicKey: spk.publicKey, privateKey: spk.privateKey }, oneTimePreKeyId: initPacket.oneTimePreKeyId };
 }
