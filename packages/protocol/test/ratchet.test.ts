@@ -118,8 +118,8 @@ describe('session initialisation (spec §8.1, T2.0)', () => {
 });
 
 describe('dhRatchet (spec §8.1)', () => {
-  it('derives fresh root and both chains, rotates DHs, records PN and resets counters', () => {
-    const before = { ...initInitiatorSession({ peerUserId: 'b', sharedSecret, theirSignedPreKeyPublicKey: spkB.publicKey, dhs: dhsA0 }), Ns: 4, Nr: 2 };
+  it('derives fresh root and both chains, rotates DHs, records PN, resets counters and keeps skipped keys', () => {
+    const before = { ...initInitiatorSession({ peerUserId: 'b', sharedSecret, theirSignedPreKeyPublicKey: spkB.publicKey, dhs: dhsA0 }), Ns: 4, Nr: 2, skippedKeys: { 'old:1': 'k' } };
     const peer = nacl.box.keyPair();
     const after = dhRatchet(before, encodeBase64(peer.publicKey));
 
@@ -132,8 +132,11 @@ describe('dhRatchet (spec §8.1)', () => {
     expect(after.Ns).toBe(0);
     expect(after.Nr).toBe(0);
     expect(decodeBase64(after.DHsPrivateKey).length).toBe(32);
+    // Skipped keys from earlier epochs survive the step (T2.7).
+    expect(after.skippedKeys).toEqual({ 'old:1': 'k' });
     // Input is not mutated.
     expect(before.Ns).toBe(4);
+    expect(before.skippedKeys).toEqual({ 'old:1': 'k' });
   });
 
   it('is deterministic for an injected next DHs (vector-friendly)', () => {

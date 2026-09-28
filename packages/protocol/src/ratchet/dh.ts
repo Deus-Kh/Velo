@@ -14,10 +14,10 @@ import type { DhKeyPairB64 } from './session';
  *   (RK, CKs) := KDF_RK(RK, DH(DHs, DHr)).
  * Pure: returns a new session, never mutates the input. Draining the
  * previous receiving chain to `header.pn` is the caller's job (T2.8).
+ * Skipped keys are keyed by epoch and survive the step (T2.7); bounding
+ * and pruning them is the decrypt step's job.
  *
  * `nextDhs` is injectable for vector tests only.
- *
- * NOTE (P1-3): the skipped-key map is still wiped here; T2.7 removes that.
  */
 export function dhRatchet(session: RatchetSessionV2, newPeerDhPubB64: string, nextDhs?: DhKeyPairB64): RatchetSessionV2 {
   if (!session.DHsPrivateKey) {
@@ -58,7 +58,7 @@ export function dhRatchet(session: RatchetSessionV2, newPeerDhPubB64: string, ne
     PN: session.Ns,
     Ns: 0,
     Nr: 0,
-    skippedKeys: {},
+    skippedKeys: { ...(session.skippedKeys ?? {}) },
     DHrPublicKey: peerDhPubB64,
     DHsPublicKey: normalizeB64(next.publicKey),
     DHsPrivateKey: normalizeB64(next.privateKey),
