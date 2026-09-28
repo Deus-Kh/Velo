@@ -21,6 +21,7 @@ import { protocolErrorCode, type ProtocolErrorCode } from '@velo/protocol';
 import { acceptNewIdentity as acceptNewIdentityForPair } from '../crypto/identityTrust';
 import { listStoredMessages, upsertStoredMessage, type StoredMessage } from '../storage/messageStore';
 import { syncNewerFromServer } from './historySync';
+import { deleteForEveryone, deleteForMe, editMessage, reactToMessage, subscribeToMessagePatches, type ConversationTarget } from './actions';
 import { classifyPendingMessageError, presentProtocolError } from './protocolErrors';
 import { makeConversationId } from '../utils/conversation';
 import type { ReplyReference } from './types';
@@ -38,6 +39,11 @@ export type UIMessage = {
   status?: 'sending' | 'sent' | 'delivered' | 'read' | 'failed';
   deliveredAt?: number | null;
   readAt?: number | null;
+  /** T7.2 */
+  reactions?: Record<string, string> | null;
+  editedAt?: number | null;
+  deletedAt?: number | null;
+  forwardedFrom?: { userId: string; createdAt: number } | null;
 };
 
 export type SessionHealth =
@@ -172,10 +178,14 @@ function toUI(m: StoredMessage): UIMessage {
     status: m.status,
     deliveredAt: m.deliveredAt,
     readAt: m.readAt,
+    reactions: m.reactions ?? null,
+    editedAt: m.editedAt ?? null,
+    deletedAt: m.deletedAt ?? null,
+    forwardedFrom: m.forwardedFrom ?? null,
   };
 }
 
-function toStored(m: UIMessage): StoredMessage {
+export function toStored(m: UIMessage): StoredMessage {
   return {
     id: m.clientMessageId || m.serverMessageId || m.id,
     serverMessageId: m.serverMessageId ?? null,
@@ -188,6 +198,10 @@ function toStored(m: UIMessage): StoredMessage {
     deliveredAt: m.deliveredAt ?? null,
     readAt: m.readAt ?? null,
     replyTo: m.replyTo ?? null,
+    reactions: m.reactions ?? null,
+    editedAt: m.editedAt ?? null,
+    deletedAt: m.deletedAt ?? null,
+    forwardedFrom: m.forwardedFrom ?? null,
   };
 }
 
@@ -443,6 +457,12 @@ export function useChatE2EE(peerUserId: string) {
       console.warn('Failed to load pending messages:', e);
     });
 
+    // T7.2: reactions, edits and deletions change stored records; mirror them into the list.
+    const unsubPatches = subscribeToMessagePatches((p) => {
+      if (cancelled || p.myUserId !== String(myUserId) || p.peerKey !== peerUserId) return;
+      setMessages((prev) => (p.message ? upsertMessage(prev, toUI(p.message)) : prev.filter((m) => m.id !== p.id && m.clientMessageId !== p.id)));
+    });
+
     async function loadInitialHistory() {
       setHistoryLoading(true);
       const me = String(myUserId);
@@ -503,6 +523,7 @@ export function useChatE2EE(peerUserId: string) {
               status: m.status || 'sent',
               deliveredAt: m.deliveredAt || null,
               readAt: m.readAt || null,
+              forwardedFrom: m.forwardedFrom ?? null,
             };
             setMessages((prev) => upsertMessage(prev, incoming));
             setSessionHealth((prev) => (prev.status === 'degraded' ? { status: 'healthy' } : prev)); // a good message clears a degraded state
@@ -624,6 +645,7 @@ export function useChatE2EE(peerUserId: string) {
 
     return () => {
       cancelled = true;
+      unsubPatches();
       unsubRef.current?.();
       unsubRef.current = null;
       statusUnsubRef.current?.();
@@ -725,6 +747,25 @@ export function useChatE2EE(peerUserId: string) {
     setReloadToken((x) => x + 1);
   }
 
+  // T7.2: message actions (local-first, then over the session).
+  const actionTarget: ConversationTarget = { kind: 'peer', peerUserId };
+  async function react(message: UIMessage, emoji: string, remove = false) {
+    if (!myUserId) return;
+    await reactToMessage({ myUserId: String(myUserId), target: actionTarget, message: toStored(message), emoji, remove });
+  }
+  async function edit(message: UIMessage, text: string) {
+    if (!myUserId) return;
+    await editMessage({ myUserId: String(myUserId), target: actionTarget, message: toStored(message), text });
+  }
+  async function deleteEverywhere(message: UIMessage) {
+    if (!myUserId) return;
+    await deleteForEveryone({ myUserId: String(myUserId), target: actionTarget, message: toStored(message) });
+  }
+  async function deleteLocally(message: UIMessage) {
+    if (!myUserId) return;
+    await deleteForMe({ myUserId: String(myUserId), peerKey: peerUserId, message: toStored(message) });
+  }
+
   return {
     socketReady,
     historyLoading,
@@ -737,5 +778,9 @@ export function useChatE2EE(peerUserId: string) {
     loadMore,
     resetSession,
     acceptNewIdentity,
+    react,
+    edit,
+    deleteEverywhere,
+    deleteLocally,
   };
 }

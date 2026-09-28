@@ -19,11 +19,14 @@ import Svg, { Path } from 'react-native-svg';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import BottomSheetPanel from '../components/BottomSheetPanel';
+import ForwardPicker from '../components/ForwardPicker';
+import MessageActionsSheet from '../components/MessageActionsSheet';
 import MessageBubble from '../components/MessageBubble';
+import { forwardMessage, summarizeReactions } from '../shared/chat/actions';
 import StatusChip from '../components/StatusChip';
 import { conversationsApi } from '../shared/api/conversations.api';
 import { messagesApi } from '../shared/api/messages.api';
-import { useChatE2EE, type SessionHealth } from '../shared/chat/useChatE2EE';
+import { toStored, useChatE2EE, type SessionHealth } from '../shared/chat/useChatE2EE';
 import type { ReplyReference, UIMessage } from '../shared/chat/types';
 import { getSocket } from '../shared/socket/socket';
 import { useAppearanceStore } from '../store/appearance.store';
@@ -341,9 +344,15 @@ const { keyboardShown , keyboardHeight } = useKeyboard()
     loadMore,
     resetSession,
     acceptNewIdentity,
+    react,
+    edit,
+    deleteEverywhere,
+    deleteLocally,
   } = useChatE2EE(peerUserId);
 
   const [text, setText] = useState('');
+  const [editTarget, setEditTarget] = useState<UIMessage | null>(null);
+  const [forwardTarget, setForwardTarget] = useState<UIMessage | null>(null);
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
   const [pendingNewMessages, setPendingNewMessages] = useState(0);
   const [showComposerActions, setShowComposerActions] = useState(false);
@@ -629,6 +638,13 @@ useEffect(() => {
 
   const onSend = async () => {
     if (!trimmedText) return;
+    if (editTarget) {
+      const target = editTarget;
+      setEditTarget(null);
+      setText('');
+      await edit(target, trimmedText);
+      return;
+    }
     if (typingStopTimeoutRef.current) {
       clearTimeout(typingStopTimeoutRef.current);
       typingStopTimeoutRef.current = null;
@@ -879,6 +895,10 @@ useEffect(() => {
                     mine={item.message.mine}
                     status={item.message.status}
                     timestamp={item.message.createdAt}
+                    reactions={summarizeReactions(item.message.reactions, String(myUserId ?? ''))}
+                    edited={Boolean(item.message.editedAt)}
+                    deleted={Boolean(item.message.deletedAt)}
+                    forwarded={Boolean(item.message.forwardedFrom)}
                     replyPreview={replyPreview}
                     onReplyPreviewPress={
                       replyPreview?.targetMessageId
@@ -981,56 +1001,67 @@ useEffect(() => {
         </BottomSheetPanel>
       ) : null}
 
-      {selectedMessageAction ? (
-        <BottomSheetPanel title="Message Actions" onClose={handleCloseMessageActions}>
-          <View className="rounded-[18px] bg-background-alt/55 px-3 py-3">
-            <Text className="text-[13px] leading-5 text-muted">
-              {buildReplySnippet(selectedMessageAction.text)}
-            </Text>
-          </View>
+      {selectedMessageAction
+        ? (() => {
+            const full = messages.find((m) => m.id === selectedMessageAction.id) ?? null;
+            return (
+              <MessageActionsSheet
+                snippet={buildReplySnippet(selectedMessageAction.text)}
+                mine={selectedMessageAction.mine}
+                deleted={Boolean(full?.deletedAt)}
+                failed={selectedMessageAction.status === 'failed'}
+                myReaction={myUserId && full?.reactions ? full.reactions[String(myUserId)] ?? null : null}
+                onReact={(emoji, remove) => {
+                  handleCloseMessageActions();
+                  if (full) react(full, emoji, remove).catch((e) => console.warn('[ChatScreen] reaction failed:', e));
+                }}
+                onReply={handleReplyToMessage}
+                onCopy={handleCopySelectedMessage}
+                onEdit={() => {
+                  handleCloseMessageActions();
+                  if (!full) return;
+                  setReplyTarget(null);
+                  setEditTarget(full);
+                  setText(full.text);
+                  setTimeout(() => composerInputRef.current?.focus(), 60);
+                }}
+                onForward={() => {
+                  handleCloseMessageActions();
+                  if (full) setForwardTarget(full);
+                }}
+                onDeleteForMe={() => {
+                  handleCloseMessageActions();
+                  if (full) deleteLocally(full).catch((e) => console.warn('[ChatScreen] delete failed:', e));
+                }}
+                onDeleteForEveryone={() => {
+                  handleCloseMessageActions();
+                  if (full) deleteEverywhere(full).catch((e) => console.warn('[ChatScreen] delete for everyone failed:', e));
+                }}
+                onRetry={() => {
+                  handleCloseMessageActions();
+                  retryMessage(selectedMessageAction.id);
+                }}
+                onClose={handleCloseMessageActions}
+              />
+            );
+          })()
+        : null}
 
-          <Pressable
-            onPress={handleReplyToMessage}
-            className="mt-2 rounded-[18px] px-3 py-3 active:opacity-80"
-          >
-            <Text className="text-[15px] font-medium text-text">Reply</Text>
-            <Text className="mt-1 text-[13px] leading-5 text-muted">
-              Quote this message in your next outgoing reply.
-            </Text>
-          </Pressable>
-
-          <Pressable
-            onPress={handleCopySelectedMessage}
-            className="rounded-[18px] px-3 py-3 active:opacity-80"
-          >
-            <Text className="text-[15px] font-medium text-text">Copy</Text>
-            <Text className="mt-1 text-[13px] leading-5 text-muted">
-              Copy this message text to your clipboard.
-            </Text>
-          </Pressable>
-
-          {selectedMessageAction.mine && selectedMessageAction.status === 'failed' ? (
-            <Pressable
-              onPress={() => {
-                handleCloseMessageActions();
-                retryMessage(selectedMessageAction.id);
-              }}
-              className="rounded-[18px] px-3 py-3 active:opacity-80"
-            >
-              <Text className="text-[15px] font-medium text-warning">Retry send</Text>
-              <Text className="mt-1 text-[13px] leading-5 text-muted">
-                Attempt to send this failed message again.
-              </Text>
-            </Pressable>
-          ) : null}
-
-          <Pressable
-            onPress={handleCloseMessageActions}
-            className="rounded-[18px] px-3 py-3 active:opacity-80"
-          >
-            <Text className="text-[15px] font-medium text-text">Cancel</Text>
-          </Pressable>
-        </BottomSheetPanel>
+      {forwardTarget && myUserId ? (
+        <ForwardPicker
+          myUserId={String(myUserId)}
+          excludePeerKey={peerUserId}
+          onClose={() => setForwardTarget(null)}
+          onPick={(target) => {
+            const message = forwardTarget;
+            setForwardTarget(null);
+            forwardMessage({ myUserId: String(myUserId), fromPeerKey: peerUserId, message: toStored(message), to: target })
+              .then(() => {
+                if (Platform.OS === 'android') ToastAndroid.show('Forwarded', ToastAndroid.SHORT);
+              })
+              .catch((e) => console.warn('[ChatScreen] forward failed:', e));
+          }}
+        />
       ) : null}
 
       <View className={`px-3 ${composerPaddingTopClass}`}
@@ -1054,6 +1085,31 @@ useEffect(() => {
               </View>
               <Pressable
                 onPress={() => setReplyTarget(null)}
+                className="h-8 w-8 items-center justify-center rounded-full bg-background-alt/60 active:opacity-80"
+              >
+                <Text className="text-lg leading-none text-text">×</Text>
+              </Pressable>
+            </View>
+          </View>
+        ) : null}
+
+        {editTarget ? (
+          <View
+            className={`mb-2.5 rounded-[20px] border border-border px-4 py-3 ${
+              surfaceStyle === 'glass' ? 'bg-surface/82' : 'bg-surface-elevated'
+            }`}
+          >
+            <View className="flex-row items-start gap-3">
+              <View className="mt-0.5 h-8 w-1 rounded-full bg-warning" />
+              <View className="flex-1">
+                <Text className="text-[12px] font-semibold uppercase tracking-[1px] text-warning">Editing message</Text>
+                <Text className="mt-1 text-[13px] leading-5 text-muted">{buildReplySnippet(editTarget.text)}</Text>
+              </View>
+              <Pressable
+                onPress={() => {
+                  setEditTarget(null);
+                  setText('');
+                }}
                 className="h-8 w-8 items-center justify-center rounded-full bg-background-alt/60 active:opacity-80"
               >
                 <Text className="text-lg leading-none text-text">×</Text>

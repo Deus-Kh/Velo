@@ -5,6 +5,7 @@ import { patchStoredMessage, storedMessageId, upsertStoredMessage, type StoredMe
 import { receiveIncoming } from './incoming';
 import { reportDecryptFailure } from '../api/telemetry.api';
 import { publishControlContent } from '../socket/messaging';
+import { handleInboundAction } from './actions';
 
 const SYNC_PAGE = 100;
 const MAX_PAGES = 20;
@@ -77,7 +78,8 @@ export async function ingestUndeliveredItems(params: {
       const r = await receiveIncoming({ myUserId, peerUserId, initPacket: it.initPacket ?? null, encrypted: envelope });
       const content = decodeContent(r.plaintext); // T6.2
       if (content.kind !== 'text' && !isControlContent(content)) {
-        acked.push(it.serverMessageId); // T7.1: an action; applied by T7.2
+        await handleInboundAction({ myUserId, peerKey: peerUserId, actorUserId: peerUserId, content }); // T7.2
+        acked.push(it.serverMessageId);
         continue;
       }
       if (isControlContent(content)) {
@@ -87,6 +89,7 @@ export async function ingestUndeliveredItems(params: {
         continue;
       }
       const record = toStored(it, 'in', content.text);
+      if (record && content.forwardedFrom) record.forwardedFrom = content.forwardedFrom;
       if (record) {
         await upsertStoredMessage({ myUserId, peerUserId, message: record });
         received.push(record);

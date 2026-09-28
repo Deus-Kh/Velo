@@ -65,11 +65,20 @@ export default function MessageBubble({
   onReplyPreviewPress,
   onPress,
   onSwipeReply,
+  reactions,
+  edited,
+  deleted,
+  forwarded,
 }: {
   text: string;
   mine: boolean;
   status: MessageStatus;
   timestamp: number;
+  /** T7.2 */
+  reactions?: Array<{ emoji: string; count: number; mine: boolean }>;
+  edited?: boolean;
+  deleted?: boolean;
+  forwarded?: boolean;
   replyPreview?: {
     title: string;
     text: string;
@@ -86,9 +95,13 @@ export default function MessageBubble({
   const statusColor = getStatusColor(status, mine);
   const showMeta = Boolean(timeLabel) || Boolean(statusGlyph);
   const messageTextTone = mine ? 'text-background' : 'text-text';
+  const hasReactions = Boolean(reactions && reactions.length > 0);
   const compactMeta =
     showMeta &&
     !replyPreview &&
+    !deleted &&
+    !forwarded &&
+    !hasReactions &&
     !text.includes('\n') &&
     text.trim().length <= 24;
   const replyPreviewSurfaceClass = mine ? 'bg-[#0A6F80]' : 'bg-surface';
@@ -99,6 +112,9 @@ export default function MessageBubble({
 
   const metaNode = showMeta ? (
     <View className="flex-row items-center">
+      {edited && !deleted ? (
+        <Text className={`mr-1 text-[11px] italic ${footerTextTone}`}>edited</Text>
+      ) : null}
       {timeLabel ? (
         <Text className={`text-[11px] ${footerTextTone}`}>
           {timeLabel}
@@ -174,13 +190,34 @@ export default function MessageBubble({
       ) : (
         <>
           {replyPreviewNode}
-          <Text className={`text-[15px] leading-[21px] ${messageTextTone}`}>
-            {text}
-          </Text>
+          {forwarded && !deleted ? (
+            <Text className={`mb-0.5 text-[11px] font-semibold ${mine ? 'text-background/70' : 'text-primary'}`}>{'\u21AA'} Forwarded</Text>
+          ) : null}
+          {deleted ? (
+            <Text className={`text-[15px] italic leading-[21px] ${mine ? 'text-background/75' : 'text-muted'}`}>This message was deleted</Text>
+          ) : (
+            <Text className={`text-[15px] leading-[21px] ${messageTextTone}`}>
+              {text}
+            </Text>
+          )}
 
           {showMeta ? (
             <View className="mt-1 flex-row items-center self-end">
               {metaNode}
+            </View>
+          ) : null}
+
+          {hasReactions ? (
+            <View className="mt-1.5 flex-row flex-wrap gap-1">
+              {reactions!.map((r) => (
+                <View
+                  key={r.emoji}
+                  className={`flex-row items-center rounded-full px-2 py-0.5 ${r.mine ? (mine ? 'bg-white/30' : 'bg-primary/20') : mine ? 'bg-white/15' : 'bg-black/10'}`}
+                >
+                  <Text className="text-[13px]">{r.emoji}</Text>
+                  {r.count > 1 ? <Text className={`ml-1 text-[11px] font-semibold ${messageTextTone}`}>{r.count}</Text> : null}
+                </View>
+              ))}
             </View>
           ) : null}
         </>
@@ -188,7 +225,7 @@ export default function MessageBubble({
     </Pressable>
   );
 
-  if (!onSwipeReply) {
+  if (!onSwipeReply || deleted) {
     return bubbleContent;
   }
 

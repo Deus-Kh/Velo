@@ -14,4 +14,9 @@ export type UIMessage = {
   status?: 'sending' | 'sent' | 'delivered' | 'read' | 'failed';
   deliveredAt?: number | null;
   readAt?: number | null;
+  /** T7.2 */
+  reactions?: Record<string, string> | null;
+  editedAt?: number | null;
+  deletedAt?: number | null;
+  forwardedFrom?: { userId: string; createdAt: number } | null;
 };

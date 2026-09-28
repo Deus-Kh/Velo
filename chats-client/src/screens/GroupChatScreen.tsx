@@ -8,16 +8,21 @@ import {
   Pressable,
   Text,
   TextInput,
+  ToastAndroid,
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useKeyboard } from '@react-native-community/hooks';
+import Clipboard from '@react-native-clipboard/clipboard';
 
 import BottomSheetPanel from '../components/BottomSheetPanel';
+import ForwardPicker from '../components/ForwardPicker';
+import MessageActionsSheet from '../components/MessageActionsSheet';
 import MessageBubble from '../components/MessageBubble';
+import { forwardMessage, summarizeReactions } from '../shared/chat/actions';
 import StatusChip from '../components/StatusChip';
 import { userApi, type UserListItem } from '../shared/api/user.api';
-import { groupsApi, type GroupMember } from '../shared/api/groups.api';
+import { groupPeerKey, groupsApi, type GroupMember } from '../shared/api/groups.api';
 import { useGroupChat, type GroupUIMessage } from '../shared/chat/useGroupChat';
 import { deleteGroupKeys } from '../shared/storage/senderKeyStore';
 import { useAppearanceStore } from '../store/appearance.store';
@@ -47,10 +52,13 @@ export default function GroupChatScreen({ groupId, initialName, onClose }: { gro
   const interfaceDensity = useAppearanceStore((s) => s.interfaceDensity);
   const surfaceStyle = useAppearanceStore((s) => s.surfaceStyle);
   const { keyboardShown, keyboardHeight } = useKeyboard();
-  const { group, messages, loading, removed, waitingForKeys, securityWarning, send, addMembers, removeMember } = useGroupChat(groupId);
+  const { group, messages, loading, removed, waitingForKeys, securityWarning, send, addMembers, removeMember, react, edit, deleteEverywhere, deleteLocally } = useGroupChat(groupId);
 
   const [text, setText] = useState('');
   const [sheet, setSheet] = useState<MemberSheet>(null);
+  const [selected, setSelected] = useState<GroupUIMessage | null>(null);
+  const [editTarget, setEditTarget] = useState<GroupUIMessage | null>(null);
+  const [forwardTarget, setForwardTarget] = useState<GroupUIMessage | null>(null);
   const [memberQuery, setMemberQuery] = useState('');
   const [candidates, setCandidates] = useState<UserListItem[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
@@ -67,15 +75,17 @@ export default function GroupChatScreen({ groupId, initialName, onClose }: { gro
 
   useEffect(() => {
     const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
-      if (sheet) {
+      if (sheet || selected || forwardTarget) {
         setSheet(null);
+        setSelected(null);
+        setForwardTarget(null);
         return true;
       }
       onClose();
       return true;
     });
     return () => subscription.remove();
-  }, [onClose, sheet]);
+  }, [forwardTarget, onClose, selected, sheet]);
 
   useEffect(() => {
     if (sheet !== 'add') return;
@@ -99,8 +109,14 @@ export default function GroupChatScreen({ groupId, initialName, onClose }: { gro
     const value = text;
     if (!value.trim()) return;
     setText('');
+    if (editTarget) {
+      const target = editTarget;
+      setEditTarget(null);
+      await edit(target, value);
+      return;
+    }
     await send(value);
-  }, [send, text]);
+  }, [edit, editTarget, send, text]);
 
   const runAction = useCallback(async (key: string, action: () => Promise<void>) => {
     setBusy(key);
@@ -218,7 +234,17 @@ export default function GroupChatScreen({ groupId, initialName, onClose }: { gro
               return (
                 <View>
                   {showSender ? <SenderLabel name={memberName(membersById.get(item.senderUserId ?? ''), item.senderUserId ?? '')} /> : null}
-                  <MessageBubble text={item.text} mine={item.mine} status={item.status} timestamp={item.createdAt} />
+                  <MessageBubble
+                    text={item.text}
+                    mine={item.mine}
+                    status={item.status}
+                    timestamp={item.createdAt}
+                    reactions={summarizeReactions(item.reactions, String(myUserId ?? ''))}
+                    edited={Boolean(item.editedAt)}
+                    deleted={Boolean(item.deletedAt)}
+                    forwarded={Boolean(item.forwardedFrom)}
+                    onPress={() => setSelected(item)}
+                  />
                 </View>
               );
             }}
@@ -228,6 +254,65 @@ export default function GroupChatScreen({ groupId, initialName, onClose }: { gro
           />
         )}
       </View>
+
+      {selected ? (
+        <MessageActionsSheet
+          snippet={selected.text.replace(/\s+/g, ' ').trim().slice(0, 48)}
+          mine={selected.mine}
+          deleted={Boolean(selected.deletedAt)}
+          failed={selected.status === 'failed'}
+          myReaction={myUserId && selected.reactions ? selected.reactions[String(myUserId)] ?? null : null}
+          onReact={(emoji, remove) => {
+            const target = selected;
+            setSelected(null);
+            react(target, emoji, remove).catch((e) => console.warn('[groups] reaction failed:', e));
+          }}
+          onCopy={() => {
+            Clipboard.setString(selected.text);
+            setSelected(null);
+            if (Platform.OS === 'android') ToastAndroid.show('Message copied', ToastAndroid.SHORT);
+          }}
+          onEdit={() => {
+            const target = selected;
+            setSelected(null);
+            setEditTarget(target);
+            setText(target.text);
+          }}
+          onForward={() => {
+            const target = selected;
+            setSelected(null);
+            setForwardTarget(target);
+          }}
+          onDeleteForMe={() => {
+            const target = selected;
+            setSelected(null);
+            deleteLocally(target).catch((e) => console.warn('[groups] delete failed:', e));
+          }}
+          onDeleteForEveryone={() => {
+            const target = selected;
+            setSelected(null);
+            deleteEverywhere(target).catch((e) => console.warn('[groups] delete for everyone failed:', e));
+          }}
+          onClose={() => setSelected(null)}
+        />
+      ) : null}
+
+      {forwardTarget && myUserId ? (
+        <ForwardPicker
+          myUserId={String(myUserId)}
+          excludePeerKey={groupPeerKey(groupId)}
+          onClose={() => setForwardTarget(null)}
+          onPick={(target) => {
+            const message = forwardTarget;
+            setForwardTarget(null);
+            forwardMessage({ myUserId: String(myUserId), fromPeerKey: groupPeerKey(groupId), message, to: target })
+              .then(() => {
+                if (Platform.OS === 'android') ToastAndroid.show('Forwarded', ToastAndroid.SHORT);
+              })
+              .catch((e) => console.warn('[groups] forward failed:', e));
+          }}
+        />
+      ) : null}
 
       {sheet === 'members' && group ? (
         <BottomSheetPanel title={`${group.members.length} members`} onClose={() => setSheet(null)}>
@@ -330,6 +415,21 @@ export default function GroupChatScreen({ groupId, initialName, onClose }: { gro
         className={`px-3 ${interfaceDensity === 'compact' ? 'pt-1.5' : 'pt-2'}`}
         style={{ paddingBottom: keyboardShown ? (hasNavigationButtons ? keyboardHeight + insets.bottom + 5 : insets.bottom + 5) : insets.bottom + 8 }}
       >
+        {editTarget ? (
+          <View className={`mb-2.5 flex-row items-center rounded-[20px] border border-border px-4 py-2.5 ${surfaceStyle === 'glass' ? 'bg-surface/82' : 'bg-surface-elevated'}`}>
+            <View className="mr-3 h-8 w-1 rounded-full bg-warning" />
+            <Text className="flex-1 text-[12px] font-semibold uppercase tracking-[1px] text-warning">Editing message</Text>
+            <Pressable
+              onPress={() => {
+                setEditTarget(null);
+                setText('');
+              }}
+              className="h-8 w-8 items-center justify-center rounded-full bg-background-alt/60 active:opacity-80"
+            >
+              <Text className="text-lg leading-none text-text">×</Text>
+            </Pressable>
+          </View>
+        ) : null}
         <View className="flex-row items-center gap-2.5">
           <View className={`flex-1 rounded-[24px] border border-border bg-surface-elevated px-4 ${interfaceDensity === 'compact' ? 'py-0.5' : 'py-1'}`}>
             <TextInput

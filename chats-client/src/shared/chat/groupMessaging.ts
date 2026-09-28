@@ -1,4 +1,5 @@
-import { groupDecryptContent, groupEncryptContent, protocolErrorCode, textContent, type GroupMessage } from '@velo/protocol';
+import { groupDecryptContent, groupEncryptContent, protocolErrorCode, textContent, type Content, type GroupMessage } from '@velo/protocol';
+import { handleInboundAction } from './actions';
 import { groupPeerKey, type GroupView } from '../api/groups.api';
 import { messagesApi, type HistoryItem } from '../api/messages.api';
 import { ensureSocketConnected } from '../socket/socket';
@@ -19,20 +20,28 @@ import { reportDecryptFailure } from '../api/telemetry.api';
 
 export type GroupSendAck = { ok: true; serverMessageId: string | null; seq: number | null; epoch: number } | { ok: false; code?: string; error?: string; epoch?: number };
 
-export async function sendGroupMessage(params: { myUserId: string; group: GroupView; text: string; clientMessageId: string; createdAt: number }): Promise<{ stored: StoredMessage; ack: GroupSendAck }> {
-  const { myUserId, group, text, clientMessageId, createdAt } = params;
-  const peerKey = groupPeerKey(group.groupId);
-
-  // Members without our key get it first (best effort; a member that could not be reached retries next send).
+/** Encrypt one envelope under our sender key and emit `group:send`; members lacking our key get it first (best effort). */
+async function sendGroupEnvelope(params: { myUserId: string; group: GroupView; content: Content; clientMessageId: string; createdAt: number }): Promise<GroupSendAck> {
+  const { myUserId, group, content, clientMessageId, createdAt } = params;
   await distributeSenderKey({ myUserId, group });
   const { state } = await ensureOwnSenderKey({ myUserId, groupId: group.groupId, epoch: group.epoch });
-  const step = groupEncryptContent(state, textContent(text), { groupId: group.groupId, senderUserId: myUserId }); // T7.1 envelope
+  const step = groupEncryptContent(state, content, { groupId: group.groupId, senderUserId: myUserId }); // T7.1 envelope
   await saveOwnSenderKey(myUserId, group.groupId, { epoch: group.epoch, state: step.state });
-
   const socket = await ensureSocketConnected();
-  const ack = await new Promise<GroupSendAck>((resolve) => {
+  return new Promise<GroupSendAck>((resolve) => {
     socket.emit('group:send', { groupId: group.groupId, clientMessageId, createdAt, epoch: group.epoch, g1: step.message }, (r: GroupSendAck) => resolve(r));
   });
+}
+
+/** T7.2: an action (reaction, edit, delete request, timer) on the group chain; nothing is stored as a message. */
+export async function sendGroupContent(params: { myUserId: string; group: GroupView; content: Content }): Promise<GroupSendAck> {
+  return sendGroupEnvelope({ ...params, clientMessageId: `${Date.now()}-${Math.random().toString(16).slice(2)}`, createdAt: Date.now() });
+}
+
+export async function sendGroupMessage(params: { myUserId: string; group: GroupView; text: string; clientMessageId: string; createdAt: number; forwardedFrom?: { userId: string; createdAt: number } | null }): Promise<{ stored: StoredMessage; ack: GroupSendAck }> {
+  const { myUserId, group, text, clientMessageId, createdAt } = params;
+  const peerKey = groupPeerKey(group.groupId);
+  const ack = await sendGroupEnvelope({ myUserId, group, content: textContent(text, params.forwardedFrom ?? undefined), clientMessageId, createdAt });
 
   const stored: StoredMessage = {
     id: clientMessageId,
@@ -47,6 +56,7 @@ export async function sendGroupMessage(params: { myUserId: string; group: GroupV
     deliveredAt: null,
     readAt: null,
     replyTo: null,
+    forwardedFrom: params.forwardedFrom ?? null,
   };
   await upsertStoredMessage({ myUserId, peerUserId: peerKey, message: stored });
   return { stored, ack };
@@ -107,7 +117,8 @@ export async function ingestGroupItems(params: {
       const r = groupDecryptContent(state, message, { groupId, senderUserId: fromUserId });
       await savePeerSenderKey(myUserId, groupId, fromUserId, r.state);
       if (r.content.kind !== 'text') {
-        acked.push(it.serverMessageId); // T7.1: an action or control kind on the group chain; T7.2 applies actions
+        await handleInboundAction({ myUserId, peerKey, actorUserId: fromUserId, content: r.content }); // T7.2
+        acked.push(it.serverMessageId);
         continue;
       }
       const stored: StoredMessage = {
@@ -123,6 +134,7 @@ export async function ingestGroupItems(params: {
         deliveredAt: null,
         readAt: null,
         replyTo: null,
+        forwardedFrom: r.content.forwardedFrom ?? null,
       };
       await upsertStoredMessage({ myUserId, peerUserId: peerKey, message: stored });
       received.push(stored);

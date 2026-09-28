@@ -9,6 +9,7 @@ import type { ReplyReference } from '../chat/types';
 import { loadSession } from '../storage/sessionStore';
 import { encryptAndPersist } from '../chat/ratchetAdapter';
 import { receiveIncoming } from '../chat/incoming';
+import { handleInboundAction } from '../chat/actions';
 import { ensureV2Session } from '../crypto/sessionBootstrap';
 import { reportDecryptFailure } from '../api/telemetry.api';
 import { ProtocolError, protocolErrorCode, type ProtocolErrorCode, type RatchetSessionV2, encodeContent, decodeContent, isControlContent, textContent, type Content } from '@velo/protocol';
@@ -30,6 +31,8 @@ export async function sendMessageV2(params: {
   clientMessageId: string;
   initPacket?: X3DHInitPacket | null;
   replyTo?: ReplyReference | null;
+  /** T7.2: provenance of a forwarded message. */
+  forwardedFrom?: { userId: string; createdAt: number } | null;
 }): Promise<{ serverMessageId: string; seq: number | null }> {
   const socket = await ensureSocketConnected();
 
@@ -48,7 +51,7 @@ export async function sendMessageV2(params: {
     myUserId,
     peerUserId: params.toUserId,
     session: session as RatchetSessionV2,
-    plaintext: encodeContent(textContent(params.plaintext)), // T6.2: content envelope
+    plaintext: encodeContent(textContent(params.plaintext, params.forwardedFrom ?? undefined)), // T6.2: content envelope
   });
 
   const dto: SendMessageDTO = {
@@ -129,6 +132,7 @@ export async function subscribeToMessages(onMessage: (m: {
   status?: 'sent' | 'delivered' | 'read' | 'failed';
   deliveredAt?: number | null;
   readAt?: number | null;
+  forwardedFrom?: { userId: string; createdAt: number } | null;
 }) => void, options?: {
   peerUserId?: string;
   onFailure?: (reason: string, code: ProtocolErrorCode | null) => void;
@@ -170,8 +174,10 @@ export async function subscribeToMessages(onMessage: (m: {
       // T6.2: the plaintext is a content envelope; control messages take their own path and are still acked.
       const content = decodeContent(plaintext);
       if (content.kind !== 'text' && !isControlContent(content)) {
-        // T7.1: message actions are applied by the store layer (T7.2); acked so the server drops the copy.
-        socket.emit('message:delivered', { serverMessageId: msg.serverMessageId }, () => {});
+        // T7.2: a reaction, edit, delete request or timer: applied to the local store, then acked.
+        handleInboundAction({ myUserId, peerKey: msg.fromUserId, actorUserId: msg.fromUserId, content }).finally(() => {
+          socket.emit('message:delivered', { serverMessageId: msg.serverMessageId }, () => {});
+        });
         return;
       }
       if (isControlContent(content)) {
@@ -184,6 +190,7 @@ export async function subscribeToMessages(onMessage: (m: {
       onMessage({
         fromUserId: msg.fromUserId,
         text: content.text,
+        forwardedFrom: content.forwardedFrom ?? null,
         serverMessageId: msg.serverMessageId,
         clientMessageId: msg.clientMessageId,
         createdAt: msg.createdAt,

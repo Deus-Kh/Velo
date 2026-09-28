@@ -33,6 +33,11 @@ export type StoredMessage = {
   deliveredAt: number | null;
   readAt: number | null;
   replyTo: ReplyReference | null;
+  /** T7.2: reactions by user id; edit/delete times (a deleted message is a tombstone with empty text); forward provenance. */
+  reactions?: Record<string, string> | null;
+  editedAt?: number | null;
+  deletedAt?: number | null;
+  forwardedFrom?: { userId: string; createdAt: number } | null;
 };
 
 const PREFIX = 'msg:v1';
@@ -69,7 +74,7 @@ export async function patchStoredMessage(params: {
   peerUserId: string;
   id: string;
   createdAt: number;
-  patch: Partial<Pick<StoredMessage, 'status' | 'deliveredAt' | 'readAt' | 'serverMessageId' | 'seq'>>;
+  patch: Partial<Omit<StoredMessage, 'id' | 'createdAt' | 'direction' | 'clientMessageId'>>;
 }): Promise<StoredMessage | null> {
   const { myUserId, peerUserId } = params;
   const key = recordKey(myUserId, peerUserId, { id: params.id, createdAt: params.createdAt });
@@ -81,6 +86,24 @@ export async function patchStoredMessage(params: {
   const next: StoredMessage = { ...current, ...params.patch };
   await AsyncStorage.setItem(key, sealJson(mk, next));
   return next;
+}
+
+/** T7.2: one record by its id (the sender's client id), without knowing its time. Keys only until the match. */
+export async function findStoredMessage(params: { myUserId: string; peerUserId: string; id: string }): Promise<StoredMessage | null> {
+  if (!params.id) return null;
+  const prefix = pairPrefix(params.myUserId, params.peerUserId);
+  const suffix = ':' + params.id;
+  const key = (await AsyncStorage.getAllKeys()).find((k) => k.startsWith(prefix) && k.endsWith(suffix));
+  if (!key) return null;
+  const raw = await AsyncStorage.getItem(key);
+  if (raw === null) return null;
+  const mk = await getOrCreateSessionMasterKey(params.myUserId);
+  return openJson<StoredMessage>(mk, raw);
+}
+
+/** T7.2: "delete for me". */
+export async function deleteStoredMessage(params: { myUserId: string; peerUserId: string; id: string; createdAt: number }): Promise<void> {
+  await AsyncStorage.removeItem(recordKey(params.myUserId, params.peerUserId, { id: params.id, createdAt: params.createdAt }));
 }
 
 /** Newest page first by key order, returned oldest → newest. `before` excludes messages at or after that time. */

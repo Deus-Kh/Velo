@@ -8,6 +8,7 @@ import { listStoredMessages, type StoredMessage } from '../storage/messageStore'
 import { deleteGroupKeys } from '../storage/senderKeyStore';
 import { distributeSenderKey, ensureOwnSenderKey, forgetDepartedMembers, handleControlContent } from './groupKeys';
 import { ingestGroupItems, sendGroupMessage, syncGroupFromServer } from './groupMessaging';
+import { deleteForEveryone, deleteForMe, editMessage, reactToMessage, subscribeToMessagePatches } from './actions';
 import { subscribeToControlContent } from '../socket/messaging';
 
 /**
@@ -82,6 +83,11 @@ export function useGroupChat(groupId: string) {
     let cancelled = false;
     let unsubscribe: (() => void) | null = null;
     let unsubscribeControl: (() => void) | null = null;
+    // T7.2: reactions, edits and deletions change stored records; mirror them into the list.
+    const unsubscribePatches = subscribeToMessagePatches((p) => {
+      if (cancelled || !myUserId || p.myUserId !== String(myUserId) || p.peerKey !== groupPeerKey(groupId)) return;
+      setMessages((prev) => (p.message ? upsert(prev, toUI(String(myUserId), p.message)) : prev.filter((m) => m.id !== p.id && m.clientMessageId !== p.id)));
+    });
     (async () => {
       if (!myUserId) return;
       setLoading(true);
@@ -137,6 +143,7 @@ export function useGroupChat(groupId: string) {
     })();
     return () => {
       cancelled = true;
+      unsubscribePatches();
       unsubscribe?.();
       unsubscribeControl?.();
     };
@@ -175,5 +182,23 @@ export function useGroupChat(groupId: string) {
     await refreshGroup();
   }, [groupId, refreshGroup]);
 
-  return { group, messages, loading, removed, waitingForKeys, securityWarning, send, sync, addMembers, removeMember, refreshGroup };
+  // T7.2: message actions on the group chain (local-first).
+  const react = useCallback(async (message: GroupUIMessage, emoji: string, remove = false) => {
+    if (!myUserId || !groupRef.current) return;
+    await reactToMessage({ myUserId: String(myUserId), target: { kind: 'group', group: groupRef.current }, message, emoji, remove });
+  }, [myUserId]);
+  const edit = useCallback(async (message: GroupUIMessage, text: string) => {
+    if (!myUserId || !groupRef.current) return;
+    await editMessage({ myUserId: String(myUserId), target: { kind: 'group', group: groupRef.current }, message, text });
+  }, [myUserId]);
+  const deleteEverywhere = useCallback(async (message: GroupUIMessage) => {
+    if (!myUserId || !groupRef.current) return;
+    await deleteForEveryone({ myUserId: String(myUserId), target: { kind: 'group', group: groupRef.current }, message });
+  }, [myUserId]);
+  const deleteLocally = useCallback(async (message: GroupUIMessage) => {
+    if (!myUserId) return;
+    await deleteForMe({ myUserId: String(myUserId), peerKey: groupPeerKey(groupId), message });
+  }, [groupId, myUserId]);
+
+  return { group, messages, loading, removed, waitingForKeys, securityWarning, send, sync, addMembers, removeMember, refreshGroup, react, edit, deleteEverywhere, deleteLocally };
 }
