@@ -1,11 +1,13 @@
 import { hkdfSha256 } from '../primitives/kdf';
 
-const INFO_RK = new Uint8Array([114, 107, 45, 118, 49]); // "rk-v1"
+/** "WhisperRatchet" — Signal's KDF_RK info label (libsignal RootKey::create_chain). Wire-format constant (R8). */
+const INFO_RK = new Uint8Array([87, 104, 105, 115, 112, 101, 114, 82, 97, 116, 99, 104, 101, 116]);
 
 /**
- * KDF_RK: derives (newRootKey, newChainKey) from (rootKey, dhOut)
- * - rootKey is used as HKDF salt (domain separation and binding)
+ * KDF_RK: (newRootKey, newChainKey) = HKDF-SHA256(salt = rootKey, ikm = dhOut, info = "WhisperRatchet", 64)
+ * - rootKey is the HKDF salt (domain separation and binding)
  * - dhOut is the input key material
+ * Byte-identical to libsignal for the T2.15 vectors.
  */
 export function kdfRootKey(params: {
   rootKey: Uint8Array; // 32 bytes

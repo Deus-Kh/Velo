@@ -5,7 +5,7 @@
  * HKDF-SHA256, the 0x01/0x02 chain KDF).
  * `it.fails` until the named task adopts Signal's constants:
  *  - X3DH            → T2.9 (DH order, 0xFF prefix, "WhisperText", fourth DH)
- *  - KDF_RK          → T2.0 ("WhisperRatchet" instead of "rk-v1")
+ *  - KDF_RK          → green since T2.0 adopted "WhisperRatchet"
  *  - message keys    → T2.5 (80-byte "WhisperMessageKeys" expansion, if adopted)
  *  - safety number   → T2.13 (libsignal numeric fingerprint)
  */
@@ -95,10 +95,10 @@ describe('libsignal vectors: constructions (red until the named task)', () => {
     }
   });
 
-  it.fails('KDF_RK matches libsignal (T2.0: info "WhisperRatchet")', () => {
+  it('KDF_RK matches libsignal (T2.0 adopted "WhisperRatchet")', () => {
     for (const s of vectors.ratchet.steps) {
       const r = kdfRootKey({ rootKey: fromHex(s.rootKeyIn), dhOut: fromHex(s.dhOut) });
-      expect(hex(r.newRootKey), 'root KDF info is "rk-v1", Signal uses "WhisperRatchet"').toBe(s.newRootKey);
+      expect(hex(r.newRootKey)).toBe(s.newRootKey);
       expect(hex(r.newChainKey)).toBe(s.newChainKey);
     }
   });

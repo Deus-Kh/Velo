@@ -509,7 +509,7 @@ Target structure and migration map as in v1 T2.1 (`primitives/`, `ratchet/`, `ha
 ---
 
 ## T2.0 — Standard Double Ratchet initialisation (the ratchet must ratchet)
-**Tier** CORE · **Fixes** P1-0 · **Est** 3d · **Depends** T2.4 · **Risk** high · **Breaks wire format** (v3, shared with T2.5/T2.13)
+**Tier** CORE · **Fixes** P1-0 · **Est** 3d · **Depends** T2.4 · **Risk** high · **Breaks wire format** (v3, shared with T2.5/T2.13) · **Status:** done 2026-09-28 (with T2.7 and T2.8, four commits)
 
 ### Why
 `ratchet/session.ts` (ex-`createSessionFromX3DH`) creates both sides with a fresh `DHs` and `DHr = null`, and `ratchetDecrypt` adopts the first inbound `dhPub` without ratcheting. Nothing ever regenerates `DHs`, so `dhRatchet` never runs. See audit §1.3.
@@ -523,6 +523,8 @@ Target structure and migration map as in v1 T2.1 (`primitives/`, `ratchet/`, `ha
 6. `x3dhInitiate` must return `spkB_pub` to the session initialiser; `x3dhRespond` must return the SPK pair.
 
 **Acceptance:** S19 passes; S01–S04, S06–S11 still pass; `grep -n "isInitiator" packages/protocol/src` empty; property test "every direction change performs exactly one ratchet step" over 1000 random conversations; `DEVIATION-1` removed from §8.5.
+
+**Status 2026-09-28:** done as four commits, one protocol behaviour each (R2): (1) `initInitiatorSession` / `initResponderSession` in `ratchet/session.ts` exactly as §8.1; `ratchetDecrypt` performs a full `dhRatchet` whenever the peer key is new or `DHr` is null (R13); HKDF directional split and `isInitiator` deleted; session format `v: 2`, a stored `v: 1` session is discarded on load and the pair re-bootstraps; `x3dhInitiate` returns `SPK_B`, the client's `x3dhRespond` returns its SPK pair; client wrappers `createInitiatorSession` / `createResponderSession`. (2) **T2.7 core:** `dhRatchet` keeps the skipped-key map. (3) **T2.8 core:** step 2 drains the previous receiving chain to `header.pn` into the skipped keys before ratcheting; drained keys are archived like any derived key. (4) `KDF_RK` info `"WhisperRatchet"` — the T2.15 root-KDF vector assertion is green. Results: S19 and S05 green (S05 rewritten to the genuine cross-epoch reorder: two messages in one epoch, the second arrives after the next epoch's first); S03/S19 expectations rewritten for per-epoch counters; new property `test/properties/ratchetSteps.test.ts` (1000 random conversation segments over 100 fresh sessions: DHs and root key change exactly on new-epoch receives, never on sends); interleaving property green with cross-epoch traffic (worlds reused for time; `PROPERTY_RUNS` raises the count). Ordering deviation, approved by the owner: T2.7 and T2.8 cores were pulled forward because a ratchet without them loses every late old-epoch message and the interleaving property could not stay honest; their remaining scope (epoch-aware bound, pruning, DEVIATION-4) stays with T2.6. The `protoVersion` bump to 3 lands with T2.5's envelope change (one bump); until then the header shape is unchanged and only key derivation differs from pre-T2.0 clients. Frozen encrypt vectors re-pinned twice (bootstrap, then the constant).
 
 ---
 
@@ -561,6 +563,8 @@ Constants: `MAX_SKIP_PER_STEP = 100`, `MAX_SKIP_TOTAL = 1000`, `MAX_SKIP_EPOCHS 
 ---
 
 ## T2.7 — Keep skipped keys across ratchet steps
+**Status:** core done 2026-09-28 with T2.0 (commit "T2.7: keep skipped message keys across a DH ratchet step"); epoch-aware bound and pruning (DEVIATION-4) remain, folded into T2.6.
+
 **Tier** CORE · **Fixes** P1-3 · **Est** 2d · **Depends** T2.0, T2.6
 
 `dhRatchet` no longer clears `skippedKeys`; `pruneSkippedKeys` evicts oldest-epoch-first using an explicit `skippedEpochOrder: string[]` on the session (never JS object order).
@@ -570,6 +574,8 @@ Constants: `MAX_SKIP_PER_STEP = 100`, `MAX_SKIP_TOTAL = 1000`, `MAX_SKIP_EPOCHS 
 ---
 
 ## T2.8 — `skipMessageKeys(header.pn)` before the ratchet
+**Status:** done 2026-09-28 with T2.0 (commit "T2.8: drain the previous receiving chain to header.pn before ratcheting").
+
 **Tier** CORE · **Fixes** P1-4 · **Est** 2d · **Depends** T2.7
 
 Implement §8.1 step 2 exactly. `pn` is read in exactly one place.
@@ -774,7 +780,7 @@ Canonical list in T2.4. Each scenario file states the checklist row it automates
 
 | ID | Deviation | Rationale | Status |
 |---|---|---|---|
-| `DEVIATION-1` | HKDF directional split instead of an initial DH ratchet | — | **Was the P1-0 bug. Removed by T2.0.** |
+| `DEVIATION-1` | HKDF directional split instead of an initial DH ratchet | — | **Was the P1-0 bug. Removed by T2.0 on 2026-09-28.** |
 | `DEVIATION-2` | X3DH omits `DH(EK_A, IK_B)` | — | **Resolved by T2.9 (D2 = fix).** |
 | `DEVIATION-3` | Message keys retained 30 days for offline history | superseded by the local store | **Removed by T2.14** (fallback only if T2.14 slips) |
 | `DEVIATION-4` | Skipped keys bounded by count *and* epoch | DoS resistance with multi-epoch tolerance | Active after T2.7 |

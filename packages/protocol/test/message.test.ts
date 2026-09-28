@@ -73,9 +73,9 @@ describe('ratchetEncrypt / ratchetDecrypt', () => {
     const { a } = pair();
     const nonce = new Uint8Array(24).fill(7);
     const e = ratchetEncrypt(a, 'frozen', { nonce });
-    expect(hex(decodeBase64(e.envelope.ciphertext))).toBe('9b0bf1649ea6c576da8031f77e7656756cbad711038e');
-    expect(e.derivedKeys[0]!.messageKeyB64).toBe('H2aBZ1EfCv9gSutc3498EfvPNs3F894IhY76KH9L1W0=');
-    expect(hex(decodeBase64(e.session.chainKeySend!))).toBe('baef9e3452b0b1538d0725e04b82ba282048d06623f19d0854df1383e1184a26');
+    expect(hex(decodeBase64(e.envelope.ciphertext))).toBe('e50804c4f3ce4743a2bcaf1139f5bb75fcf0d751e68b');
+    expect(e.derivedKeys[0]!.messageKeyB64).toBe('odK3b3KVPxNIFmsQy11o7+UusV0W5yDf8mw1TzKgtkg=');
+    expect(hex(decodeBase64(e.session.chainKeySend!))).toBe('e3d95e3d9b1273732c117e750ded362b4d9c8980cce236ab4fea21c614763558');
   });
 
   it('decrypts out-of-order messages within an epoch via skipped keys and reports the consumed id', () => {
