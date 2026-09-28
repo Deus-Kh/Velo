@@ -463,7 +463,7 @@ Target structure and migration map as in v1 T2.1 (`primitives/`, `ratchet/`, `ha
 ---
 
 ## T2.4 — Protocol test harness
-**Tier** CORE · **Est** 5d · **Depends** T2.2, T2.3
+**Tier** CORE · **Est** 5d · **Depends** T2.2, T2.3 · **Status:** done 2026-09-28
 
 `MemoryStore`, `VirtualClient` (`register`, `startSession`, `send`, `receive`, `serialize`/`restore`, `sessionState`), `Network` (`deliver`, `hold`, `release`, `reorder`, `duplicate`, `drop`, `tamper`, `partition`, plus a **malicious server** mode that can substitute bundles and `initPacket`s). Scenarios, one file each:
 
@@ -492,6 +492,8 @@ Target structure and migration map as in v1 T2.1 (`primitives/`, `ratchet/`, `ha
 | S21 | **Substituted bundle identity vs pin:** second bundle fetch returns different identity keys | **fail — accepted today** (T2.13) |
 
 **Acceptance:** all 21 implemented; S05, S12, S13, S14, S19, S20, S21 fail with clear diagnostics; suite < 30 s; runs under plain Node; ratchet coverage ≥ 90% before any fix.
+
+**Status 2026-09-28:** done. Harness in `packages/protocol/test/harness/`: `MemoryStore` (sync stand-in for AsyncStorage+Keychain; `serialize`/`restore` = restart, `clear` = reinstall), `FakeServer` (bundle route with oldest-unused one-time-prekey consumption and empty-pool degradation, `message:send` dedupe by client id and the `firstWithInitPacket` synthesis, history as stored; `malicious` hooks `substituteBundle`, `substituteIdentity`, `substituteInitPacket`, `relabelSender`), `VirtualClient` (`register`, `startSession`, `send`, `receive`, `loadHistory`, `resetSession`, `wipe`, `serialize`/`restore`, `sessionState`, `pinIdentity`/`trustedIdentity`; mirrors sessionBootstrap, messaging, ratchetAdapter, useChatE2EE and the TOFU pin in NewChatScreen), `Network` (`send`, `deliverNow`, `hold`, `release`, `releaseOne`, `reorder`, `duplicate`, `drop`, `discard`, `tamper`, `partition`, `heal`, delivery log). Pure X3DH moved to `src/handshake/x3dh.ts` (frozen vectors with and without a one-time prekey; the client's `crypto/x3dh.ts` is now an I/O wrapper). Scenarios `test/scenarios/S01…S21.*.test.ts`, one file each with checklist row, defect and expected state; `knownRed.test.ts` pins the red set; `test/properties/interleavings.test.ts` (300 seeded runs, gaps kept under `MAX_SKIP`). S12 runs the ratchet in a child Node process (`harness/s12-child.cjs`, TypeScript transpiled on require) killed at 5 s, because a synchronous hang cannot be interrupted in-process. Results against the current code: 61 passing assertions, **9 red scenarios** as `it.fails`: S05, S12, S13, S14, S19, S20, S21 (predicted) + **S16** (message-key archive grows one row per message, P1-10/T2.14) + **S10** (recovery after reinstall fails because the server still serves the pre-reinstall one-time prekeys, P1-11 extended; fix assigned to T2.13 step 5). S14 also shows a message with a modified `pn` is *accepted* (pn unused and unauthenticated). Suite 17 s; ratchet coverage: chain/root/dh/session 100 %, message.ts 98 % lines / 92 % branches; `npm run test:coverage`. S17 passes today only because nothing ratchets; after T2.0 it is the real race test.
 
 ---
 
@@ -530,7 +532,7 @@ Target structure and migration map as in v1 T2.1 (`primitives/`, `ratchet/`, `ha
 2. **Pinned trust enforced.** `identity/trust.ts` (pure): `checkIdentity(pinned, presented) → 'first-contact' | 'match' | 'mismatch'`. `fetchAndVerifyPreKeyBundle` and `x3dhRespond` both: verify the binding, then `checkIdentity` against the pin; `first-contact` → pin both keys; `mismatch` → throw `IDENTITY_MISMATCH`; never proceed on a mismatch. The trust store now pins **both** keys.
 3. **Responder authenticates the initiator.** On `initPacket`: fetch (or use pinned) identity for `fromUserId`; require `initPacket.initiatorIdentityDhPublicKey === pinned IK_dh`. The packet no longer needs to carry the identity key at all after this — keep it for the mismatch diagnostic only.
 4. **Safety number.** `identity/fingerprint.ts` implements libsignal's numeric fingerprint (version 0, 5200 iterations SHA-512 over `version || IK_sign || IK_dh || stableUserId`, two 30-digit halves ordered by raw bytes). Verified against the T2.15 vectors. `VerifyContactScreen` shows it; a mismatch renders the security-warning class from §8.3 and blocks send until "Verify" or "Accept new identity".
-5. **Server:** `identityKeyHistory[]` and `identityChangedAt` on `User`; identity upload with a different key appends history and emits `identity:changed` to every peer with a conversation; **remove the `initPacket` synthesis in `setupSocket.ts:481-495`** — the client bootstraps from the first stored message (history path) or from the live `initPacket`.
+5. **Server:** `identityKeyHistory[]` and `identityChangedAt` on `User`; identity upload with a different key appends history, **purges the user's one-time and signed prekeys** (S10 finding: stale pre-reinstall prekeys otherwise break every new session to the user), and emits `identity:changed` to every peer with a conversation; the client re-uploads its prekeys after re-registering; **remove the `initPacket` synthesis in `setupSocket.ts:481-495`** — the client bootstraps from the first stored message (history path) or from the live `initPacket`.
 6. **AD** for T2.5 becomes `IK_sign_A || IK_sign_B || canonicalHeader` (binding covers the DH keys).
 7. Rewrite `docs/protocol/SESSION_ESTABLISHMENT_POLICY.md` for the new states: `unverified-first-contact`, `verified`, `identity-changed-blocked`.
 
@@ -764,7 +766,7 @@ Every bump: update this table, the server validator, `Message.ts`, and the clien
 The two bold codes are the security-warning class and must look different from technical errors.
 
 ## 8.4 Scenario catalog
-Canonical list in T2.4. Each scenario file states the checklist row it automates, the defect it covers, and expected state before and after the fix.
+Canonical list in T2.4. Each scenario file states the checklist row it automates, the defect it covers, and expected state before and after the fix. Implemented in `packages/protocol/test/scenarios/` (2026-09-28); the red set is pinned by `knownRed.test.ts` and must be updated in the same commit as any fix that flips a scenario.
 
 ## 8.5 Deviation register
 

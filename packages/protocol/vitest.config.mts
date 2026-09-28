@@ -4,5 +4,11 @@ export default defineConfig({
   test: {
     include: ['test/**/*.test.ts'],
     testTimeout: 5_000, // a hanging ratchet (S12) must fail, not stall the runner
+    coverage: {
+      provider: 'v8',
+      include: ['src/**/*.ts'],
+      reporter: ['text', 'json-summary'],
+      reportsDirectory: './coverage',
+    },
   },
 });

@@ -9,7 +9,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
-    "lint": "eslint src test --ext .ts"
+    "lint": "eslint src test --ext .ts",
+    "test:coverage": "vitest run --coverage"
   },
   "peerDependencies": {
     "@noble/hashes": "^2.0.1",
@@ -20,6 +21,7 @@
     "@noble/hashes": "^2.0.1",
     "@types/node": "^24.19.0",
     "@typescript-eslint/parser": "^8.0.0",
+    "@vitest/coverage-v8": "^5.0.0",
     "eslint": "^8.57.1",
     "tweetnacl": "^1.0.3",
     "tweetnacl-util": "^0.15.1",

@@ -85,3 +85,6 @@ chats-client!.yarn/versions
 
 #server
 chats-server/node_modules/
+
+# vitest coverage output
+packages/protocol/coverage/

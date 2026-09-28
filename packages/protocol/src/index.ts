@@ -7,8 +7,8 @@
  *
  * T2.1 moved the pure modules here unchanged (session creation split into a
  * pure builder). T2.2 made the ratchet steps pure: they return the next
- * session and the derived keys, and the client adapter persists them. The
- * X3DH handshake still lives in the client.
+ * session and the derived keys, and the client adapter persists them. T2.4
+ * moved the X3DH math here; the client keeps only the I/O wrappers.
  */
 
 export {
@@ -45,5 +45,6 @@ export type { ProtoVersion, AnySession, RatchetSessionV2 } from './types/session
 
 export { verifySignedPreKeyBundle } from './handshake/bundle';
 export type { PreKeyBundle } from './handshake/types';
+export { x3dhInitiate, x3dhRespond, INFO_X3DH_V1, type X3DHInitPacket, type X3DHSessionKeys } from './handshake/x3dh';
 
 export { computeSafetyNumber } from './identity/fingerprint';
