@@ -68,6 +68,7 @@ export async function createUser(opts: { withKeys?: boolean; oneTimePreKeys?: nu
     passwordHash: 'x',
     identitySignPublicKey: withKeys ? `IKSIGN${String(n).padStart(38, '0')}` : null,
     identityDhPublicKey: withKeys ? `IKDH${String(n).padStart(40, '0')}` : null,
+    identityBindingSignature: withKeys ? `BIND${String(n).padStart(84, '0')}` : null,
   });
   const userId = String(user._id);
 

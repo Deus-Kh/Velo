@@ -3,13 +3,16 @@ import { requireAuth, type AuthedRequest } from '../middleware/auth';
 import { bundleLimiter } from '../middleware/rateLimit';
 import { services } from '../lib/services';
 import { UserModel } from '../models/User';
+import { ConversationModel } from '../models/Conversation';
+import { verifyIdentityBinding } from '../lib/identityBinding';
+import { emitToUser } from '../lib/realtime';
 import { SignedPreKeyModel } from '../models/SignedPreKey';
 import { OneTimePreKeyModel } from '../models/OneTimePreKey';
 import { PreKeyBundleIssueModel } from '../models/PreKeyBundleIssue';
 import { isValidObjectIdString } from '../utils/objectId';
 import {
   identityDhKeySchema,
-  identityKeySchema,
+  identityUploadSchema,
   preKeysUploadSchema,
   signedPreKeySchema,
   validateBody,
@@ -28,19 +31,78 @@ function tooManyRequests(res: Response, retryAfterSeconds: number, code: string,
 }
 
 /**
- * POST /keys/identity
- * Body: { identitySignPublicKey: string }
- * Stores user's identity signing public key (Ed25519 public key, base64).
+ * POST /keys/identity  (T2.13)
+ * Body: { identitySignPublicKey, identityDhPublicKey, identityBindingSignature }
+ *
+ * The binding is verified before anything is stored. An upload whose keys
+ * differ from the stored identity is an identity change (reinstall, key
+ * rotation, or an attacker with the account): the previous identity goes
+ * to identityKeyHistory, identityChangedAt is set, the user's one-time and
+ * signed prekeys are purged (they belonged to the old install and would
+ * otherwise be served for new sessions — S10), and every peer with a
+ * conversation is told so its client can show the safety-number warning.
  */
-keysRouter.post('/identity', requireAuth, validateBody(identityKeySchema), async (req: AuthedRequest, res) => {
-  const { identitySignPublicKey } = req.body as { identitySignPublicKey: string };
+keysRouter.post('/identity', requireAuth, validateBody(identityUploadSchema), async (req: AuthedRequest, res) => {
+  const body = req.body as { identitySignPublicKey: string; identityDhPublicKey: string; identityBindingSignature: string };
 
-  await UserModel.updateOne(
-    { _id: req.userId },
-    { $set: { identitySignPublicKey, identitySignUpdatedAt: new Date() } }
-  );
+  if (!verifyIdentityBinding(body)) {
+    return res.status(400).json({ error: 'Identity binding signature does not verify', code: 'IDENTITY_BINDING_INVALID' });
+  }
 
-  return res.json({ ok: true });
+  const user = await UserModel.findById(req.userId).select('identitySignPublicKey identityDhPublicKey identityBindingSignature');
+  if (!user) return res.status(404).json({ error: 'User not found', code: 'NOT_FOUND' });
+
+  const now = new Date();
+  const hadIdentity = !!user.identitySignPublicKey && !!user.identityDhPublicKey;
+  const changed =
+    hadIdentity &&
+    (user.identitySignPublicKey !== body.identitySignPublicKey || user.identityDhPublicKey !== body.identityDhPublicKey);
+
+  const set: Record<string, unknown> = {
+    identitySignPublicKey: body.identitySignPublicKey,
+    identitySignUpdatedAt: now,
+    identityDhPublicKey: body.identityDhPublicKey,
+    identityDhUpdatedAt: now,
+    identityBindingSignature: body.identityBindingSignature,
+  };
+  const update: Record<string, unknown> = { $set: set };
+
+  if (changed) {
+    set.identityChangedAt = now;
+    update.$push = {
+      identityKeyHistory: {
+        identitySignPublicKey: user.identitySignPublicKey,
+        identityDhPublicKey: user.identityDhPublicKey,
+        identityBindingSignature: user.identityBindingSignature ?? null,
+        replacedAt: now,
+      },
+    };
+  }
+
+  await UserModel.updateOne({ _id: req.userId }, update);
+
+  if (changed) {
+    await Promise.all([
+      OneTimePreKeyModel.deleteMany({ userId: req.userId }),
+      SignedPreKeyModel.deleteMany({ userId: req.userId }),
+    ]);
+    console.warn('[keys] identity changed; prekeys purged', { userId: String(req.userId) });
+
+    const conversations = await ConversationModel.find({ members: req.userId }).select('members').lean();
+    const me = String(req.userId);
+    const peers = new Set<string>();
+    for (const c of conversations) {
+      for (const m of c.members ?? []) {
+        const id = String(m);
+        if (id !== me) peers.add(id);
+      }
+    }
+    for (const peerId of peers) {
+      emitToUser(peerId, 'identity:changed', { userId: me, identityChangedAt: now.toISOString() });
+    }
+  }
+
+  return res.json({ ok: true, changed });
 });
 
 keysRouter.post('/identity-dh', requireAuth, validateBody(identityDhKeySchema), async (req: AuthedRequest, res) => {
@@ -56,21 +118,25 @@ keysRouter.post('/identity-dh', requireAuth, validateBody(identityDhKeySchema), 
 
 /**
  * GET /keys/identity/:userId
- * Returns user's identity signing public key.
+ * Both identity keys, the binding, and when the identity last changed.
  */
 keysRouter.get('/identity/:userId', requireAuth, async (req: AuthedRequest, res) => {
   const { userId } = req.params;
+  if (!isValidObjectIdString(userId)) return res.status(400).json({ error: 'Invalid userId', code: 'BAD_ID' });
 
-  const user = await UserModel.findById(userId).select('identitySignPublicKey');
-  if (!user) return res.status(404).json({ error: 'User not found' });
+  const user = await UserModel.findById(userId).select('identitySignPublicKey identityDhPublicKey identityBindingSignature identityChangedAt');
+  if (!user) return res.status(404).json({ error: 'User not found', code: 'NOT_FOUND' });
 
   if (!user.identitySignPublicKey) {
-    return res.status(404).json({ error: 'Identity key not set' });
+    return res.status(404).json({ error: 'Identity key not set', code: 'NO_IDENTITY_KEY' });
   }
 
   return res.json({
     userId: String(user._id),
     identitySignPublicKey: user.identitySignPublicKey,
+    identityDhPublicKey: user.identityDhPublicKey ?? null,
+    identityBindingSignature: user.identityBindingSignature ?? null,
+    identityChangedAt: user.identityChangedAt ? user.identityChangedAt.toISOString() : null,
   });
 });
 
@@ -165,13 +231,16 @@ keysRouter.get('/bundle/:userId', requireAuth, bundleLimiter, async (req: Authed
   }
 
   // 1) peer identity keys
-  const peer = await UserModel.findById(targetId).select('identitySignPublicKey identityDhPublicKey');
+  const peer = await UserModel.findById(targetId).select('identitySignPublicKey identityDhPublicKey identityBindingSignature');
   if (!peer) return res.status(404).json({ error: 'User not found', code: 'NOT_FOUND' });
   if (!peer.identitySignPublicKey) {
     return res.status(404).json({ error: 'Identity key not set', code: 'NO_IDENTITY_KEY' });
   }
   if (!peer.identityDhPublicKey) {
     return res.status(404).json({ error: 'Identity DH key not set', code: 'NO_IDENTITY_KEY' });
+  }
+  if (!peer.identityBindingSignature) {
+    return res.status(404).json({ error: 'Identity binding not published', code: 'NO_IDENTITY_BINDING' });
   }
 
   // 2) latest signed prekey
@@ -207,6 +276,7 @@ keysRouter.get('/bundle/:userId', requireAuth, bundleLimiter, async (req: Authed
     userId: targetId,
     identitySignPublicKey: peer.identitySignPublicKey,
     identityDhPublicKey: peer.identityDhPublicKey,
+    identityBindingSignature: peer.identityBindingSignature,
     signedPreKey: {
       keyId: signed.keyId,
       publicKey: signed.publicKey,

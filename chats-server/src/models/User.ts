@@ -16,6 +16,22 @@ const UserSchema = new Schema(
     identityDhPublicKey: { type: String, default: null, index: true },
     identityDhUpdatedAt: { type: Date, default: null },
 
+    // T2.13: Ed25519 signature by identitySignPublicKey over "velo-identity-binding-v1" || identityDhPublicKey.
+    identityBindingSignature: { type: String, default: null },
+    // Every previous identity, newest last. Never overwritten silently.
+    identityKeyHistory: {
+      type: [
+        {
+          identitySignPublicKey: { type: String, required: true },
+          identityDhPublicKey: { type: String, default: null },
+          identityBindingSignature: { type: String, default: null },
+          replacedAt: { type: Date, required: true },
+        },
+      ],
+      default: [],
+    },
+    identityChangedAt: { type: Date, default: null },
+
     pushTokens: {
       type: [
         {

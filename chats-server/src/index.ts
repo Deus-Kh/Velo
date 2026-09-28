@@ -7,6 +7,7 @@ import { configureServices } from './lib/services';
 import { configureRateLimiters } from './middleware/rateLimit';
 import { createApp } from './app';
 import { setupSocket } from './socket/setupSocket';
+import { setRealtimeServer } from './lib/realtime';
 
 /** Upper bound for any socket.io packet; the per-message ciphertext cap is enforced separately. */
 const SOCKET_MAX_HTTP_BUFFER_SIZE = 256 * 1024;
@@ -28,6 +29,7 @@ async function main() {
   });
 
   setupSocket(io);
+  setRealtimeServer(io);
 
   server.listen(config.PORT, () => {
     console.log(`Server running on http://localhost:${config.PORT}`);

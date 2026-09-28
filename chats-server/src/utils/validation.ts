@@ -97,6 +97,13 @@ export const identityDhKeySchema = z.object({
   identityDhPublicKey: base64Bytes(32, 'identityDhPublicKey'),
 });
 
+/** T2.13: both identity keys and the binding signature in one upload. */
+export const identityUploadSchema = z.object({
+  identitySignPublicKey: base64Bytes(32, 'identitySignPublicKey'),
+  identityDhPublicKey: base64Bytes(32, 'identityDhPublicKey'),
+  identityBindingSignature: base64Bytes(64, 'identityBindingSignature'),
+});
+
 export const signedPreKeySchema = z.object({
   keyId: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
   publicKey: base64Bytes(32, 'publicKey'),
