@@ -73,6 +73,40 @@ scrapes it with the same bearer token (`deploy/prometheus/prometheus.yml`,
 alert rules in `alerts.yml`). Import `deploy/grafana/velo-dashboard.json` into
 Grafana. No series carries a user or conversation identifier.
 
+## Backups (T4.9)
+
+```bash
+sudo mkdir -p /var/backups/velo && sudo chown velo:velo /var/backups/velo && sudo chmod 0700 /var/backups/velo
+sudo cp /opt/velo/deploy/systemd/velo-backup.{service,timer} /etc/systemd/system/
+sudo systemctl daemon-reload && sudo systemctl enable --now velo-backup.timer
+sudo systemctl start velo-backup.service && journalctl -u velo-backup -n 5 --no-pager   # first snapshot now
+```
+
+Daily at 03:30, `node dist/tools/backup.js dump /var/backups/velo --keep-days 14`
+writes one directory per snapshot (`<collection>.ejson.gz` in canonical
+Extended JSON plus `manifest.json` with document counts and SHA-256 per
+collection) and prunes snapshots older than 14 days. A snapshot holds what
+the server holds: accounts, public keys, undelivered ciphertext, receipts,
+refresh-token hashes. No plaintext and no private key of any user, so it is
+exactly as sensitive as the database: encrypted storage, not the web root.
+Copy the directory off-host (`rsync -a /var/backups/velo backup-host:`).
+
+### Restore (rehearsed on every CI run: `chats-server/test/backup.test.ts`)
+
+```bash
+sudo systemctl stop velo-server
+cd /opt/velo/chats-server
+sudo -u velo node dist/tools/backup.js verify  /var/backups/velo/<snapshot>      # checksums first
+sudo -u velo node dist/tools/backup.js restore /var/backups/velo/<snapshot> --drop   # replace every collection
+sudo systemctl start velo-server
+```
+
+Without `--drop` the restore merges by `_id` (documents created after the
+snapshot survive). A snapshot whose checksums do not match is refused before
+anything is touched. Devices keep their sessions and history; a restore only
+rewinds what the server knew, so messages sent after the snapshot that were
+not yet delivered are lost and their senders see them as undelivered.
+
 ## Rollback
 
 ```bash

@@ -450,6 +450,8 @@ Extraction happens in T2.1. Secrets (`*.pem`, `*.keystore`, service-account JSON
 
 **4' progress — T4.8 done 2026-09-28** (one commit): the chat screen derives every non-healthy state from the §8.3 taxonomy; decrypt failures are shown as a degraded-session banner instead of being swallowed; security warnings render differently from technical errors. Next in order: T4.9 (Mongo backups + one rehearsed restore).
 
+**4' progress — T4.9 done 2026-09-28** (one commit): driver-based daily snapshots with checksummed manifests and retention under systemd; verify/restore commands; the restore is rehearsed in CI on every build. Next in order: T4.10 (certificate pinning + rotation procedure).
+
 **2b progress — T2.14 done 2026-09-28** (one commit, D7 = A): plaintext stored locally in sealed records, message keys never archived, history read from the device with the server asked only for newer messages, one-time migration of the old archive. **The known-red registry is empty: every scenario the harness owns is green.** Remaining in Phase 2: T2.12 (manual two-device checklist, owner).
 
 **2b progress — T2.11 done 2026-09-28** (two commits): bootstrap persists only after the first message decrypts, bootstrap replay refused, glare converges on the lower user id without losing messages, a peer's local reset is adopted automatically. Next in order: T2.14.

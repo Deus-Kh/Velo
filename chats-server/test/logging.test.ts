@@ -38,6 +38,7 @@ describe('T4.5 logging', () => {
     const src = join(__dirname, '..', 'src');
     const offenders = walk(src)
       .filter((p) => !p.endsWith(join('lib', 'logger.ts')))
+      .filter((p) => !p.includes(join('src', 'tools') + require('path').sep)) // CLI tools print their result to stdout by design (T4.9)
       .filter((p) => /console\.(log|warn|error|info|debug)\(/.test(readFileSync(p, 'utf8')));
     expect(offenders).toEqual([]);
   });

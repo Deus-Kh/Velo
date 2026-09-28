@@ -1,0 +1,26 @@
+# Daily MongoDB snapshot (T4.9). Paired with velo-backup.timer.
+# Snapshots go to /var/backups/velo/<timestamp>/ (Extended JSON, gzip, manifest with checksums);
+# snapshots older than 14 days are pruned by the same run.
+[Unit]
+Description=Velo MongoDB snapshot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=velo
+Group=velo
+WorkingDirectory=/opt/velo/chats-server
+EnvironmentFile=/etc/velo/server.env
+Environment=NODE_ENV=production
+ExecStart=/usr/bin/node dist/tools/backup.js dump /var/backups/velo --keep-days 14
+# The snapshot directory must be writable by the service user and live on encrypted storage:
+#   sudo mkdir -p /var/backups/velo && sudo chown velo:velo /var/backups/velo && sudo chmod 0700 /var/backups/velo
+ReadWritePaths=/var/backups/velo
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=velo-backup
