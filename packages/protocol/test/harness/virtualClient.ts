@@ -248,7 +248,7 @@ export class VirtualClient {
       identityDhPublicKey: dh.publicKey,
       identityDhSecretKey: decodeBase64(dh.privateKey),
     });
-    const session = initInitiatorSession({ peerUserId, sharedSecret: sessionKeys.rootKey, theirSignedPreKeyPublicKey });
+    const session = initInitiatorSession({ peerUserId, sharedSecret: sessionKeys.rootKey, headerKeyA: sessionKeys.headerKeyA, nextHeaderKeyB: sessionKeys.nextHeaderKeyB, theirSignedPreKeyPublicKey });
     this.saveSession(peerUserId, session);
     return initPacket;
   }
@@ -307,6 +307,8 @@ export class VirtualClient {
     return initResponderSession({
       peerUserId,
       sharedSecret: sessionKeys.rootKey,
+      headerKeyA: sessionKeys.headerKeyA,
+      nextHeaderKeyB: sessionKeys.nextHeaderKeyB,
       signedPreKey: { publicKey: spk.publicKey, privateKey: spk.privateKey },
     });
   }

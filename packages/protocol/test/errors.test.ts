@@ -30,6 +30,8 @@ function walk(dir: string): string[] {
 }
 
 const sharedSecret = encodeBase64(new Uint8Array(32).fill(0xaa));
+const HK_A = encodeBase64(new Uint8Array(32).fill(0xa1));
+const NHK_B = encodeBase64(new Uint8Array(32).fill(0xb2));
 const spkPair = nacl.box.keyPair.fromSecretKey(new Uint8Array(32).fill(0x44));
 const signedPreKey = { publicKey: encodeBase64(spkPair.publicKey), privateKey: encodeBase64(spkPair.secretKey) };
 
@@ -40,8 +42,8 @@ const AD: AssociatedData = {
 
 function pair(): { a: RatchetSessionV2; b: RatchetSessionV2 } {
   return {
-    a: initInitiatorSession({ peerUserId: 'b', sharedSecret, theirSignedPreKeyPublicKey: signedPreKey.publicKey }),
-    b: initResponderSession({ peerUserId: 'a', sharedSecret, signedPreKey }),
+    a: initInitiatorSession({ headerKeyA: HK_A, nextHeaderKeyB: NHK_B, peerUserId: 'b', sharedSecret, theirSignedPreKeyPublicKey: signedPreKey.publicKey }),
+    b: initResponderSession({ headerKeyA: HK_A, nextHeaderKeyB: NHK_B, peerUserId: 'a', sharedSecret, signedPreKey }),
   };
 }
 
@@ -112,7 +114,7 @@ describe('throw sites map to the taxonomy', () => {
     expect(codeOf(() => dhRatchet({ ...a, DHsPrivateKey: null as unknown as string }, encodeBase64(peer.publicKey)))).toBe('STORAGE_CORRUPTION');
     expect(codeOf(() => dhRatchet(a, encodeBase64(new Uint8Array(31))))).toBe('INVALID_KEY_LENGTH');
     expect(codeOf(() => dhRatchet({ ...a, DHsPrivateKey: encodeBase64(new Uint8Array(16)) }, encodeBase64(peer.publicKey)))).toBe('INVALID_KEY_LENGTH');
-    expect(codeOf(() => initInitiatorSession({ peerUserId: 'b', sharedSecret: encodeBase64(new Uint8Array(16)), theirSignedPreKeyPublicKey: signedPreKey.publicKey }))).toBe('INVALID_KEY_LENGTH');
+    expect(codeOf(() => initInitiatorSession({ headerKeyA: HK_A, nextHeaderKeyB: NHK_B, peerUserId: 'b', sharedSecret: encodeBase64(new Uint8Array(16)), theirSignedPreKeyPublicKey: signedPreKey.publicKey }))).toBe('INVALID_KEY_LENGTH');
   });
 
   it('handshake/bundle.ts', () => {

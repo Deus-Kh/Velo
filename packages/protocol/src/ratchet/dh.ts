@@ -9,11 +9,14 @@ import { PEER_EPOCH_HISTORY } from './limits';
 import { wipe } from '../primitives/zeroize';
 
 /**
- * DH ratchet step (spec §8.1 `dhRatchet`, Signal's DHRatchet):
- *   PN := Ns; Ns := Nr := 0; DHr := dhPub;
- *   (RK, CKr) := KDF_RK(RK, DH(DHs, DHr));
+ * DH ratchet step (spec §8.1 `dhRatchet`, Signal's DHRatchetHE since T3.6):
+ *   PN := Ns; Ns := Nr := 0; HKs := NHKs; HKr := NHKr; DHr := dhPub;
+ *   (RK, CKr, NHKr) := KDF_RK_HE(RK, DH(DHs, DHr));
  *   DHs := fresh;
- *   (RK, CKs) := KDF_RK(RK, DH(DHs, DHr)).
+ *   (RK, CKs, NHKs) := KDF_RK_HE(RK, DH(DHs, DHr)).
+ * The header key of the epoch being left (the old HKr) is kept in
+ * `epochHeaderKeys` under the old peer key so its late messages can still
+ * be recognised; it is pruned with the epoch's skipped keys.
  * Pure: returns a new session, never mutates the input. Draining the
  * previous receiving chain to `header.pn` is the caller's job (T2.8).
  * Skipped keys are keyed by epoch and survive the step (T2.7); the new
@@ -65,13 +68,23 @@ export function dhRatchet(session: RatchetSessionV2, newPeerDhPubB64: string, ne
   const rootKey = encodeBase64(step2.newRootKey);
   const chainKeyRecv = encodeBase64(step1.newChainKey);
   const chainKeySend = encodeBase64(step2.newChainKey);
-  wipe(step1.newRootKey, step1.newChainKey, step2.newRootKey, step2.newChainKey); // T3.4
+  const nextHeaderKeyRecv = encodeBase64(step1.newHeaderKey);
+  const nextHeaderKeySend = encodeBase64(step2.newHeaderKey);
+  wipe(step1.newRootKey, step1.newChainKey, step1.newHeaderKey, step2.newRootKey, step2.newChainKey, step2.newHeaderKey); // T3.4
+
+  const epochHeaderKeys = { ...(session.epochHeaderKeys ?? {}) };
+  if (session.DHrPublicKey && session.headerKeyRecv) epochHeaderKeys[session.DHrPublicKey] = session.headerKeyRecv;
 
   return {
     ...session,
     rootKey,
     chainKeyRecv,
     chainKeySend,
+    headerKeySend: session.nextHeaderKeySend,
+    headerKeyRecv: session.nextHeaderKeyRecv,
+    nextHeaderKeyRecv,
+    nextHeaderKeySend,
+    epochHeaderKeys,
     PN: session.Ns,
     Ns: 0,
     Nr: 0,

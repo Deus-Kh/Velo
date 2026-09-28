@@ -12,10 +12,12 @@ const { ratchetEncrypt, ratchetDecrypt } = require(path.join(__dirname, '..', '.
 
 const n = Number(process.argv[2]);
 const sharedSecret = encodeBase64(new Uint8Array(32).fill(0xaa));
+const headerKeyA = encodeBase64(new Uint8Array(32).fill(0xa1));
+const nextHeaderKeyB = encodeBase64(new Uint8Array(32).fill(0xb2));
 const spk = nacl.box.keyPair();
 const signedPreKey = { publicKey: encodeBase64(spk.publicKey), privateKey: encodeBase64(spk.secretKey) };
-const a = initInitiatorSession({ peerUserId: 'b', sharedSecret, theirSignedPreKeyPublicKey: signedPreKey.publicKey });
-const b = initResponderSession({ peerUserId: 'a', sharedSecret, signedPreKey });
+const a = initInitiatorSession({ peerUserId: 'b', sharedSecret, headerKeyA, nextHeaderKeyB, theirSignedPreKeyPublicKey: signedPreKey.publicKey });
+const b = initResponderSession({ peerUserId: 'a', sharedSecret, headerKeyA, nextHeaderKeyB, signedPreKey });
 
 const AD = { senderIdentityKey: encodeBase64(new Uint8Array(32).fill(1)), receiverIdentityKey: encodeBase64(new Uint8Array(32).fill(2)) };
 const e = ratchetEncrypt(a, 'x', AD);

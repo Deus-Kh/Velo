@@ -114,7 +114,7 @@ async function decryptWithCandidate(params: {
   }
 
   const { sessionKeys, signedPreKey, oneTimePreKeyId } = await x3dhRespond({ myUserId, initPacket });
-  const candidate = initResponderSession({ peerUserId, sharedSecret: sessionKeys.rootKey, signedPreKey });
+  const candidate = initResponderSession({ peerUserId, sharedSecret: sessionKeys.rootKey, headerKeyA: sessionKeys.headerKeyA, nextHeaderKeyB: sessionKeys.nextHeaderKeyB, signedPreKey });
   const ad = await associatedDataFor({ myUserId, peerUserId, direction: 'in' });
   const step = ratchetDecrypt(candidate, encrypted, ad);
   return { plaintext: step.plaintext, session: step.session, oneTimePreKeyId };

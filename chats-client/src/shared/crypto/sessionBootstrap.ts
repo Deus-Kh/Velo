@@ -17,6 +17,8 @@ export async function ensureV2Session(params: {
     myUserId: params.myUserId,
     peerUserId: params.peerUserId,
     sharedSecret: sessionKeys.rootKey,
+    headerKeyA: sessionKeys.headerKeyA,
+    nextHeaderKeyB: sessionKeys.nextHeaderKeyB,
     theirSignedPreKeyPublicKey,
   });
 

@@ -15,6 +15,8 @@ import { ratchetDecrypt, ratchetEncrypt } from '../src/ratchet/message';
 import { kdfRootKey } from '../src/ratchet/root';
 import { initInitiatorSession, initResponderSession } from '../src/ratchet/session';
 
+const HK_A = encodeBase64(new Uint8Array(32).fill(0xa1));
+const NHK_B = encodeBase64(new Uint8Array(32).fill(0xb2));
 const zeros = (n: number) => new Uint8Array(n);
 const isZero = (b: Uint8Array) => b.every((x) => x === 0);
 
@@ -27,8 +29,8 @@ function pair() {
   const spk = nacl.box.keyPair.fromSecretKey(new Uint8Array(32).fill(7));
   const sk = encodeBase64(new Uint8Array(32).fill(9));
   const spkB64 = { publicKey: encodeBase64(spk.publicKey), privateKey: encodeBase64(spk.secretKey) };
-  const a = initInitiatorSession({ peerUserId: 'B', sharedSecret: sk, theirSignedPreKeyPublicKey: spkB64.publicKey });
-  const b = initResponderSession({ peerUserId: 'A', sharedSecret: sk, signedPreKey: spkB64 });
+  const a = initInitiatorSession({ headerKeyA: HK_A, nextHeaderKeyB: NHK_B, peerUserId: 'B', sharedSecret: sk, theirSignedPreKeyPublicKey: spkB64.publicKey });
+  const b = initResponderSession({ headerKeyA: HK_A, nextHeaderKeyB: NHK_B, peerUserId: 'A', sharedSecret: sk, signedPreKey: spkB64 });
   return { a, b };
 }
 

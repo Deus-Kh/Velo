@@ -40,8 +40,10 @@ function freshPair(): DhKeyPairB64 {
 }
 
 /**
- * Initiator initialisation (spec §8.1, Signal's initialize_alice_session):
- *   RK := SK; DHs := fresh; DHr := SPK_B; (RK, CKs) := KDF_RK(RK, DH(DHs, DHr)); CKr := null.
+ * Initiator initialisation (spec §8.1, Signal's initialize_alice_session,
+ * header-encryption variant RatchetInitAliceHE since T3.6):
+ *   RK := SK; DHs := fresh; DHr := SPK_B; (RK, CKs, NHKs) := KDF_RK_HE(RK, DH(DHs, DHr)); CKr := null;
+ *   HKs := shared_hka; HKr := null; NHKr := shared_nhkb.
  * The initiator therefore performs the first ratchet step at creation and
  * its first message already carries a fresh ratchet key.
  * Pure: no storage, no clock. `dhs` is injectable for vector tests only.
@@ -49,29 +51,39 @@ function freshPair(): DhKeyPairB64 {
 export function initInitiatorSession(params: {
   peerUserId: string;
   sharedSecret: string; // base64 32 bytes, the X3DH root key
+  headerKeyA: string; // base64 32 bytes, X3DH's shared_hka (T3.6)
+  nextHeaderKeyB: string; // base64 32 bytes, X3DH's shared_nhkb (T3.6)
   theirSignedPreKeyPublicKey: string; // base64 X25519, SPK_B
   dhs?: DhKeyPairB64;
 }): RatchetSessionV2 {
   const sk = requireKey(params.sharedSecret, 'sharedSecret');
+  wipe(requireKey(params.headerKeyA, 'headerKeyA'));
+  wipe(requireKey(params.nextHeaderKeyB, 'nextHeaderKeyB'));
   const dhs = params.dhs ?? freshPair();
   const dhsPriv = requireKey(dhs.privateKey, 'DHsPrivateKey');
   const dhr = requireKey(params.theirSignedPreKeyPublicKey, 'theirSignedPreKeyPublicKey');
 
   const dhOut = nacl.scalarMult(dhsPriv, dhr);
   wipe(dhsPriv);
-  const { newRootKey, newChainKey } = kdfRootKey({ rootKey: sk, dhOut });
+  const { newRootKey, newChainKey, newHeaderKey } = kdfRootKey({ rootKey: sk, dhOut });
   wipe(sk, dhOut);
   const rootKey = encodeBase64(newRootKey);
   const chainKeySend = encodeBase64(newChainKey);
-  wipe(newRootKey, newChainKey); // T3.4
+  const nextHeaderKeySend = encodeBase64(newHeaderKey);
+  wipe(newRootKey, newChainKey, newHeaderKey); // T3.4
 
   return {
-    v: 2,
+    v: 3,
     protoVersion: 3,
     peerUserId: params.peerUserId,
     rootKey,
     chainKeySend,
     chainKeyRecv: null,
+    headerKeySend: normalizeB64(params.headerKeyA),
+    headerKeyRecv: null,
+    nextHeaderKeySend,
+    nextHeaderKeyRecv: normalizeB64(params.nextHeaderKeyB),
+    epochHeaderKeys: {},
     Ns: 0,
     Nr: 0,
     PN: 0,
@@ -86,8 +98,10 @@ export function initInitiatorSession(params: {
 }
 
 /**
- * Responder initialisation (spec §8.1, Signal's initialize_bob_session):
- *   RK := SK; DHs := SPK_B pair (copied into the session); DHr := null; CKs := CKr := null.
+ * Responder initialisation (spec §8.1, Signal's initialize_bob_session,
+ * RatchetInitBobHE since T3.6):
+ *   RK := SK; DHs := SPK_B pair (copied into the session); DHr := null; CKs := CKr := null;
+ *   HKs := null; NHKs := shared_nhkb; HKr := null; NHKr := shared_hka.
  * The first inbound message performs a full ratchet step (R13), which
  * creates both chains. The signed-prekey pair is copied, so a later
  * signed-prekey rotation cannot break this session.
@@ -95,19 +109,28 @@ export function initInitiatorSession(params: {
 export function initResponderSession(params: {
   peerUserId: string;
   sharedSecret: string; // base64 32 bytes, the X3DH root key
+  headerKeyA: string; // base64 32 bytes, X3DH's shared_hka (T3.6)
+  nextHeaderKeyB: string; // base64 32 bytes, X3DH's shared_nhkb (T3.6)
   signedPreKey: DhKeyPairB64; // our SPK pair the initiator used
 }): RatchetSessionV2 {
   wipe(requireKey(params.sharedSecret, 'sharedSecret'));
+  wipe(requireKey(params.headerKeyA, 'headerKeyA'));
+  wipe(requireKey(params.nextHeaderKeyB, 'nextHeaderKeyB'));
   wipe(requireKey(params.signedPreKey.privateKey, 'signedPreKey.privateKey'));
   requireKey(params.signedPreKey.publicKey, 'signedPreKey.publicKey');
 
   return {
-    v: 2,
+    v: 3,
     protoVersion: 3,
     peerUserId: params.peerUserId,
     rootKey: normalizeB64(params.sharedSecret),
     chainKeySend: null,
     chainKeyRecv: null,
+    headerKeySend: null,
+    headerKeyRecv: null,
+    nextHeaderKeySend: normalizeB64(params.nextHeaderKeyB),
+    nextHeaderKeyRecv: normalizeB64(params.headerKeyA),
+    epochHeaderKeys: {},
     Ns: 0,
     Nr: 0,
     PN: 0,

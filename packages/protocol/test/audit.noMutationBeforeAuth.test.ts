@@ -30,6 +30,8 @@ function deepFreeze<T>(value: T): T {
   }
   return value;
 }
+const HK_A = encodeBase64(new Uint8Array(32).fill(0xa1));
+const NHK_B = encodeBase64(new Uint8Array(32).fill(0xb2));
 const snapshot = <T,>(v: T): T => JSON.parse(JSON.stringify(v)) as T;
 
 function pair() {
@@ -37,8 +39,8 @@ function pair() {
   const sk = encodeBase64(new Uint8Array(32).fill(9));
   const spkB64 = { publicKey: encodeBase64(spk.publicKey), privateKey: encodeBase64(spk.secretKey) };
   return {
-    a: initInitiatorSession({ peerUserId: 'B', sharedSecret: sk, theirSignedPreKeyPublicKey: spkB64.publicKey }),
-    b: initResponderSession({ peerUserId: 'A', sharedSecret: sk, signedPreKey: spkB64 }),
+    a: initInitiatorSession({ headerKeyA: HK_A, nextHeaderKeyB: NHK_B, peerUserId: 'B', sharedSecret: sk, theirSignedPreKeyPublicKey: spkB64.publicKey }),
+    b: initResponderSession({ headerKeyA: HK_A, nextHeaderKeyB: NHK_B, peerUserId: 'A', sharedSecret: sk, signedPreKey: spkB64 }),
   };
 }
 

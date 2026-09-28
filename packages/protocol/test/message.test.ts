@@ -15,6 +15,8 @@ const pairB64 = (byte: number) => {
   return { publicKey: encodeBase64(kp.publicKey), privateKey: encodeBase64(kp.secretKey) };
 };
 const sharedSecret = encodeBase64(new Uint8Array(32).fill(0xaa));
+const HK_A = encodeBase64(new Uint8Array(32).fill(0xa1));
+const NHK_B = encodeBase64(new Uint8Array(32).fill(0xb2));
 const spkB = pairB64(0x44);
 const dhsA0 = pairB64(0x66);
 const IK_A = encodeBase64(nacl.sign.keyPair.fromSeed(new Uint8Array(32).fill(0x0a)).publicKey);
@@ -26,8 +28,8 @@ const BA: AssociatedData = { senderIdentityKey: IK_B, receiverIdentityKey: IK_A 
 /** Fresh A (initiator) and B (responder) sessions sharing SK and SPK_B. */
 function pair() {
   return {
-    a: initInitiatorSession({ peerUserId: 'b', sharedSecret, theirSignedPreKeyPublicKey: spkB.publicKey, dhs: dhsA0 }),
-    b: initResponderSession({ peerUserId: 'a', sharedSecret, signedPreKey: spkB }),
+    a: initInitiatorSession({ headerKeyA: HK_A, nextHeaderKeyB: NHK_B, peerUserId: 'b', sharedSecret, theirSignedPreKeyPublicKey: spkB.publicKey, dhs: dhsA0 }),
+    b: initResponderSession({ headerKeyA: HK_A, nextHeaderKeyB: NHK_B, peerUserId: 'a', sharedSecret, signedPreKey: spkB }),
   };
 }
 

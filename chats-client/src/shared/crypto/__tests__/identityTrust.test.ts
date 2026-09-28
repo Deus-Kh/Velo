@@ -146,7 +146,7 @@ describe('acceptNewIdentity', () => {
     await saveSession({
       myUserId: ME,
       peerUserId: PEER,
-      session: initInitiatorSession({ peerUserId: PEER, sharedSecret: encodeBase64(new Uint8Array(32).fill(1)), theirSignedPreKeyPublicKey: encodeBase64(spk.publicKey) }),
+      session: initInitiatorSession({ peerUserId: PEER, sharedSecret: encodeBase64(new Uint8Array(32).fill(1)), headerKeyA: encodeBase64(new Uint8Array(32).fill(2)), nextHeaderKeyB: encodeBase64(new Uint8Array(32).fill(3)), theirSignedPreKeyPublicKey: encodeBase64(spk.publicKey) }),
     });
     await AsyncStorage.setItem(`v2mk:${ME}:${PEER}:out:x:0`, 'k');
 

@@ -14,8 +14,8 @@ function secondaryKey(myUserId: string, peerUserId: string) {
 }
 
 /**
- * Only the T2.0 format (`v: 2`, standard bootstrap) speaking wire version 3
- * (T2.5) is loadable. Anything older is discarded so the pair re-bootstraps
+ * Only the T3.6 format (`v: 3`, header keys) is loadable. Anything older
+ * (`v: 2` plaintext headers, `v: 1`) is discarded so the pair re-bootstraps
  * on the next message (spec §8.2: one bump, one migration).
  */
 function isSessionShape(value: unknown): value is AnySession {
@@ -24,8 +24,10 @@ function isSessionShape(value: unknown): value is AnySession {
   return (
     !!s &&
     typeof s === 'object' &&
-    s.v === 2 &&
+    s.v === 3 &&
     s.protoVersion === 3 &&
+    typeof s.nextHeaderKeySend === 'string' &&
+    typeof s.nextHeaderKeyRecv === 'string' &&
     typeof s.rootKey === 'string' &&
     keyOrNull(s.chainKeySend) &&
     keyOrNull(s.chainKeyRecv) &&
@@ -124,11 +126,15 @@ export async function createInitiatorSession(params: {
   myUserId: string;
   peerUserId: string;
   sharedSecret: string; // base64, X3DH root key
+  headerKeyA: string; // base64, X3DH shared_hka (T3.6)
+  nextHeaderKeyB: string; // base64, X3DH shared_nhkb (T3.6)
   theirSignedPreKeyPublicKey: string; // base64, SPK_B from the bundle
 }): Promise<RatchetSessionV2> {
   const session = initInitiatorSession({
     peerUserId: params.peerUserId,
     sharedSecret: params.sharedSecret,
+    headerKeyA: params.headerKeyA,
+    nextHeaderKeyB: params.nextHeaderKeyB,
     theirSignedPreKeyPublicKey: params.theirSignedPreKeyPublicKey,
   });
   await saveSession({ myUserId: params.myUserId, peerUserId: params.peerUserId, session });
@@ -143,11 +149,15 @@ export async function createResponderSession(params: {
   myUserId: string;
   peerUserId: string;
   sharedSecret: string; // base64, X3DH root key
+  headerKeyA: string;
+  nextHeaderKeyB: string;
   signedPreKey: { publicKey: string; privateKey: string };
 }): Promise<RatchetSessionV2> {
   const session = initResponderSession({
     peerUserId: params.peerUserId,
     sharedSecret: params.sharedSecret,
+    headerKeyA: params.headerKeyA,
+    nextHeaderKeyB: params.nextHeaderKeyB,
     signedPreKey: params.signedPreKey,
   });
   await saveSession({ myUserId: params.myUserId, peerUserId: params.peerUserId, session });

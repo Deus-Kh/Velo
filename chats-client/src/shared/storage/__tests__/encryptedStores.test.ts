@@ -34,12 +34,16 @@ const ME = '65f000000000000000000001';
 const PEER = '65f000000000000000000002';
 
 const session: RatchetSessionV2 = {
-  v: 2,
+  v: 3,
   protoVersion: 3,
   peerUserId: PEER,
   rootKey: 'ROOTKEY-b64',
   chainKeySend: 'CKS-b64',
   chainKeyRecv: 'CKR-b64',
+  headerKeySend: 'HKS-b64',
+  headerKeyRecv: null,
+  nextHeaderKeySend: 'NHKS-b64',
+  nextHeaderKeyRecv: 'NHKR-b64',
   Ns: 3,
   Nr: 5,
   PN: 0,

@@ -53,6 +53,11 @@ describe('x3dh (pure, Signal\u2019s four-DH construction since T2.9)', () => {
         oneTimePreKeySecretKey: withOpk ? opkB.secretKey : null,
       });
       expect(responded).toEqual(sessionKeys);
+      // T3.6: the header-encryption seeds come out of the same HKDF block, distinct from SK and from each other.
+      expect(decodeBase64(sessionKeys.headerKeyA).length).toBe(32);
+      expect(decodeBase64(sessionKeys.nextHeaderKeyB).length).toBe(32);
+      expect(sessionKeys.headerKeyA).not.toBe(sessionKeys.nextHeaderKeyB);
+      expect(sessionKeys.headerKeyA).not.toBe(sessionKeys.rootKey);
       expect(initPacket.oneTimePreKeyId).toBe(withOpk ? 9 : null);
       expect(initPacket.signedPreKeyId).toBe(7);
       expect(initPacket.peerUserId).toBe('B');

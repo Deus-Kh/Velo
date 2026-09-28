@@ -32,13 +32,15 @@ const ME = '65f000000000000000000001';
 const PEER = '65f000000000000000000002';
 
 const sharedSecret = encodeBase64(new Uint8Array(32).fill(0xaa));
+const HK_A = encodeBase64(new Uint8Array(32).fill(0xa1));
+const NHK_B = encodeBase64(new Uint8Array(32).fill(0xb2));
 
 function sessions(): { a: RatchetSessionV2; b: RatchetSessionV2 } {
   const spk = nacl.box.keyPair();
   const signedPreKey = { publicKey: encodeBase64(spk.publicKey), privateKey: encodeBase64(spk.secretKey) };
   return {
-    a: initInitiatorSession({ peerUserId: PEER, sharedSecret, theirSignedPreKeyPublicKey: signedPreKey.publicKey }),
-    b: initResponderSession({ peerUserId: ME, sharedSecret, signedPreKey }),
+    a: initInitiatorSession({ headerKeyA: HK_A, nextHeaderKeyB: NHK_B, peerUserId: PEER, sharedSecret, theirSignedPreKeyPublicKey: signedPreKey.publicKey }),
+    b: initResponderSession({ headerKeyA: HK_A, nextHeaderKeyB: NHK_B, peerUserId: ME, sharedSecret, signedPreKey }),
   };
 }
 

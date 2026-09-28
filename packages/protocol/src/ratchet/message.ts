@@ -66,7 +66,12 @@ export function pruneSkippedKeys(session: RatchetSessionV2): RatchetSessionV2 {
     }
   }
 
-  return { ...session, skippedKeys: keys, skippedEpochOrder: kept };
+  // Header keys of evicted epochs go with their skipped keys (T3.6); the current epoch's HKr lives in the session itself.
+  const epochHeaderKeys: Record<string, string> = {};
+  for (const [epoch, hk] of Object.entries(session.epochHeaderKeys ?? {})) {
+    if (kept.includes(epoch) && epoch !== session.DHrPublicKey) epochHeaderKeys[epoch] = hk;
+  }
+  return { ...session, skippedKeys: keys, skippedEpochOrder: kept, epochHeaderKeys };
 }
 
 function requireCounter(value: number, what: string): void {

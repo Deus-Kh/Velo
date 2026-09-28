@@ -30,6 +30,10 @@ export const KEM_SHARED_SECRET_LENGTH = 32;
 export type X3DHSessionKeys = {
   rootKey: string; // base64 32 bytes — the shared secret SK the ratchet starts from
   chainKey: string; // base64 32 bytes — libsignal's second output; unused by the standard bootstrap
+  /** T3.6 header encryption: the initiator's first sending header key (shared_hka in the Double Ratchet spec). */
+  headerKeyA: string; // base64 32 bytes
+  /** T3.6: the responder's first next-header key (shared_nhkb). */
+  nextHeaderKeyB: string; // base64 32 bytes
 };
 
 function concatBytes(arrays: Uint8Array[]): Uint8Array {
@@ -61,8 +65,10 @@ function key(b64: string, what: string): Uint8Array {
 /**
  * Signal's X3DH key derivation:
  *   IKM := 0xFF×32 ‖ DH1 ‖ DH2 ‖ DH3 [‖ DH4] [‖ SS_KEM]
- *   HKDF-SHA256(salt = none, IKM, info = "WhisperText", 64) → SK ‖ chainKey
- * Byte-identical to libsignal for the T2.15 vectors. The optional trailing
+ *   HKDF-SHA256(salt = none, IKM, info = "WhisperText", 128) → SK ‖ chainKey ‖ HK_A ‖ NHK_B
+ * The first 64 bytes are byte-identical to libsignal for the T2.15 vectors
+ * (HKDF expansion is prefix-stable); the next 64 are the header-encryption
+ * seeds of T3.6 (shared_hka, shared_nhkb). The optional trailing
  * KEM shared secret is PQXDH's extension point (T3.5): with it the IKM is
  * exactly PQXDH's `F || DH1..DH4 || SS`; without it nothing changes.
  */
@@ -74,9 +80,14 @@ function deriveSessionKeys(dhParts: Uint8Array[], kemSharedSecret?: Uint8Array |
   }
   const ikm = concatBytes([X3DH_PREFIX, ...parts]);
   wipe(...parts);
-  const okm = hkdfSha256({ ikm, info: INFO_X3DH, length: 64 });
+  const okm = hkdfSha256({ ikm, info: INFO_X3DH, length: 128 });
   wipe(ikm);
-  const out = { rootKey: encodeBase64(okm.slice(0, 32)), chainKey: encodeBase64(okm.slice(32, 64)) };
+  const out = {
+    rootKey: encodeBase64(okm.slice(0, 32)),
+    chainKey: encodeBase64(okm.slice(32, 64)),
+    headerKeyA: encodeBase64(okm.slice(64, 96)),
+    nextHeaderKeyB: encodeBase64(okm.slice(96, 128)),
+  };
   wipe(okm); // T3.4: DH outputs, IKM and the HKDF block are all zeroed
   return out;
 }
