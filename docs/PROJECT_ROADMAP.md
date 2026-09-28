@@ -458,6 +458,8 @@ Extraction happens in T2.1. Secrets (`*.pem`, `*.keystore`, service-account JSON
 
 **6' progress — T6.1 done 2026-09-28** (one commit): Sender Keys in the protocol package (state, distribution record with `deviceId: 0`, signed group messages, bounded skipped keys, replay window, zeroization, frozen vectors); the task definitions T6.1–T6.7 are now in the spec (§7b). Next in order: T6.2 (content envelope inside the pairwise ratchet).
 
+**6' progress — T6.2 done 2026-09-28** (one commit): pairwise plaintext is a versioned content envelope (text, sender-key distribution, request); legacy bare text still reads; control content routed on the client and in the harness. Next in order: T6.3 (server: groups).
+
 **2b progress — T2.14 done 2026-09-28** (one commit, D7 = A): plaintext stored locally in sealed records, message keys never archived, history read from the device with the server asked only for newer messages, one-time migration of the old archive. **The known-red registry is empty: every scenario the harness owns is green.** Remaining in Phase 2: T2.12 (manual two-device checklist, owner).
 
 **2b progress — T2.11 done 2026-09-28** (two commits): bootstrap persists only after the first message decrypts, bootstrap replay refused, glare converges on the lower user id without losing messages, a peer's local reset is adopted automatically. Next in order: T2.14.

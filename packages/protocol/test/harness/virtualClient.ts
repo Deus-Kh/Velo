@@ -9,6 +9,7 @@ import { x3dhInitiate, x3dhRespond, type X3DHInitPacket } from '../../src/handsh
 import { rotateSignedPreKeySet, selectSignedPreKey, signSignedPreKey, type SignedPreKeyRecord, type SignedPreKeySet } from '../../src/handshake/signedPrekey';
 import { normalizeB64 } from '../../src/primitives/base64';
 import { ratchetDecrypt, ratchetEncrypt, type MessageEnvelope, type MessageHeader } from '../../src/ratchet/message';
+import { decodeContent, encodeContent, isControlContent, textContent, type Content } from '../../src/content/envelope';
 import type { AssociatedData } from '../../src/ratchet/envelope';
 import { glareWinner, initInitiatorSession, initResponderSession, sessionHasReceived } from '../../src/ratchet/session';
 import type { RatchetSessionV2 } from '../../src/types/session';
@@ -53,6 +54,8 @@ export class VirtualClient {
   clockSkewMs = 0;
   /** T3.6: the plaintext headers this client sealed, by clientMessageId (the wire carries them encrypted). */
   readonly sentHeaders = new Map<string, MessageHeader>();
+  /** T6.2: control content received over pairwise sessions (sender-key distributions and requests). */
+  readonly controlInbox: Array<{ fromUserId: string; content: Content; serverMessageId: string }> = [];
 
   constructor(
     readonly userId: string,
@@ -335,7 +338,7 @@ export class VirtualClient {
     const session = this.sessionState(peerUserId);
     if (!session) throw new ProtocolError('NO_SESSION', 'No v2 session for this peer');
 
-    const step = ratchetEncrypt(session, text, this.associatedData(peerUserId, 'out'));
+    const step = ratchetEncrypt(session, encodeContent(textContent(text)), this.associatedData(peerUserId, 'out')); // T6.2 envelope
     this.persistStep(peerUserId, step.session);
 
     this.msgCounter += 1;
@@ -351,6 +354,27 @@ export class VirtualClient {
     });
     this.storeMessage(peerUserId, { direction: 'out', text, createdAt: dto.createdAt, seq: dto.seq, serverMessageId: dto.serverMessageId });
     return dto;
+  }
+
+  /** T6.2: send control content over the pairwise session (a sender-key distribution or request). */
+  sendContent(peerUserId: string, content: Content): NewMessageDTO {
+    if (!this.network) throw new Error('client not attached to a network');
+    const initPacket = this.startSession(peerUserId);
+    const session = this.sessionState(peerUserId);
+    if (!session) throw new ProtocolError('NO_SESSION', 'No v2 session for this peer');
+    const step = ratchetEncrypt(session, encodeContent(content), this.associatedData(peerUserId, 'out'));
+    this.persistStep(peerUserId, step.session);
+    this.msgCounter += 1;
+    const clientMessageId = this.userId + '-' + randomUUID();
+    this.sentHeaders.set(clientMessageId, step.header);
+    return this.network.send(this.userId, {
+      toUserId: peerUserId,
+      clientMessageId,
+      createdAt: Date.now() + this.clockSkewMs + this.msgCounter,
+      protoVersion: 4,
+      v4: step.envelope,
+      initPacket,
+    });
   }
 
   /** The realtime message:new handler. Throws ProtocolError like the client's decrypt path. */
@@ -392,6 +416,14 @@ export class VirtualClient {
         plaintext = step.plaintext;
       }
     }
+    // T6.2: the plaintext is a content envelope; control messages never reach the text inbox.
+    const content = decodeContent(plaintext);
+    if (isControlContent(content)) {
+      this.controlInbox.push({ fromUserId: peerUserId, content, serverMessageId: dto.serverMessageId });
+      this.server.ackDelivered(this.userId, dto.serverMessageId);
+      return plaintext;
+    }
+    plaintext = content.text;
     this.inbox.push({ fromUserId: peerUserId, text: plaintext, serverMessageId: dto.serverMessageId });
     this.storeMessage(peerUserId, { direction: 'in', text: plaintext, createdAt: dto.createdAt, seq: dto.seq, serverMessageId: dto.serverMessageId });
     // socket/messaging.ts: the delivered ack goes out only after the message decrypted (T3.1: the server then deletes it).

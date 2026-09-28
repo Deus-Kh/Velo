@@ -98,6 +98,19 @@ export {
 } from './identity/binding';
 export { checkIdentity, requireIdentityMatch, type IdentityCheck } from './identity/trust';
 
+// Phase 6' (T6.2): the content envelope inside the pairwise ratchet
+export {
+  encodeContent,
+  decodeContent,
+  textContent,
+  isControlContent,
+  CONTENT_VERSION,
+  type Content,
+  type TextContent,
+  type SenderKeyDistributionContent,
+  type SenderKeyRequestContent,
+} from './content/envelope';
+
 // Phase 6' groups (T6.1): Sender Keys
 export {
   createSenderKeyState,

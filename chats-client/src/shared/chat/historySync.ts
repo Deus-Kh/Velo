@@ -1,5 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { normalizeB64, protocolErrorCode, type MessageEnvelope, type ProtocolErrorCode } from '@velo/protocol';
+import { normalizeB64, protocolErrorCode, decodeContent, isControlContent, type Content, type MessageEnvelope, type ProtocolErrorCode } from '@velo/protocol';
 import { messagesApi, type HistoryItem, type ReceiptItem } from '../api/messages.api';
 import { patchStoredMessage, storedMessageId, upsertStoredMessage, type StoredMessage } from '../storage/messageStore';
 import { receiveIncoming } from './incoming';
@@ -44,6 +44,8 @@ export type IngestCallbacks = {
   onResetRequired?: (reason: string, code: ProtocolErrorCode) => void;
   /** T4.8: a message that failed for another reason (shown, not swallowed). */
   onDecryptFailure?: (reason: string, code: ProtocolErrorCode) => void;
+  /** T6.2: control content (sender-key distributions and requests) found while ingesting. */
+  onControl?: (content: Content, meta: { fromUserId: string; serverMessageId: string }) => void;
 };
 
 /**
@@ -71,7 +73,13 @@ export async function ingestUndeliveredItems(params: {
     if (!envelope) continue;
     try {
       const r = await receiveIncoming({ myUserId, peerUserId, initPacket: it.initPacket ?? null, encrypted: envelope });
-      const record = toStored(it, 'in', r.plaintext);
+      const content = decodeContent(r.plaintext); // T6.2
+      if (isControlContent(content)) {
+        callbacks?.onControl?.(content, { fromUserId: peerUserId, serverMessageId: it.serverMessageId });
+        acked.push(it.serverMessageId);
+        continue;
+      }
+      const record = toStored(it, 'in', content.text);
       if (record) {
         await upsertStoredMessage({ myUserId, peerUserId, message: record });
         received.push(record);

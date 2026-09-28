@@ -10,7 +10,7 @@ import { loadSession } from '../storage/sessionStore';
 import { encryptAndPersist } from '../chat/ratchetAdapter';
 import { receiveIncoming } from '../chat/incoming';
 import { reportDecryptFailure } from '../api/telemetry.api';
-import { ProtocolError, protocolErrorCode, type ProtocolErrorCode, type RatchetSessionV2 } from '@velo/protocol';
+import { ProtocolError, protocolErrorCode, type ProtocolErrorCode, type RatchetSessionV2, encodeContent, decodeContent, isControlContent, textContent, type Content } from '@velo/protocol';
 import type { X3DHInitPacket } from '../crypto/x3dh';
 
 function requireMyUserId(): string {
@@ -47,7 +47,7 @@ export async function sendMessageV2(params: {
     myUserId,
     peerUserId: params.toUserId,
     session: session as RatchetSessionV2,
-    plaintext: params.plaintext,
+    plaintext: encodeContent(textContent(params.plaintext)), // T6.2: content envelope
   });
 
   const dto: SendMessageDTO = {
@@ -88,6 +88,8 @@ export async function subscribeToMessages(onMessage: (m: {
 }) => void, options?: {
   peerUserId?: string;
   onFailure?: (reason: string, code: ProtocolErrorCode | null) => void;
+  /** T6.2: control content (sender-key distributions and requests) decrypted on this session. */
+  onControl?: (content: Content, meta: { fromUserId: string; serverMessageId: string }) => void;
 }): Promise<() => void> {
   const socket = await ensureSocketConnected();
 
@@ -117,9 +119,17 @@ export async function subscribeToMessages(onMessage: (m: {
         encrypted: msg.v4,
       });
       
+      // T6.2: the plaintext is a content envelope; control messages take their own path and are still acked.
+      const content = decodeContent(plaintext);
+      if (isControlContent(content)) {
+        options?.onControl?.(content, { fromUserId: msg.fromUserId, serverMessageId: msg.serverMessageId });
+        socket.emit('message:delivered', { serverMessageId: msg.serverMessageId }, () => {});
+        return;
+      }
+
       onMessage({
         fromUserId: msg.fromUserId,
-        text: plaintext,
+        text: content.text,
         serverMessageId: msg.serverMessageId,
         clientMessageId: msg.clientMessageId,
         createdAt: msg.createdAt,
