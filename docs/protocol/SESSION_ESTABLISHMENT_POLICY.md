@@ -203,6 +203,7 @@ If local session does not exist and history item has no `initPacket`:
 Current policy:
 
 - attach `initPacket` only on first send that creates the local session
+- (T2.11) an `initPacket` for a peer that already has a session is not ignored: it means the peer built its own session (glare, or a local reset on the peer). A candidate session is built from it and must decrypt the accompanying message; only then is anything persisted. See §8.
 
 ### Rule 7.3
 
@@ -220,6 +221,13 @@ If future architecture introduces a separate bootstrap/session entity, this poli
 ---
 
 ## 8. Broken Session Rules
+
+### Resolution before anything is called broken (T2.11)
+
+- **Bootstrap:** the responder session is persisted only after the first message decrypts (R7); the one-time prekey secret is deleted only after that; the packet's ephemeral key is remembered and a replay is `REPLAY_DETECTED`. A packet whose message does not decrypt leaves no trace.
+- **Glare** (both sides bootstrapped at once; our session has never received): the lower user id's session wins, deterministically on both sides. The winner keeps its session and keeps the peer's as a decrypt-only *secondary* until the peer sends on the winner's session; the loser adopts the peer's session. No message is lost and no reset is needed.
+- **Peer reset** (our session has received before, a new packet arrives whose message decrypts under the candidate): the peer reset locally and re-initiated; adopt its session. A packet that does not decrypt changes nothing (`DECRYPT_FAILED`).
+- **Reinstall** (identity changed): `IDENTITY_MISMATCH`, sending blocked until the user verifies or accepts; accepting drops the stale session.
 
 A session should be considered `broken` when one of these is true:
 

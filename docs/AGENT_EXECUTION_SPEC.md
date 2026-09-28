@@ -613,12 +613,14 @@ Implement §8.1 step 2 exactly. `pn` is read in exactly one place.
 ---
 
 ## T2.11 — Glare, peer reinstall, and OPK lifecycle
-**Tier** CORE · **Fixes** P1-11 · **Est** 2d · **Depends** T2.13
+**Tier** CORE · **Fixes** P1-11 · **Est** 2d · **Depends** T2.13 · **Status:** done 2026-09-28 (two commits)
 
 - Inbound `initPacket` while a session exists and the identity **matches** the pin: if the local session has never decrypted anything from the peer, both sides tie-break deterministically (the lower user id's session wins; the other side re-bootstraps from the peer's packet). Otherwise surface `SESSION_RESET_REQUIRED` with the Reset affordance.
 - Delete the OPK secret only after the responder session is persisted; delete OPK secrets referenced by ignored packets.
 
 **Acceptance:** S10 and S17 pass without manual reset; no OPK secret remains for a consumed key id after the session is persisted.
+
+**Status 2026-09-28:** done. (1) Bootstrap lifecycle (`chat/incoming.ts`, harness mirror): authenticate the initiator, refuse a replayed packet (bounded cache of used ephemeral keys, `storage/bootstrapReplayCache.ts`), build a candidate responder session, decrypt the accompanying message, and only then persist keys and session, delete the one-time prekey secret and remember the packet; a packet whose message does not decrypt leaves no session and keeps its secret (deleting on failure would let an attacker burn the pool — deviation from "delete OPK secrets referenced by ignored packets", recorded). `x3dhRespond` no longer deletes the secret itself. S24. (2) Resolution of a packet against an existing session: glare (our session never received) → the lower user id's session wins on both sides; the winner keeps its session and stores the peer's as a decrypt-only **secondary** (`session:v2:<me>:<peer>:secondary`, sealed like the primary) so the loser's in-flight messages still decrypt; the loser adopts; the secondary is retired on the first primary success from the peer. Established session + new packet whose message decrypts under the candidate → the peer reset locally and re-initiated: adopt (the decrypt proves the pinned identity; no manual reset on this side). S23 (glare, loser's two in-flight messages decrypt, convergence) and S25 (peer reset adopted; bogus packet leaves the session untouched); S10 now passes without any `resetSession` call. DEVIATION-7 added: a single secondary session instead of Signal's list of previous session states.
 
 ---
 
@@ -796,6 +798,7 @@ Canonical list in T2.4. Each scenario file states the checklist row it automates
 | `DEVIATION-4` | Skipped keys bounded by count *and* epoch (`MAX_SKIP_TOTAL = 1000`, `MAX_SKIP_EPOCHS = 5`, per-step gap 100) | DoS resistance with multi-epoch tolerance | **Active since 2026-09-28 (T2.6)** |
 | `DEVIATION-5` | Two identity keys (Ed25519 signing + X25519 DH) bound by a signature, versus Signal's single Curve25519 identity with XEdDSA; the safety number hashes `IK_sign || IK_dh` (64 bytes, no type byte) where libsignal hashes `0x05 || key` | avoids a new signature scheme; binding is verified on every bundle and `initPacket`; the fingerprint construction itself is libsignal's and is vector-tested with libsignal's key encoding | **Active since 2026-09-28 (T2.13, D10)** |
 | `DEVIATION-6` | Random 24-byte AEAD nonce instead of a KDF-derived nonce | — | **Removed by T2.5 (2026-09-28): the nonce is derived from the message key with `WhisperMessageKeys`, as in Signal.** |
+| `DEVIATION-7` | Glare keeps one decrypt-only secondary session on the winner's side until the peer switches, where libsignal keeps a list of previous session states per address | bounded state, deterministic tie-break (lower user id), no lost in-flight messages | **Active since 2026-09-28 (T2.11)** |
 
 ## 8.6 Glossary
 **IK** identity key · **SPK** signed prekey · **OPK** one-time prekey · **EK** ephemeral key · **RK/CK/MK** root/chain/message key · **DHs/DHr** self/remote ratchet keys · **Ns/Nr/PN** counters · **AD** associated data · **binding signature** Ed25519 signature by IK_sign over IK_dh · **pin** the locally stored identity of a peer.

@@ -8,6 +8,11 @@ function sessionKey(myUserId: string, peerUserId: string) {
   return `session:v2:${myUserId}:${peerUserId}`;
 }
 
+/** T2.11 glare: the peer's session kept for decryption only until the peer has switched to ours. */
+function secondaryKey(myUserId: string, peerUserId: string) {
+  return `session:v2:${myUserId}:${peerUserId}:secondary`;
+}
+
 /**
  * Only the T2.0 format (`v: 2`, standard bootstrap) speaking wire version 3
  * (T2.5) is loadable. Anything older is discarded so the pair re-bootstraps
@@ -90,7 +95,24 @@ export async function deleteSession(params: {
   myUserId: string;
   peerUserId: string;
 }): Promise<void> {
-  await AsyncStorage.removeItem(sessionKey(params.myUserId, params.peerUserId));
+  await AsyncStorage.multiRemove([sessionKey(params.myUserId, params.peerUserId), secondaryKey(params.myUserId, params.peerUserId)]);
+}
+
+export async function loadSecondarySession(params: { myUserId: string; peerUserId: string }): Promise<AnySession | null> {
+  const raw = await AsyncStorage.getItem(secondaryKey(params.myUserId, params.peerUserId));
+  if (!raw || !looksSealed(raw)) return null;
+  const mk = await getOrCreateSessionMasterKey(params.myUserId);
+  const session = openJson<AnySession>(mk, raw);
+  return session && isSessionShape(session) ? session : null;
+}
+
+export async function saveSecondarySession(params: { myUserId: string; peerUserId: string; session: AnySession }): Promise<void> {
+  const mk = await getOrCreateSessionMasterKey(params.myUserId);
+  await AsyncStorage.setItem(secondaryKey(params.myUserId, params.peerUserId), sealJson(mk, params.session));
+}
+
+export async function deleteSecondarySession(params: { myUserId: string; peerUserId: string }): Promise<void> {
+  await AsyncStorage.removeItem(secondaryKey(params.myUserId, params.peerUserId));
 }
 
 /**

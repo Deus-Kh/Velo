@@ -6,6 +6,8 @@
  * and P0-9 (the reinstalled peer has a new identity: the other side must
  * see IDENTITY_MISMATCH and accept the new identity before continuing).
  * Expected before fixes: FAIL. After T2.13: pass. (Flipped green by T2.13.)
+ * Since T2.11 no manual session reset is needed on either side: accepting
+ * the new identity drops A's stale session, and B has none.
  */
 import { describe, expect, it } from 'vitest';
 import { codeOf, makeWorld } from '../harness';
@@ -18,36 +20,34 @@ function wipeAndFailOnce(opts: { oneTimePreKeys: number }) {
   A!.send('B', 'before wipe');
   B!.send('A', 'ack');
 
+  // B reinstalls: local state gone. Before B has registered again, a message from A
+  // finds no session on B and (since T2.13) the server attaches nothing.
   B!.wipe();
-  B!.register(); // reinstall: fresh identity, signed prekey and one-time prekeys
-  expect(B!.hasSession('A')).toBe(false);
-  // The server told A that B's identity changed (they share a conversation).
-  expect(A!.identityChanges).toEqual(['B']);
-
-  // A still has its session and sends without an initPacket; B has no
-  // session and (since T2.13) the server attaches nothing.
   network.hold('B');
   A!.send('B', 'lost');
   const [lost] = network.release('B');
   expect(lost!.ok).toBe(false);
   expect(lost!.ok ? null : lost!.code, 'a message without a session must fail loudly, not silently').toBe('MISSING_BOOTSTRAP');
 
-  A!.resetSession('B');
-  B!.resetSession('A');
+  // B registers again with a fresh identity, signed prekey and one-time prekeys;
+  // the server tells A that B's identity changed (they share a conversation).
+  B!.register();
+  expect(B!.hasSession('A')).toBe(false);
+  expect(A!.identityChanges).toEqual(['B']);
   return w;
 }
 
 describe('S10 wipe one client, reset, recover', () => {
-  it('after a reinstall, A is blocked by the changed identity until it accepts, then recovers on fresh prekeys', () => {
+  it('after a reinstall, A is blocked by the changed identity until it accepts, then recovers on fresh prekeys — no manual reset', () => {
     const { server, clients } = wipeAndFailOnce({ oneTimePreKeys: 10 });
     const { A, B } = clients;
 
     // B's pre-reinstall prekeys are gone from the server (P1-11).
     expect(server.unusedOneTimePreKeyCount('B')).toBe(10);
 
-    // A's pin still names B's old identity: the new bundle is refused.
+    // A was told B's identity changed: sending is blocked until the user accepts (the client's identity_changed state).
     expect(codeOf(() => A!.send('B', 'recovered')), 'the reinstalled peer’s new identity must not be accepted silently').toBe('IDENTITY_MISMATCH');
-    expect(A!.hasSession('B')).toBe(false);
+    expect(A!.hasSession('B'), 'the stale session is dropped only when the user accepts the new identity').toBe(true);
 
     // The user compares safety numbers and accepts the new identity.
     A!.acceptNewIdentity('B');
