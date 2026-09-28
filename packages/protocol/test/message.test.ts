@@ -153,6 +153,45 @@ describe('ratchetEncrypt / ratchetDecrypt', () => {
     expect(() => ratchetDecrypt(b, envelopes[MAX_SKIP + 5]!)).toThrow('Replay or unknown old message');
   });
 
+  it('a previous-epoch message arriving after the next epoch decrypts from a key drained via pn (T2.7 + T2.8)', () => {
+    let { a, b } = pair();
+    const e0 = ratchetEncrypt(a, 'a0');
+    a = e0.session;
+    b = ratchetDecrypt(b, e0.envelope).session; // B ratchets (B0)
+    const eb0 = ratchetEncrypt(b, 'b0');
+    b = eb0.session;
+    a = ratchetDecrypt(a, eb0.envelope).session; // A ratchets: epoch A1
+
+    const a1 = ratchetEncrypt(a, 'a1'); // A1, n = 0
+    a = a1.session;
+    const a1b = ratchetEncrypt(a, 'a1b'); // A1, n = 1 — delivered last
+    a = a1b.session;
+
+    b = ratchetDecrypt(b, a1.envelope).session; // B ratchets (B1)
+    const eb1 = ratchetEncrypt(b, 'b1');
+    b = eb1.session;
+    a = ratchetDecrypt(a, eb1.envelope).session; // A ratchets: epoch A2
+    const a2 = ratchetEncrypt(a, 'a2'); // A2, n = 0, pn = 2
+    expect(a2.envelope.header.pn).toBe(2);
+    expect(a2.envelope.header.dhPub).not.toBe(a1.envelope.header.dhPub);
+
+    // B receives a2 first: drains epoch A1 to pn = 2 (a1b's key retained), ratchets, decrypts.
+    const d2 = ratchetDecrypt(b, a2.envelope);
+    expect(d2.plaintext).toBe('a2');
+    expect(Object.keys(d2.session.skippedKeys ?? {})).toEqual([skippedKeyId(a1.envelope.header.dhPub, 1)]);
+    expect(d2.derivedKeys).toEqual([
+      { direction: 'in', dhPub: a1.envelope.header.dhPub, n: 1, messageKeyB64: a1b.derivedKeys[0]!.messageKeyB64 },
+      { direction: 'in', dhPub: a2.envelope.header.dhPub, n: 0, messageKeyB64: a2.derivedKeys[0]!.messageKeyB64 },
+    ]);
+    b = d2.session;
+
+    // The late a1b now decrypts from the retained key.
+    const d1b = ratchetDecrypt(b, a1b.envelope);
+    expect(d1b.plaintext).toBe('a1b');
+    expect(d1b.consumedSkippedKeyId).toBe(skippedKeyId(a1.envelope.header.dhPub, 1));
+    expect(Object.keys(d1b.session.skippedKeys ?? {})).toHaveLength(0);
+  });
+
   it('never adopts a peer key without ratcheting: the root key changes on every new peer key (R13)', () => {
     let { a, b } = pair();
     const roots = new Set<string>([a.rootKey, b.rootKey]);

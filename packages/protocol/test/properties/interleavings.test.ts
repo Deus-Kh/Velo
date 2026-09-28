@@ -1,25 +1,36 @@
 /**
  * Property: over random interleavings of sends and deliveries, every message
  * decrypts exactly once and nothing throws, as long as no receiver gap
- * exceeds MAX_SKIP. Since T2.0 the traffic crosses epochs, so this needs
- * skipped keys kept across a ratchet step (T2.7) and the previous chain
- * drained to header.pn (T2.8); red until both land. The Phase 2 exit gate
- * raises RUNS to 10,000.
+ * exceeds MAX_SKIP. Since T2.0 the traffic crosses epochs; skipped keys
+ * survive ratchet steps (T2.7) and the previous chain is drained to
+ * header.pn (T2.8), so late old-epoch messages decrypt.
+ *
+ * Budget: worlds are reused (sessions reset per run) because a fresh world
+ * costs ~36 ms in pure-JS X25519. PROPERTY_RUNS raises the run count for
+ * the Phase 2 exit gate (10,000).
  */
 import { describe, expect, it } from 'vitest';
 import { MAX_SKIP } from '../../src/ratchet/message';
 import { makeWorld, rng } from '../harness';
 
-const RUNS = 300;
+const RUNS = Number(process.env.PROPERTY_RUNS ?? 300);
 const STEPS = 40;
+const WORLDS = 10;
 
 describe('property: random interleavings', () => {
-  it.fails('every message decrypts exactly once; no ProtocolError; skipped keys bounded', () => {
+  it('every message decrypts exactly once; no ProtocolError; skipped keys bounded', () => {
+    const worlds = Array.from({ length: WORLDS }, () => makeWorld(['A', 'B'], { oneTimePreKeys: Math.ceil(RUNS / WORLDS) + 1 }));
+
     for (let run = 0; run < RUNS; run += 1) {
       const seed = 1000 + run;
       const rand = rng(seed);
-      const { network, clients } = makeWorld();
+      const { network, clients } = worlds[run % WORLDS]!;
       const { A, B } = clients;
+      A!.resetSession('B');
+      B!.resetSession('A');
+      A!.inbox.length = 0;
+      B!.inbox.length = 0;
+      network.log.length = 0;
       const sent: Record<string, string[]> = { A: [], B: [] };
 
       A!.send('B', 'A#0');
@@ -47,11 +58,11 @@ describe('property: random interleavings', () => {
       network.release('B');
 
       const failures = network.log.filter((l) => !l.ok);
-      expect(failures, 'seed ' + String(seed) + ': late old-epoch messages are lost until T2.7/T2.8: ' + JSON.stringify(failures.map((f) => (f.ok ? null : f.code)))).toEqual([]);
+      expect(failures, 'seed ' + String(seed) + ': ' + JSON.stringify(failures.map((f) => (f.ok ? null : f.code)))).toEqual([]);
       expect(B!.inbox.map((m) => m.text).sort(), 'seed ' + String(seed)).toEqual([...sent.A!].sort());
       expect(A!.inbox.map((m) => m.text).sort(), 'seed ' + String(seed)).toEqual([...sent.B!].sort());
       expect(Object.keys(A!.sessionState('B')!.skippedKeys ?? {}).length).toBeLessThanOrEqual(MAX_SKIP);
       expect(Object.keys(B!.sessionState('A')!.skippedKeys ?? {}).length).toBeLessThanOrEqual(MAX_SKIP);
     }
-  }, 30_000);
+  }, 120_000);
 });

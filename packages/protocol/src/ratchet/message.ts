@@ -122,10 +122,11 @@ export function ratchetEncrypt(
  * `session`. On any throw the caller must persist nothing (R7).
  *
  *  1. skipped-key fast path;
- *  2. if the peer's ratchet key is new (or there is none yet), perform a
- *     full DH ratchet step — never merely adopt the key (R13);
+ *  2. if the peer's ratchet key is new (or there is none yet): drain the
+ *     previous receiving chain to header.pn into the skipped keys (T2.8),
+ *     then perform a full DH ratchet step — never merely adopt (R13);
  *  3. derive forward on the current receiving chain to header.n, keeping
- *     the skipped keys;
+ *     the skipped keys (T2.7);
  *  4-6. derive the target key, authenticate, commit.
  */
 export function ratchetDecrypt(session: RatchetSessionV2, envelope: V2Encrypted): RatchetDecryptResult {
@@ -133,23 +134,39 @@ export function ratchetDecrypt(session: RatchetSessionV2, envelope: V2Encrypted)
   const targetN = envelope.header.n;
 
   // 1. Skipped-key fast path.
-  const skipped: Record<string, string> = { ...(session.skippedKeys || {}) };
+  const retained: Record<string, string> = { ...(session.skippedKeys || {}) };
   const skippedId = skippedKeyId(incomingDhPub, targetN);
-  const skippedKey = skipped[skippedId];
+  const skippedKey = retained[skippedId];
   if (skippedKey) {
     const plaintext = openWithMessageKey(skippedKey, envelope);
-    delete skipped[skippedId];
+    delete retained[skippedId];
     return {
-      session: { ...session, skippedKeys: skipped },
+      session: { ...session, skippedKeys: retained },
       plaintext,
       derivedKeys: [{ direction: 'in', dhPub: incomingDhPub, n: targetN, messageKeyB64: skippedKey }],
       consumedSkippedKeyId: skippedId,
     };
   }
 
-  // 2. New peer ratchet key → DH ratchet step (R13).
+  const derivedKeys: DerivedMessageKey[] = [];
   let work = session;
+
+  // 2. New peer ratchet key: drain the old chain to header.pn (T2.8), then ratchet (R13).
   if (!work.DHrPublicKey || work.DHrPublicKey !== incomingDhPub) {
+    if (work.DHrPublicKey && work.chainKeyRecv) {
+      let oldCk = decodeBase64(work.chainKeyRecv);
+      let oldNr = work.Nr;
+      while (oldNr < envelope.header.pn) {
+        const step = chainKdf(oldCk);
+        const mkB64 = encodeBase64(step.messageKey);
+        if (Object.keys(retained).length < MAX_SKIP) {
+          retained[skippedKeyId(work.DHrPublicKey, oldNr)] = mkB64;
+        }
+        derivedKeys.push({ direction: 'in', dhPub: work.DHrPublicKey, n: oldNr, messageKeyB64: mkB64 });
+        oldCk = step.nextChainKey;
+        oldNr += 1;
+      }
+    }
     work = dhRatchet(work, incomingDhPub);
   }
   if (!work.chainKeyRecv) {
@@ -162,8 +179,6 @@ export function ratchetDecrypt(session: RatchetSessionV2, envelope: V2Encrypted)
   }
 
   // 3–4. Derive forward to the target, retaining skipped keys.
-  const derivedKeys: DerivedMessageKey[] = [];
-  const retained: Record<string, string> = { ...(work.skippedKeys || {}) };
   let ck = decodeBase64(work.chainKeyRecv);
   let nr = work.Nr;
   let messageKey: Uint8Array | null = null;
