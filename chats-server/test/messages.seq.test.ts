@@ -17,16 +17,17 @@ let C: Awaited<ReturnType<typeof createUser>>;
 let sa: Socket;
 let sb: Socket;
 
-const v3Payload = (n: number) => ({
-  header: { n, pn: 0, dhPub: 'D'.repeat(44) },
-  ciphertext: 'C'.repeat(64),
+const encHeaderB64 = Buffer.alloc(85, 7).toString('base64'); // T3.6: fixed-size encrypted header
+const v4Payload = (n: number) => ({
+  encHeader: encHeaderB64,
+  ciphertext: 'C'.repeat(48) + String(n).padStart(16, 'C'),
   mac: 'M'.repeat(24),
 });
 
 type SendAck = { ok: boolean; serverMessageId: string; seq: number };
 
 function send(socket: Socket, toUserId: string, clientMessageId: string, createdAt: number, n = 0) {
-  return emitAck<SendAck>(socket, 'message:send', { toUserId, clientMessageId, createdAt, protoVersion: 3, v3: v3Payload(n) });
+  return emitAck<SendAck>(socket, 'message:send', { toUserId, clientMessageId, createdAt, protoVersion: 4, v4: v4Payload(n) });
 }
 
 beforeAll(async () => {
@@ -85,5 +86,12 @@ describe('T3.2 sequence numbers', () => {
     expect(idx).toBeDefined();
     expect((idx as any).unique).toBe(true);
     expect((idx as any).partialFilterExpression).toEqual({ seq: { $type: 'number' } });
+  });
+
+  it('refuses the previous wire version and a malformed encrypted header (T3.6)', async () => {
+    const old = await emitAck<{ ok: boolean; code: string }>(sa, 'message:send', { toUserId: B.userId, clientMessageId: 'old-1', createdAt: Date.now(), protoVersion: 3, v3: { header: { n: 0, pn: 0, dhPub: 'D'.repeat(44) }, ciphertext: 'C'.repeat(64), mac: 'M'.repeat(24) } });
+    expect(old).toMatchObject({ ok: false, code: 'UNSUPPORTED_PROTO_VERSION' });
+    const short = await emitAck<{ ok: boolean; error: string }>(sa, 'message:send', { toUserId: B.userId, clientMessageId: 'bad-1', createdAt: Date.now(), protoVersion: 4, v4: { encHeader: Buffer.alloc(84, 7).toString('base64'), ciphertext: 'C'.repeat(64), mac: 'M'.repeat(24) } });
+    expect(short).toMatchObject({ ok: false, error: 'Invalid v4 payload' });
   });
 });

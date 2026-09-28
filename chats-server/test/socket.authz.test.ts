@@ -21,8 +21,9 @@ let sb: Socket;
 let sc: Socket;
 let serverMessageId: string;
 
-const v3Payload = () => ({
-  header: { n: 0, pn: 0, dhPub: 'D'.repeat(44) },
+const encHeaderB64 = Buffer.alloc(85, 7).toString('base64'); // T3.6: fixed-size encrypted header
+const v4Payload = () => ({
+  encHeader: encHeaderB64,
   ciphertext: 'C'.repeat(64),
   mac: 'M'.repeat(24),
 });
@@ -45,8 +46,8 @@ beforeAll(async () => {
     toUserId: B.userId,
     clientMessageId: 'cm-1',
     createdAt: Date.now(),
-    protoVersion: 3,
-    v3: v3Payload(),
+    protoVersion: 4,
+    v4: v4Payload(),
   });
   expect(ack.ok).toBe(true);
   serverMessageId = ack.serverMessageId;
@@ -67,12 +68,12 @@ describe('handshake', () => {
 describe('message:send', () => {
   it('refuses self-send and unknown recipients', async () => {
     const self = await emitAck<{ ok: boolean; code: string }>(sa, 'message:send', {
-      toUserId: A.userId, clientMessageId: 'cm-self', createdAt: Date.now(), protoVersion: 3, v3: v3Payload(),
+      toUserId: A.userId, clientMessageId: 'cm-self', createdAt: Date.now(), protoVersion: 4, v4: v4Payload(),
     });
     expect(self).toMatchObject({ ok: false, code: 'SELF_SEND' });
 
     const ghost = await emitAck<{ ok: boolean; code: string }>(sa, 'message:send', {
-      toUserId: '65f0000000000000000000ff', clientMessageId: 'cm-ghost', createdAt: Date.now(), protoVersion: 3, v3: v3Payload(),
+      toUserId: '65f0000000000000000000ff', clientMessageId: 'cm-ghost', createdAt: Date.now(), protoVersion: 4, v4: v4Payload(),
     });
     expect(ghost).toMatchObject({ ok: false, code: 'NOT_FOUND' });
   });

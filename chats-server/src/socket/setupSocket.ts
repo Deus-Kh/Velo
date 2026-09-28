@@ -13,20 +13,18 @@ import { UserModel } from "../models/User";
 
 /** Maximum encrypted message body accepted over the socket (P0-5 storage-flood control). */
 const MAX_CIPHERTEXT_BYTES = 64 * 1024;
-/** Message counters are bounded far below u32 (spec T2.6); mirrors packages/protocol MAX_MESSAGE_NUMBER. */
-const MAX_MESSAGE_NUMBER = 2 ** 24;
+/**
+ * T3.6: the encrypted header is fixed-size: 24-byte nonce + 16-byte Poly1305 tag + 45-byte canonical
+ * header (u8 version | u32 dhPubLen | 32-byte dhPub | u32 n | u32 pn). Mirrors packages/protocol ENCRYPTED_HEADER_LENGTH.
+ * The server cannot see counters any more, so the counter bound is the receiver's (spec T2.6).
+ */
+const ENCRYPTED_HEADER_BYTES = 24 + 16 + 45;
 /** Same bound expressed as base64 characters (4 chars per 3 bytes, padded). */
 const MAX_CIPHERTEXT_B64_LENGTH = Math.ceil(MAX_CIPHERTEXT_BYTES / 3) * 4;
 
-type V2Header = {
-  n: number;
-  pn: number;
-  dhPub: string; // base64 X25519 public key
-};
-
-/** Wire v3 envelope (T2.5): no nonce on the wire, MAC over identities + canonical header + ciphertext. */
-type V3Payload = {
-  header: V2Header;
+/** Wire v4 envelope (T3.6): encrypted header, secretbox payload, MAC over identities + encrypted header + ciphertext. Three opaque strings. */
+type V4Payload = {
+  encHeader: string;
   ciphertext: string;
   mac: string;
 };
@@ -35,8 +33,8 @@ type SendMessageDTO = {
   toUserId: string;
   clientMessageId: string;
   createdAt: number;
-  protoVersion?: 3;
-  v3?: V3Payload | null; // v3 envelope (T2.5)
+  protoVersion?: 4;
+  v4?: V4Payload | null; // v4 envelope (T3.6)
   replyTo?: {
     serverMessageId?: string | null;
     clientMessageId?: string | null;
@@ -54,6 +52,15 @@ type SendMessageDTO = {
 
 function isNonEmptyString(v: unknown, minLen = 1): v is string {
   return typeof v === "string" && v.length >= minLen;
+}
+
+/** A v4 encrypted header decodes to exactly ENCRYPTED_HEADER_BYTES (T3.6). */
+function isEncryptedHeader(v: string): boolean {
+  try {
+    return Buffer.from(v, "base64").length === ENCRYPTED_HEADER_BYTES;
+  } catch {
+    return false;
+  }
 }
 
 function isValidObjectIdString(v: unknown): v is string {
@@ -193,7 +200,7 @@ export function setupSocket(io: Server) {
         }
 
         const protoVersion = dto?.protoVersion ?? 0;
-        if (protoVersion !== 3) {
+        if (protoVersion !== 4) {
           console.warn("[socket] reject message: unsupported protoVersion", {
             protoVersion: dto?.protoVersion,
             from: userId,
@@ -201,39 +208,31 @@ export function setupSocket(io: Server) {
           return ack?.({
             ok: false,
             code: "UNSUPPORTED_PROTO_VERSION",
-            error: "Only protoVersion 3 is supported",
+            error: "Only protoVersion 4 is supported",
           });
         }
 
-        const v3 = dto.v3;
+        const v4 = dto.v4;
         if (
-          !v3 ||
-          !v3.header ||
-          typeof v3.header.n !== "number" ||
-          typeof v3.header.pn !== "number" ||
-          !Number.isInteger(v3.header.n) ||
-          !Number.isInteger(v3.header.pn) ||
-          v3.header.n < 0 ||
-          v3.header.pn < 0 ||
-          v3.header.n >= MAX_MESSAGE_NUMBER ||
-          v3.header.pn >= MAX_MESSAGE_NUMBER ||
-          !isNonEmptyString(v3.header.dhPub, 20) ||
-          !isNonEmptyString(v3.ciphertext, 8) ||
-          !isNonEmptyString(v3.mac, 8)
+          !v4 ||
+          !isNonEmptyString(v4.encHeader, 8) ||
+          !isEncryptedHeader(v4.encHeader) ||
+          !isNonEmptyString(v4.ciphertext, 8) ||
+          !isNonEmptyString(v4.mac, 8)
         ) {
-          console.warn("[socket] reject message: invalid v3 payload", {
-            hasV3: !!dto.v3,
-            header: dto.v3?.header,
-            cipherLen: dto.v3?.ciphertext?.length,
-            macLen: dto.v3?.mac?.length,
+          console.warn("[socket] reject message: invalid v4 payload", {
+            hasV4: !!dto.v4,
+            encHeaderLen: dto.v4?.encHeader?.length,
+            cipherLen: dto.v4?.ciphertext?.length,
+            macLen: dto.v4?.mac?.length,
           });
-          return ack?.({ ok: false, error: "Invalid v3 payload" });
+          return ack?.({ ok: false, error: "Invalid v4 payload" });
         }
 
-        if (v3.ciphertext.length > MAX_CIPHERTEXT_B64_LENGTH) {
+        if (v4.ciphertext.length > MAX_CIPHERTEXT_B64_LENGTH) {
           console.warn("[socket] reject message: ciphertext too large", {
             from: userId,
-            cipherLen: v3.ciphertext.length,
+            cipherLen: v4.ciphertext.length,
           });
           return ack?.({
             ok: false,
@@ -288,7 +287,7 @@ export function setupSocket(io: Server) {
           fromUserId: userId,
           toUserId: dto.toUserId,
           protoVersion,
-          v3,
+          v4,
           replyTo: dto.replyTo ?? null,
           initPacket: dto.initPacket ?? null,
           clientMessageId: dto.clientMessageId,
@@ -335,7 +334,7 @@ export function setupSocket(io: Server) {
           fromUserId: String(userId),
           toUserId: String(dto.toUserId),
           protoVersion,
-          v3: doc.v3,
+          v4: doc.v4,
           replyTo: (doc as any).replyTo ?? null,
           initPacket: initPacketToSend,
           clientMessageId: dto.clientMessageId,
@@ -355,7 +354,7 @@ export function setupSocket(io: Server) {
           fromUserId: String(userId),
           toUserId: String(dto.toUserId),
           protoVersion,
-          v3: doc.v3,
+          v4: doc.v4,
           replyTo: (doc as any).replyTo ?? null,
           initPacket: initPacketToSend,
           clientMessageId: dto.clientMessageId,

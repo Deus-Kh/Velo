@@ -24,7 +24,7 @@ beforeEach(() => {
   vi.restoreAllMocks();
 });
 
-const envelope = (n: number) => ({ header: { n, pn: 0, dhPub: 'DH'.padEnd(44, 'A') }, ciphertext: 'CT'.padEnd(64, 'B'), mac: 'M'.padEnd(24, 'C') });
+const envelope = (n: number) => ({ encHeader: Buffer.alloc(85, n + 1).toString('base64'), ciphertext: 'CT'.padEnd(64, 'B'), mac: 'M'.padEnd(24, 'C') });
 
 async function storeMessage(from: string, to: string, n: number, createdAt: number) {
   const { MessageModel } = await import('../src/models/Message');
@@ -34,8 +34,8 @@ async function storeMessage(from: string, to: string, n: number, createdAt: numb
     conversationId: makeConversationId(from, to),
     fromUserId: new Types.ObjectId(from),
     toUserId: new Types.ObjectId(to),
-    protoVersion: 3,
-    v3: envelope(n),
+    protoVersion: 4,
+    v4: envelope(n),
     initPacket: n === 0 ? { peerUserId: to, ephPublicKey: 'E'.padEnd(44, 'E'), signedPreKeyId: 1, oneTimePreKeyId: 7, initiatorIdentityDhPublicKey: 'I'.padEnd(44, 'I') } : null,
     clientMessageId: `${from}-${n}`,
     createdAtClient: createdAt,
@@ -65,7 +65,7 @@ describe('T3.1 delete-on-delivery', () => {
     expect(forB.status).toBe(200);
     expect(forB.body.items.map((i: any) => i.serverMessageId)).toEqual([m0, m1]);
     expect(forB.body.items[0].initPacket).not.toBeNull();
-    expect(forB.body.items[0].v3.ciphertext).toBe(envelope(0).ciphertext);
+    expect(forB.body.items[0].v4.ciphertext).toBe(envelope(0).ciphertext);
 
     const forA = await get(`/messages/undelivered?peerUserId=${b.userId}`, tokenFor(a.userId));
     expect(forA.body.items).toEqual([]);
@@ -85,7 +85,7 @@ describe('T3.1 delete-on-delivery', () => {
     expect(ack.body.results[id]).toBe('delivered');
 
     const doc = (await rawDoc(id)) as any;
-    expect(doc.v3).toBeUndefined();
+    expect(doc.v4).toBeUndefined();
     expect(doc.initPacket).toBeUndefined();
     expect(doc.status).toBe('delivered');
     expect(typeof doc.deliveredAt).toBe('number');
@@ -118,7 +118,7 @@ describe('T3.1 delete-on-delivery', () => {
     expect(Object.values(bogus.body.results)).toEqual(['BAD_ID', 'NOT_FOUND']);
 
     const doc = (await rawDoc(id)) as any;
-    expect(doc.v3.ciphertext).toBe(envelope(0).ciphertext);
+    expect(doc.v4.ciphertext).toBe(envelope(0).ciphertext);
     expect(doc.status).toBe('sent');
 
     const bad = await post('/messages/delivered', tokenFor(b.userId), { serverMessageIds: 'x' });
@@ -139,7 +139,7 @@ describe('T3.1 delete-on-delivery', () => {
 
     const doc = (await rawDoc(id)) as any;
     expect(doc.status).toBe('read');
-    expect(doc.v3).toBeUndefined();
+    expect(doc.v4).toBeUndefined();
 
     // A (the sender) syncs: nothing undelivered for A, but the receipt for A's own message is there.
     const sync = await get(`/messages/undelivered?peerUserId=${b.userId}&receiptsSince=${since}`, tokenFor(a.userId));

@@ -1,14 +1,14 @@
 import { Schema, model, Types } from 'mongoose';
 import { makeConversationId } from '../utils/conversation';
 
-/** Wire v3 envelope (T2.5): {header, ciphertext, mac}. The nonce is derived, never stored. */
-const V3Schema = new Schema(
+/**
+ * Wire v4 envelope (T3.6): {encHeader, ciphertext, mac}. The header travels
+ * encrypted under the sender's header key; the server stores three opaque
+ * strings and never learns counters or ratchet keys (P1-8).
+ */
+const V4Schema = new Schema(
   {
-    header: {
-      n: { type: Number, required: true },
-      pn: { type: Number, required: true },
-      dhPub: { type: String, required: true },
-    },
+    encHeader: { type: String, required: true },
     ciphertext: { type: String, required: true },
     mac: { type: String, required: true },
   },
@@ -43,11 +43,11 @@ const MessageSchema = new Schema(
     fromUserId: { type: Types.ObjectId, ref: 'User', required: true, index: true },
     toUserId: { type: Types.ObjectId, ref: 'User', required: true, index: true },
 
-    protoVersion: { type: Number, default: 3, index: true },
+    protoVersion: { type: Number, default: 4, index: true },
 
-    // v3 envelope. T3.1: unset once the recipient acks delivery; the document
+    // v4 envelope. T3.1: unset once the recipient acks delivery; the document
     // then remains as a metadata-only receipt until it expires.
-    v3: { type: V3Schema, default: null },
+    v4: { type: V4Schema, default: null },
     initPacket: { type: InitPacketSchema, default: null },
     replyTo: { type: ReplyToSchema, default: null },
 

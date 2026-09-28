@@ -7,68 +7,6 @@ import { markDelivered } from "../lib/delivery";
 export const messagesRouter = Router();
 
 /**
- * GET /messages/with/:userId
- * Returns encrypted history between current user and peer (ciphertext only).
- * T3.1: kept only for the T2.14 migration window (archived keys → local
- * store). Delivered messages no longer carry ciphertext, so the newer
- * `/messages/undelivered` is what the client syncs from.
- * Query:
- *   - limit (default 50, max 200)
- *   - before (optional) : timestamp (createdAtClient) for pagination (older page, newest first)
- *   - after  (optional) : timestamp (createdAtClient); returns messages newer than it, oldest first (T2.14 sync)
- */
-messagesRouter.get(
-  "/with/:userId",
-  requireAuth,
-  async (req: AuthedRequest, res) => {
-    const me = req.userId!;
-    const peer = String(req.params.userId);
-    const conversationId = makeConversationId(me, peer);
-
-    const limit = Math.min(Number(req.query.limit || 50), 200);
-    const before = req.query.before ? Number(req.query.before) : null;
-    const after = req.query.after !== undefined ? Number(req.query.after) : null;
-
-    const baseFilter: any = {
-      conversationId,
-    };
-
-    if (before && Number.isFinite(before)) {
-      baseFilter.createdAtClient = { $lt: before };
-    } else if (after !== null && Number.isFinite(after)) {
-      baseFilter.createdAtClient = { $gt: after };
-    }
-
-    const docs = await MessageModel.find(baseFilter)
-      .select("_id conversationId fromUserId toUserId protoVersion v3 initPacket replyTo clientMessageId createdAtClient seq status deliveredAt readAt")
-      .sort({ createdAtClient: after !== null && !before ? 1 : -1 })
-      .limit(limit);
-
-    // Вернём в порядке "старые -> новые"
-    const items = docs
-      .map((d) => ({
-        serverMessageId: String(d._id),
-        conversationId: (d as any).conversationId,
-        fromUserId: String(d.fromUserId),
-        toUserId: String(d.toUserId),
-        protoVersion: (d.protoVersion ?? 3) as 3,
-        v3: d.v3 ?? null,
-        initPacket: (d as any).initPacket ?? null,
-        replyTo: (d as any).replyTo ?? null,
-        clientMessageId: d.clientMessageId,
-        createdAt: d.createdAtClient,
-        seq: (d as any).seq ?? null,
-        status: (d as any).status ?? 'sent',
-        deliveredAt: (d as any).deliveredAt ?? null,
-        readAt: (d as any).readAt ?? null,
-      }))
-      .reverse();
-
-    return res.json({ items });
-  },
-);
-
-/**
  * GET /messages/undelivered  (T3.1)
  * Ciphertext the server still holds for the caller: messages addressed to
  * me whose recipient device has not acked delivery yet. Oldest first.
@@ -91,12 +29,12 @@ messagesRouter.get(
     const receiptsSince = req.query.receiptsSince !== undefined ? Number(req.query.receiptsSince) : null;
     const serverTime = Date.now();
 
-    const filter: any = { toUserId: me, v3: { $ne: null } };
+    const filter: any = { toUserId: me, v4: { $ne: null } };
     if (peer) filter.conversationId = makeConversationId(me, peer);
     if (after !== null && Number.isFinite(after)) filter.seq = { $gt: after };
 
     const docs = await MessageModel.find(filter)
-      .select("_id conversationId fromUserId toUserId protoVersion v3 initPacket replyTo clientMessageId createdAtClient seq status deliveredAt readAt")
+      .select("_id conversationId fromUserId toUserId protoVersion v4 initPacket replyTo clientMessageId createdAtClient seq status deliveredAt readAt")
       .sort({ seq: 1, _id: 1 })
       .limit(limit);
 
@@ -105,8 +43,8 @@ messagesRouter.get(
       conversationId: (d as any).conversationId,
       fromUserId: String(d.fromUserId),
       toUserId: String(d.toUserId),
-      protoVersion: (d.protoVersion ?? 3) as 3,
-      v3: d.v3 ?? null,
+      protoVersion: (d.protoVersion ?? 4) as 4,
+      v4: d.v4 ?? null,
       initPacket: (d as any).initPacket ?? null,
       replyTo: (d as any).replyTo ?? null,
       clientMessageId: d.clientMessageId,
