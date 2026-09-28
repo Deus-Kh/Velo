@@ -7,7 +7,7 @@ import { useAuthStore } from '../../store/auth.store';
 import type { ReplyReference } from '../chat/types';
 
 import { loadSession } from '../storage/sessionStore';
-import { encryptV2, decryptV2 } from '../crypto/messageV2';
+import { decryptAndPersist, encryptAndPersist } from '../chat/ratchetAdapter';
 import type { RatchetSessionV2 } from '@velo/protocol';
 import type { X3DHInitPacket } from '../crypto/x3dh';
 import { ensureV2SessionFromIncoming } from '../crypto/sessionBootstrap';
@@ -42,7 +42,7 @@ export async function sendMessageV2(params: {
     throw new Error('No v2 session for this peer');
   }
 
-  const { encrypted } = await encryptV2({
+  const { encrypted } = await encryptAndPersist({
     myUserId,
     peerUserId: params.toUserId,
     session: session as RatchetSessionV2,
@@ -134,7 +134,7 @@ export async function subscribeToMessages(onMessage: (m: {
         );
       }
 
-      const { plaintext } = await decryptV2({
+      const { plaintext } = await decryptAndPersist({
         myUserId,
         peerUserId: msg.fromUserId,
         session: session as RatchetSessionV2,

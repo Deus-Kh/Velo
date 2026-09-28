@@ -12,7 +12,7 @@ import { getSocket } from '../socket/socket';
 import { messagesApi } from '../api/messages.api';
 import { useAuthStore } from '../../store/auth.store';
 
-import type { V2Encrypted } from '../crypto/messageV2';
+import type { V2Encrypted } from '@velo/protocol';
 import { utf8Decode } from '@velo/protocol';
 import { deleteV2MessageKeysForPair, getV2MessageKey } from '../storage/v2MessageKeyStore';
 import {
@@ -26,7 +26,7 @@ import {
 
 import { deleteSession, loadSession } from '../storage/sessionStore';
 import type { RatchetSessionV2 } from '@velo/protocol';
-import { decryptV2 } from '../crypto/messageV2';
+import { decryptAndPersist } from './ratchetAdapter';
 import { ensureV2SessionFromIncoming } from '../crypto/sessionBootstrap';
 import type { X3DHInitPacket } from '../crypto/x3dh';
 import { makeConversationId } from '../utils/conversation';
@@ -244,7 +244,7 @@ async function decryptHistoryBatch(
 
           if (mode === 'live' && !mine && v2Session) {
             try {
-              const r = await decryptV2({
+              const r = await decryptAndPersist({
                 myUserId,
                 peerUserId,
                 session: v2Session,

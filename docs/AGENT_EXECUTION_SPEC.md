@@ -443,11 +443,13 @@ Target structure and migration map as in v1 T2.1 (`primitives/`, `ratchet/`, `ha
 ---
 
 ## T2.2 — Purify the ratchet
-**Tier** CORE · **Est** 3d · **Depends** T2.1
+**Tier** CORE · **Est** 3d · **Depends** T2.1 · **Status:** done 2026-09-28
 
 `ratchetEncrypt(session, plaintext, ad) → {session, envelope, derivedKeys}` and `ratchetDecrypt(session, envelope, ad) → {session, plaintext, derivedKeys, consumedSkippedKeyId}`: synchronous, no I/O, never mutate the input. Client adapter `chat/ratchetAdapter.ts` persists **only after** the pure step succeeds (keys first, then session); on throw persist nothing (R7).
 
 **Acceptance:** no `await` in either function; `grep -rE "AsyncStorage|Keychain|putV2MessageKey|saveSession" packages/protocol/src` empty; a failed decrypt leaves the input session deep-equal to before; manual smoke passes.
+
+**Status 2026-09-28:** done. `packages/protocol/src/ratchet/message.ts` (`ratchetEncrypt`, `ratchetDecrypt`, `skippedKeyId`, `MAX_SKIP`, wire types `V2Header`/`V2Encrypted`, `DerivedMessageKey`); client adapter `chats-client/src/shared/chat/ratchetAdapter.ts` (`encryptAndPersist`, `decryptAndPersist`); `crypto/messageV2.ts` removed; `socket/messaging.ts` and `chat/useChatE2EE.ts` call the adapter. No `await` in the package; acceptance grep empty; 8 vitest cases including deep-equality of the input after a tampered ciphertext, a tampered skipped-key message, replay, out-of-order delivery, the `MAX_SKIP` bound, and a frozen ciphertext/key/chain vector for a fixed nonce; 4 Jest cases prove the adapter writes keys then session on success and nothing on throw. Deviations: (1) the `ad` parameter is omitted until T2.5 — `secretbox` has no associated data and a dead argument would lie; (2) a `nonce` option exists for vector tests only; (3) the pure step's P1-0 "adopt without ratchet" branch and P1-3 skipped-key wipe are moved verbatim and pinned, per the ordering rule (T2.0/T2.7 change them); (4) behavioural change accepted under R7: keys derived during a decrypt that fails authentication are no longer archived. Manual two-device smoke is owed by the owner on Android (Metro release bundle verified: 12 package modules, one `tweetnacl`).
 
 ---
 

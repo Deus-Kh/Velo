@@ -1,7 +1,7 @@
 
 
 import { http } from './http';
-import type { V2Encrypted } from '../crypto/messageV2';
+import type { V2Encrypted } from '@velo/protocol';
 import type { X3DHInitPacket } from '../crypto/x3dh';
 import type { ReplyReference } from '../chat/types';
 

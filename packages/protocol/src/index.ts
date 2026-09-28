@@ -6,8 +6,9 @@
  * transport live in the client; this package only computes.
  *
  * T2.1 moved the pure modules here unchanged (session creation split into a
- * pure builder). The ratchet encrypt/decrypt and the X3DH handshake still
- * live in the client until T2.2 strips their I/O.
+ * pure builder). T2.2 made the ratchet steps pure: they return the next
+ * session and the derived keys, and the client adapter persists them. The
+ * X3DH handshake still lives in the client.
  */
 
 export { normalizeB64 } from './primitives/base64';
@@ -19,6 +20,17 @@ export { chainKdf, type ChainStep } from './ratchet/chain';
 export { kdfRootKey } from './ratchet/root';
 export { applyDhRatchet } from './ratchet/dh';
 export { createSessionFromX3DH, type DhKeyPairB64 } from './ratchet/session';
+export {
+  ratchetEncrypt,
+  ratchetDecrypt,
+  skippedKeyId,
+  MAX_SKIP,
+  type V2Header,
+  type V2Encrypted,
+  type DerivedMessageKey,
+  type RatchetEncryptResult,
+  type RatchetDecryptResult,
+} from './ratchet/message';
 
 export type { ProtoVersion, AnySession, RatchetSessionV2 } from './types/session';
 
