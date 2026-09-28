@@ -21,7 +21,7 @@ import { protocolErrorCode, type ProtocolErrorCode } from '@velo/protocol';
 import { acceptNewIdentity as acceptNewIdentityForPair } from '../crypto/identityTrust';
 import { listStoredMessages, upsertStoredMessage, type StoredMessage } from '../storage/messageStore';
 import { syncNewerFromServer } from './historySync';
-import { classifyPendingMessageError } from './protocolErrors';
+import { classifyPendingMessageError, presentProtocolError } from './protocolErrors';
 import { makeConversationId } from '../utils/conversation';
 import type { ReplyReference } from './types';
 
@@ -41,10 +41,12 @@ export type UIMessage = {
 };
 
 export type SessionHealth =
-  | { status: 'healthy'; reason?: undefined }
-  | { status: 'reset_required'; reason: string }
+  | { status: 'healthy'; reason?: undefined; code?: undefined }
+  | { status: 'reset_required'; reason: string; code?: ProtocolErrorCode | null }
   /** T2.13: the peer's identity no longer matches the pin. Sending is blocked until the user verifies or accepts. */
-  | { status: 'identity_changed'; reason: string };
+  | { status: 'identity_changed'; reason: string; code?: ProtocolErrorCode | null }
+  /** T4.8: a message could not be decrypted but the session still works; cleared by the next successful message or a reset. */
+  | { status: 'degraded'; reason: string; code: ProtocolErrorCode };
 
 
 type StatusChangedEvent = {
@@ -221,8 +223,9 @@ export function useChatE2EE(peerUserId: string) {
   // Helpers
   // ---------------------------------------------------------------------------
 
-  const markResetRequiredRef = useRef<(reason: string) => void>(() => {});
-  const markIdentityChangedRef = useRef<(reason: string) => void>(() => {});
+  const markResetRequiredRef = useRef<(reason: string, code?: ProtocolErrorCode | null) => void>(() => {});
+  const markIdentityChangedRef = useRef<(reason: string, code?: ProtocolErrorCode | null) => void>(() => {});
+  const markDegradedRef = useRef<(reason: string, code: ProtocolErrorCode) => void>(() => {});
   const sessionHealthRef = useRef<SessionHealth>({ status: 'healthy' });
 
   useEffect(() => {
@@ -345,7 +348,7 @@ export function useChatE2EE(peerUserId: string) {
     } catch (e) {
       console.warn('Send failed:', e);
       if (protocolErrorCode(e) === 'IDENTITY_MISMATCH') {
-        markIdentityChangedRef.current('peer identity does not match the pinned identity');
+        markIdentityChangedRef.current('peer identity does not match the pinned identity', 'IDENTITY_MISMATCH');
       }
 
       const currentPending = (await listPendingMessages(String(myUserId))).find(
@@ -413,19 +416,26 @@ export function useChatE2EE(peerUserId: string) {
 
     let cancelled = false;
 
-    const markResetRequired = (reason: string) => {
+    const markResetRequired = (reason: string, code: ProtocolErrorCode | null = null) => {
       if (cancelled) return;
       setSessionHealth((prev) =>
-        prev.status === 'reset_required' ? prev : { status: 'reset_required', reason }
+        prev.status === 'reset_required' || prev.status === 'identity_changed' ? prev : { status: 'reset_required', reason, code }
       );
     };
     markResetRequiredRef.current = markResetRequired;
 
-    const markIdentityChanged = (reason: string) => {
+    const markIdentityChanged = (reason: string, code: ProtocolErrorCode | null = 'IDENTITY_MISMATCH') => {
       if (cancelled) return;
-      setSessionHealth((prev) => (prev.status === 'identity_changed' ? prev : { status: 'identity_changed', reason }));
+      setSessionHealth((prev) => (prev.status === 'identity_changed' ? prev : { status: 'identity_changed', reason, code }));
     };
     markIdentityChangedRef.current = markIdentityChanged;
+
+    // T4.8: a decrypt failure that does not break the session is shown, not swallowed.
+    const markDegraded = (reason: string, code: ProtocolErrorCode) => {
+      if (cancelled) return;
+      setSessionHealth((prev) => (prev.status === 'healthy' || prev.status === 'degraded' ? { status: 'degraded', reason, code } : prev));
+    };
+    markDegradedRef.current = markDegraded;
 
     setSessionHealth({ status: 'healthy' });
     oldestCreatedAtRef.current = null;
@@ -453,6 +463,7 @@ export function useChatE2EE(peerUserId: string) {
           peerUserId,
           onIdentityChanged: markIdentityChanged,
           onResetRequired: markResetRequired,
+          onDecryptFailure: markDegraded,
         });
         if (!cancelled && sync.received.length > 0) {
           if (oldestCreatedAtRef.current === null) oldestCreatedAtRef.current = sync.received[0]!.createdAt;
@@ -494,6 +505,7 @@ export function useChatE2EE(peerUserId: string) {
               readAt: m.readAt || null,
             };
             setMessages((prev) => upsertMessage(prev, incoming));
+            setSessionHealth((prev) => (prev.status === 'degraded' ? { status: 'healthy' } : prev)); // a good message clears a degraded state
             // T2.14: decrypted once, stored locally; the message key is gone.
             upsertStoredMessage({ myUserId: String(myUserId), peerUserId, message: toStored(incoming) }).catch((e) => {
               console.warn('Failed to store incoming message:', e);
@@ -503,9 +515,11 @@ export function useChatE2EE(peerUserId: string) {
             peerUserId,
             onFailure: (reason, code) => {
               if (code === 'IDENTITY_MISMATCH') {
-                markIdentityChangedRef.current(reason);
+                markIdentityChangedRef.current(reason, code);
               } else if (isPolicyBrokenSessionReason(reason, code)) {
-                markResetRequiredRef.current(reason);
+                markResetRequiredRef.current(reason, code);
+              } else if (code && presentProtocolError(code).userMessage) {
+                markDegradedRef.current(reason, code); // T4.8: the taxonomy decides what the user sees
               }
             },
           }

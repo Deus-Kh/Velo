@@ -29,6 +29,7 @@ import { getSocket } from '../shared/socket/socket';
 import { useAppearanceStore } from '../store/appearance.store';
 import { useAuthStore } from '../store/auth.store';
 import { useKeyboard } from '@react-native-community/hooks'
+import { describeSessionHealth } from '../shared/chat/sessionHealthPresentation';
 
 
 const BOTTOM_OFFSET_THRESHOLD = 80;
@@ -129,18 +130,12 @@ function getHeaderPresenceMeta({
   socketReady: boolean;
   sessionHealth: SessionHealth;
 }): HeaderPresenceMeta {
-  if (sessionHealth.status === 'identity_changed') {
+  // T4.8: every non-healthy state is described by the spec 8.3 taxonomy in one place.
+  const described = describeSessionHealth(sessionHealth);
+  if (described) {
     return {
-      subtitle: 'Safety number changed',
-      pillLabel: 'Verify identity',
-      pillTone: 'warning',
-    };
-  }
-
-  if (sessionHealth.status === 'reset_required') {
-    return {
-      subtitle: 'Secure session needs reset',
-      pillLabel: 'Needs attention',
+      subtitle: described.subtitle,
+      pillLabel: described.pillLabel,
       pillTone: 'warning',
     };
   }
@@ -386,14 +381,10 @@ const { keyboardShown , keyboardHeight } = useKeyboard()
     interfaceDensity === 'compact' ? 'min-h-[40px] py-2.5' : 'min-h-[44px] py-3';
   const composerContainerMinHeightClass =
     interfaceDensity === 'compact' ? 'min-h-[44px]' : 'min-h-[48px]';
+  const healthPresentation = describeSessionHealth(sessionHealth, conversationName);
   const composerDisabledReason =
-    sessionHealth.status === 'identity_changed'
-      ? 'Safety number changed. Verify or accept the new identity to send.'
-      : sessionHealth.status === 'reset_required'
-      ? 'Reset the secure session to send new messages.'
-      : !socketReady
-        ? 'Reconnect to send messages. Your draft stays here.'
-        : null;
+    healthPresentation?.composerDisabledReason ??
+    (!socketReady ? 'Reconnect to send messages. Your draft stays here.' : null);
 
   const makeConversationId = (userA: string, userB: string) =>
     [userA, userB].sort().join(':');
@@ -831,13 +822,23 @@ useEffect(() => {
             />
           ) : null}
 
-          {sessionHealth.status === 'reset_required' ? (
+          {sessionHealth.status === 'reset_required' && healthPresentation ? (
             <InlineChatNotice
-              title="Secure session needs attention"
-              body="This conversation cannot decrypt reliably until the secure session is reset."
-              tone="warning"
+              title={healthPresentation.title}
+              body={healthPresentation.body}
+              tone={healthPresentation.tone}
               actionLabel="Reset secure session"
               onAction={resetSession}
+            />
+          ) : null}
+
+          {sessionHealth.status === 'degraded' && healthPresentation ? (
+            <InlineChatNotice
+              title={healthPresentation.title}
+              body={healthPresentation.body}
+              tone={healthPresentation.tone}
+              actionLabel={healthPresentation.action === 'reset' ? 'Reset secure session' : healthPresentation.action === 'verify' ? 'Verify' : undefined}
+              onAction={healthPresentation.action === 'reset' ? resetSession : healthPresentation.action === 'verify' ? onVerify : undefined}
             />
           ) : null}
 

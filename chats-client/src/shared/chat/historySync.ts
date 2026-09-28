@@ -1,5 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { normalizeB64, protocolErrorCode, type MessageEnvelope } from '@velo/protocol';
+import { normalizeB64, protocolErrorCode, type MessageEnvelope, type ProtocolErrorCode } from '@velo/protocol';
 import { messagesApi, type HistoryItem, type ReceiptItem } from '../api/messages.api';
 import { patchStoredMessage, storedMessageId, upsertStoredMessage, type StoredMessage } from '../storage/messageStore';
 import { receiveIncoming } from './incoming';
@@ -40,8 +40,10 @@ function toStored(it: HistoryItem, direction: 'in' | 'out', text: string): Store
 }
 
 export type IngestCallbacks = {
-  onIdentityChanged?: (reason: string) => void;
-  onResetRequired?: (reason: string) => void;
+  onIdentityChanged?: (reason: string, code: ProtocolErrorCode) => void;
+  onResetRequired?: (reason: string, code: ProtocolErrorCode) => void;
+  /** T4.8: a message that failed for another reason (shown, not swallowed). */
+  onDecryptFailure?: (reason: string, code: ProtocolErrorCode) => void;
 };
 
 /**
@@ -77,10 +79,13 @@ export async function ingestUndeliveredItems(params: {
       }
     } catch (e) {
       const code = protocolErrorCode(e);
-      if (code === 'IDENTITY_MISMATCH') callbacks?.onIdentityChanged?.('initiator identity does not match the pinned identity');
-      else if (code === 'MISSING_BOOTSTRAP' || code === 'SESSION_RESET_REQUIRED') callbacks?.onResetRequired?.('missing session and initPacket for inbound history item');
+      if (code === 'IDENTITY_MISMATCH') callbacks?.onIdentityChanged?.('initiator identity does not match the pinned identity', code);
+      else if (code === 'MISSING_BOOTSTRAP' || code === 'SESSION_RESET_REQUIRED') callbacks?.onResetRequired?.('missing session and initPacket for inbound history item', code);
       else if (code === 'REPLAY_DETECTED' || code === 'UNKNOWN_OLD_MESSAGE') acked.push(it.serverMessageId); // already consumed: nothing left to fetch
-      else console.warn('Ingest: message not decryptable', { serverMessageId: it.serverMessageId, code });
+      else {
+        console.warn('Ingest: message not decryptable', { serverMessageId: it.serverMessageId, code });
+        if (code) callbacks?.onDecryptFailure?.('a stored message could not be decrypted', code);
+      }
       if (code !== 'REPLAY_DETECTED' && code !== 'UNKNOWN_OLD_MESSAGE') reportDecryptFailure(code); // T4.6: the code only
     }
   }
@@ -112,8 +117,9 @@ export type SyncResult = {
 export async function syncNewerFromServer(params: {
   myUserId: string;
   peerUserId: string;
-  onIdentityChanged: (reason: string) => void;
-  onResetRequired: (reason: string) => void;
+  onIdentityChanged: (reason: string, code: ProtocolErrorCode) => void;
+  onResetRequired: (reason: string, code: ProtocolErrorCode) => void;
+  onDecryptFailure?: (reason: string, code: ProtocolErrorCode) => void;
 }): Promise<SyncResult> {
   const { myUserId, peerUserId } = params;
   const received: StoredMessage[] = [];
@@ -165,7 +171,7 @@ export async function syncNewerFromServer(params: {
       myUserId,
       peerUserId,
       items,
-      callbacks: { onIdentityChanged: params.onIdentityChanged, onResetRequired: params.onResetRequired },
+      callbacks: { onIdentityChanged: params.onIdentityChanged, onResetRequired: params.onResetRequired, onDecryptFailure: params.onDecryptFailure },
     });
     received.push(...ingested.received);
 

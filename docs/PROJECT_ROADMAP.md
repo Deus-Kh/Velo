@@ -295,7 +295,7 @@ Fix: after T2.0, an inbound `initPacket` whose identity matches the pin but whos
 - **P2-5 · No build step, no process manager** `[CORE]` → T4.1, T4.2
 - **P2-6 · Pagination on a client-supplied timestamp** `[PARITY]` → T3.2 — **fixed 2026-09-28 (undelivered cursor is `seq`; the legacy history route keeps its timestamp cursor until it is removed)**
 - **P2-7 · `cors({ origin: true, credentials: true })`** `[PARITY]` → T4.4 — **fixed 2026-09-28 (allow-list from `CORS_ORIGINS` for Express and socket.io)**
-- **P2-8 · No structured error taxonomy** `[PARITY]` → T2.3, T4.7
+- **P2-8 · No structured error taxonomy** `[PARITY]` → T2.3, T4.8 — **fixed 2026-09-28 (typed codes since T2.3; the UI derives banners, header and composer state from the taxonomy since T4.8)**
 - **P2-9 · Ordering keyed on the client clock** `[PARITY]` *(new)* — any client pins itself to the top of everyone's history. Server-assigned per-conversation sequence. → T3.2 — **fixed 2026-09-28**
 - **P2-10 · Presence/typing subscribable by anyone; no privacy toggles** `[PARITY]` *(new)* — relationship check; toggles for read receipts, typing, last-seen; consider dropping "online" broadcast entirely (Signal has none). → T1.7, Phase 7'
 - **P2-11 · 69 dependency advisories, 7 critical** `[CORE]` *(new)* → T1.12
@@ -447,6 +447,8 @@ Extraction happens in T2.1. Secrets (`*.pem`, `*.keystore`, service-account JSON
 **4' progress — T4.6 done 2026-09-28** (one commit): Prometheus metrics with no user identifiers (delivery latency, device-reported decrypt failures by code, prekey depletion, push results, HTTP and sockets), a bearer-protected `/metrics`, alert rules and a Grafana dashboard under `deploy/`. Next in order: T4.7 (GitHub Actions CI).
 
 **4' progress — T4.7 done 2026-09-28** (one commit): GitHub Actions with five jobs (secrets, protocol with a coverage gate, server, client, Android debug build); the app's Jest environment mocks its native modules so the template smoke test runs. Branch protection is a repository setting (human). Next in order: T4.8 (error taxonomy in the UI).
+
+**4' progress — T4.8 done 2026-09-28** (one commit): the chat screen derives every non-healthy state from the §8.3 taxonomy; decrypt failures are shown as a degraded-session banner instead of being swallowed; security warnings render differently from technical errors. Next in order: T4.9 (Mongo backups + one rehearsed restore).
 
 **2b progress — T2.14 done 2026-09-28** (one commit, D7 = A): plaintext stored locally in sealed records, message keys never archived, history read from the device with the server asked only for newer messages, one-time migration of the old archive. **The known-red registry is empty: every scenario the harness owns is green.** Remaining in Phase 2: T2.12 (manual two-device checklist, owner).
 
