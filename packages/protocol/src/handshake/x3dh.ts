@@ -19,7 +19,13 @@ export type X3DHInitPacket = {
   signedPreKeyId: number;
   oneTimePreKeyId: number | null;
   initiatorIdentityDhPublicKey: string; // base64 X25519
+  /** T3.5 PQ-readiness (PQXDH shape): which KEM prekey was encapsulated to, and the ciphertext. Absent today. */
+  pqPreKeyId?: number | null;
+  kemCiphertext?: string | null; // base64
 };
+
+/** ML-KEM shared secrets are 32 bytes for every parameter set. */
+export const KEM_SHARED_SECRET_LENGTH = 32;
 
 export type X3DHSessionKeys = {
   rootKey: string; // base64 32 bytes — the shared secret SK the ratchet starts from
@@ -54,13 +60,20 @@ function key(b64: string, what: string): Uint8Array {
 
 /**
  * Signal's X3DH key derivation:
- *   IKM := 0xFF×32 ‖ DH1 ‖ DH2 ‖ DH3 [‖ DH4]
+ *   IKM := 0xFF×32 ‖ DH1 ‖ DH2 ‖ DH3 [‖ DH4] [‖ SS_KEM]
  *   HKDF-SHA256(salt = none, IKM, info = "WhisperText", 64) → SK ‖ chainKey
- * Byte-identical to libsignal for the T2.15 vectors.
+ * Byte-identical to libsignal for the T2.15 vectors. The optional trailing
+ * KEM shared secret is PQXDH's extension point (T3.5): with it the IKM is
+ * exactly PQXDH's `F || DH1..DH4 || SS`; without it nothing changes.
  */
-function deriveSessionKeys(dhParts: Uint8Array[]): X3DHSessionKeys {
-  const ikm = concatBytes([X3DH_PREFIX, ...dhParts]);
-  wipe(...dhParts);
+function deriveSessionKeys(dhParts: Uint8Array[], kemSharedSecret?: Uint8Array | null): X3DHSessionKeys {
+  const parts = [...dhParts];
+  if (kemSharedSecret) {
+    requireLength(kemSharedSecret, KEM_SHARED_SECRET_LENGTH, 'kemSharedSecret');
+    parts.push(kemSharedSecret);
+  }
+  const ikm = concatBytes([X3DH_PREFIX, ...parts]);
+  wipe(...parts);
   const okm = hkdfSha256({ ikm, info: INFO_X3DH, length: 64 });
   wipe(ikm);
   const out = { rootKey: encodeBase64(okm.slice(0, 32)), chainKey: encodeBase64(okm.slice(32, 64)) };
@@ -85,6 +98,8 @@ export function x3dhInitiate(params: {
   identityDhPublicKey: string; // base64, ours (IK_A)
   identityDhSecretKey: Uint8Array; // ours
   ephemeral?: nacl.BoxKeyPair;
+  /** T3.5: the KEM shared secret obtained by encapsulating to `bundle.pqPreKey` (PQXDH). Never supplied today. */
+  kemSharedSecret?: Uint8Array | null;
 }): { initPacket: X3DHInitPacket; sessionKeys: X3DHSessionKeys; theirSignedPreKeyPublicKey: string } {
   const { bundle } = params;
   verifySignedPreKeyBundle(bundle);
@@ -108,7 +123,7 @@ export function x3dhInitiate(params: {
     oneTimePreKeyId = bundle.oneTimePreKey.keyId;
   }
 
-  const sessionKeys = deriveSessionKeys(dhParts);
+  const sessionKeys = deriveSessionKeys(dhParts, params.kemSharedSecret);
   if (!params.ephemeral) wipe(eph.secretKey); // T3.4: the ephemeral secret is never needed again
 
   return {
@@ -136,6 +151,8 @@ export function x3dhRespond(params: {
   signedPreKeySecretKey: Uint8Array;
   identityDhSecretKey: Uint8Array; // ours (IK_B)
   oneTimePreKeySecretKey: Uint8Array | null;
+  /** T3.5: the KEM shared secret decapsulated from `initPacket.kemCiphertext` (PQXDH). Never supplied today. */
+  kemSharedSecret?: Uint8Array | null;
 }): X3DHSessionKeys {
   const { initPacket } = params;
   requireLength(params.signedPreKeySecretKey, 32, 'signedPreKeySecretKey');
@@ -160,5 +177,5 @@ export function x3dhRespond(params: {
     dhParts.push(nacl.scalarMult(params.oneTimePreKeySecretKey, ephPub)); // DH4
   }
 
-  return deriveSessionKeys(dhParts);
+  return deriveSessionKeys(dhParts, params.kemSharedSecret);
 }

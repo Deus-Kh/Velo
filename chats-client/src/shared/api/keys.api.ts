@@ -30,6 +30,8 @@ export interface PreKeyBundleResponse {
    * (weaker forward secrecy for this handshake).
    */
   remainingOneTimePreKeys?: number;
+  /** T3.5 PQ-readiness: served as null until PQXDH lands. */
+  pqPreKey?: null | { keyId: number; kind: 'ml-kem-768' | 'ml-kem-1024'; publicKey: string; signature: string };
 }
 
 export interface UnusedPreKeysCountResponse {

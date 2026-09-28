@@ -47,6 +47,8 @@ type SendMessageDTO = {
     signedPreKeyId: number;
     oneTimePreKeyId: number | null;
     initiatorIdentityDhPublicKey: string;
+    pqPreKeyId?: number | null; // T3.5, ignored today
+    kemCiphertext?: string | null;
   } | null;
 };
 

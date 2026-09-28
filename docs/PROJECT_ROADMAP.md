@@ -430,6 +430,8 @@ Extraction happens in T2.1. Secrets (`*.pem`, `*.keystore`, service-account JSON
 
 **3' progress — T3.4 done 2026-09-28** (three commits): explicit bounded replay window with `REPLAY_DETECTED` and `UNKNOWN_OLD_MESSAGE` meaning what they say; every derived key wiped and no key material leaving a ratchet step; a frozen-input mutation audit over every refusal class plus S28 end to end. Next in order: T3.5 (PQ-readiness).
 
+**3' progress — T3.5 done 2026-09-28** (one commit): the X3DH IKM builder takes an optional trailing KEM shared secret (PQXDH's exact shape), the bundle and init-packet schemas carry the PQ slots as `null`/absent, no wire bump. PQXDH proper stays a post-defense item (month 7). Next in order: T3.6 (header encryption) **only if weeks 9–11 are on schedule**; otherwise Phase 4'.
+
 **2b progress — T2.14 done 2026-09-28** (one commit, D7 = A): plaintext stored locally in sealed records, message keys never archived, history read from the device with the server asked only for newer messages, one-time migration of the old archive. **The known-red registry is empty: every scenario the harness owns is green.** Remaining in Phase 2: T2.12 (manual two-device checklist, owner).
 
 **2b progress — T2.11 done 2026-09-28** (two commits): bootstrap persists only after the first message decrypts, bootstrap replay refused, glare converges on the lower user id without losing messages, a peer's local reset is adopted automatically. Next in order: T2.14.
@@ -464,7 +466,7 @@ Extraction happens in T2.1. Secrets (`*.pem`, `*.keystore`, service-account JSON
 | T3.2 Server sequence numbers; compound cursor | P2-6, P2-9. **Done 2026-09-28** | 1d |
 | T3.3 Push done right | Data-only payload; background handler; notifee render; tap deep-link; iOS APNs; token-prune fix; honest preview toggle. **Done for Android 2026-09-28; iOS parked** | 3d |
 | T3.4 Key zeroization + replay window + no-mutation-before-auth audit | `fill(0)`; typed `REPLAY_DETECTED` vs `UNKNOWN_OLD_MESSAGE`. **Done 2026-09-28** (DEVIATION-8: best-effort in JavaScript) | 2d |
-| T3.5 PQ-readiness | Handshake IKM accepts a KEM secret without another wire bump | 1d |
+| T3.5 PQ-readiness | Handshake IKM accepts a KEM secret without another wire bump. **Done 2026-09-28** | 1d |
 | T3.6 Header encryption (P1-8) | **Only if weeks 9–11 are on schedule**; otherwise documented | 5d |
 | T2.14 if slid | Local encrypted DB | 4d |
 

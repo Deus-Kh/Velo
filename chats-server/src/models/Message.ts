@@ -22,6 +22,9 @@ const InitPacketSchema = new Schema(
     signedPreKeyId: { type: Number, required: true },
     oneTimePreKeyId: { type: Number, default: null },
     initiatorIdentityDhPublicKey: { type: String, required: true },
+    // T3.5 PQ-readiness (PQXDH shape): stored if a client ever sends them, ignored today.
+    pqPreKeyId: { type: Number, default: null },
+    kemCiphertext: { type: String, default: null },
   },
   { _id: false }
 );

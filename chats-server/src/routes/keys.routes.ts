@@ -297,6 +297,8 @@ keysRouter.get('/bundle/:userId', requireAuth, bundleLimiter, async (req: Authed
     },
     oneTimePreKey: oneTime ? { keyId: oneTime.keyId, publicKey: oneTime.publicKey } : null,
     remainingOneTimePreKeys: remaining,
+    // T3.5 PQ-readiness: the PQXDH prekey slot exists in the schema; no KEM key is stored or served yet.
+    pqPreKey: null,
   });
 });
 

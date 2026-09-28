@@ -175,6 +175,7 @@ export class FakeServer {
       signedPreKey: { keyId: signed.keyId, publicKey: signed.publicKey, signature: signed.signature },
       oneTimePreKey: oneTime ? { keyId: oneTime.keyId, publicKey: oneTime.publicKey } : null,
       remainingOneTimePreKeys: this.unusedOneTimePreKeyCount(targetId),
+      pqPreKey: null, // T3.5: served, never encapsulated to
     };
     return this.malicious.substituteBundle ? this.malicious.substituteBundle(bundle, requesterId) : bundle;
   }

@@ -129,4 +129,60 @@ describe('x3dh (pure, Signal\u2019s four-DH construction since T2.9)', () => {
     }
     expect(code).toBe('INVALID_KEY_LENGTH');
   });
+
+  describe('PQ-readiness (T3.5)', () => {
+    const ss = new Uint8Array(32).fill(0x77); // what ML-KEM decapsulation would yield
+
+    it('a bundle with pqPreKey: null (as the server serves today) derives exactly the classical keys', () => {
+      const classical = initiate(true);
+      const withField = x3dhInitiate({
+        bundle: { ...bundle(true), pqPreKey: null },
+        peerUserId: 'B',
+        identityDhPublicKey: encodeBase64(ikDhA.publicKey),
+        identityDhSecretKey: ikDhA.secretKey,
+        ephemeral: ephA,
+      });
+      expect(withField.sessionKeys).toEqual(classical.sessionKeys);
+      expect(withField.initPacket).toEqual(classical.initPacket);
+      expect('pqPreKeyId' in withField.initPacket).toBe(false); // nothing PQ leaves the handshake today
+    });
+
+    it('a KEM shared secret enters the IKM last (PQXDH shape): both sides agree, and the keys differ from classical', () => {
+      const classical = initiate(true);
+      const pq = x3dhInitiate({
+        bundle: bundle(true),
+        peerUserId: 'B',
+        identityDhPublicKey: encodeBase64(ikDhA.publicKey),
+        identityDhSecretKey: ikDhA.secretKey,
+        ephemeral: ephA,
+        kemSharedSecret: new Uint8Array(ss),
+      });
+      expect(pq.sessionKeys).not.toEqual(classical.sessionKeys);
+      const responded = x3dhRespond({
+        initPacket: pq.initPacket,
+        signedPreKeySecretKey: spkB.secretKey,
+        identityDhSecretKey: ikDhB.secretKey,
+        oneTimePreKeySecretKey: opkB.secretKey,
+        kemSharedSecret: new Uint8Array(ss),
+      });
+      expect(responded).toEqual(pq.sessionKeys);
+      // A responder without the secret (or with another) cannot agree: the KEM is bound into SK.
+      const without = x3dhRespond({ initPacket: pq.initPacket, signedPreKeySecretKey: spkB.secretKey, identityDhSecretKey: ikDhB.secretKey, oneTimePreKeySecretKey: opkB.secretKey });
+      expect(without).toEqual(classical.sessionKeys);
+      expect(without).not.toEqual(pq.sessionKeys);
+    });
+
+    it('the KEM secret is consumed (wiped) and must be 32 bytes', () => {
+      const secret = new Uint8Array(ss);
+      x3dhInitiate({ bundle: bundle(false), peerUserId: 'B', identityDhPublicKey: encodeBase64(ikDhA.publicKey), identityDhSecretKey: ikDhA.secretKey, ephemeral: ephA, kemSharedSecret: secret });
+      expect(secret.every((x) => x === 0)).toBe(true);
+      let caught: unknown;
+      try {
+        x3dhInitiate({ bundle: bundle(false), peerUserId: 'B', identityDhPublicKey: encodeBase64(ikDhA.publicKey), identityDhSecretKey: ikDhA.secretKey, ephemeral: ephA, kemSharedSecret: new Uint8Array(31) });
+      } catch (e) {
+        caught = e;
+      }
+      expect(isProtocolError(caught) && caught.code).toBe('INVALID_KEY_LENGTH');
+    });
+  });
 });
