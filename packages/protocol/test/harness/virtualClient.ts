@@ -244,7 +244,14 @@ export class VirtualClient {
       opkSecret = raw ? decodeBase64(raw) : null;
     }
 
-    const sessionKeys = x3dhRespond({ initPacket, signedPreKeySecretKey: decodeBase64(spk.privateKey), oneTimePreKeySecretKey: opkSecret });
+    const identityDh = this.store.getJson<StoredPair>('identity-dh');
+    if (!identityDh) throw new ProtocolError('STORAGE_CORRUPTION', 'Identity DH key not found locally', { what: 'identityDh' });
+    const sessionKeys = x3dhRespond({
+      initPacket,
+      signedPreKeySecretKey: decodeBase64(spk.privateKey),
+      identityDhSecretKey: decodeBase64(identityDh.privateKey),
+      oneTimePreKeySecretKey: opkSecret,
+    });
     if (initPacket.oneTimePreKeyId !== null) this.store.delete('opk:' + String(initPacket.oneTimePreKeyId));
 
     const session = initResponderSession({

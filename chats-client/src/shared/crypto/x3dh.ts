@@ -50,7 +50,8 @@ export async function x3dhRespond(params: {
     oneTimePreKeySecretKey = skB64 ? decodeBase64(skB64) : null;
   }
 
-  const sessionKeys = respond({ initPacket, signedPreKeySecretKey, oneTimePreKeySecretKey });
+  const identityDhSecretKey = await getIdentityDhSecretKeyBytesForUser(myUserId); // IK_B for the fourth DH (T2.9)
+  const sessionKeys = respond({ initPacket, signedPreKeySecretKey, identityDhSecretKey, oneTimePreKeySecretKey });
 
   if (initPacket.oneTimePreKeyId !== null) {
     await deleteOneTimePreKeySecret({ myUserId, keyId: initPacket.oneTimePreKeyId });

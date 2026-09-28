@@ -41,13 +41,14 @@ function initiate(withOpk: boolean) {
   });
 }
 
-describe('x3dh (pure, current 3-DH construction pinned before T2.9/T2.13)', () => {
+describe('x3dh (pure, Signal\u2019s four-DH construction since T2.9)', () => {
   it('initiator and responder derive the same keys, with and without a one-time prekey', () => {
     for (const withOpk of [true, false]) {
       const { initPacket, sessionKeys } = initiate(withOpk);
       const responded = x3dhRespond({
         initPacket,
         signedPreKeySecretKey: spkB.secretKey,
+        identityDhSecretKey: ikDhB.secretKey,
         oneTimePreKeySecretKey: withOpk ? opkB.secretKey : null,
       });
       expect(responded).toEqual(sessionKeys);
@@ -60,17 +61,24 @@ describe('x3dh (pure, current 3-DH construction pinned before T2.9/T2.13)', () =
     }
   });
 
-  it('is byte-for-byte the pre-T2.4 client output (frozen vectors, R8)', () => {
+  it('is byte-for-byte reproducible for fixed keys (frozen vectors, R8; Signal constants since T2.9)', () => {
     const withOpk = initiate(true).sessionKeys;
-    expect(hex(decodeBase64(withOpk.rootKey))).toBe('e2c88c6d127b8dcae727a1f67054b51e345404a69044ed04706d290681597d4e');
-    expect(hex(decodeBase64(withOpk.chainKey))).toBe('a2a3abd47e0e42249bf4df455780fe3cd434353629e5e972b5eba24c2725bfb4');
+    expect(hex(decodeBase64(withOpk.rootKey))).toBe('8b1b74dc1127d171059a3d7f6cd2090578107553f824657ec1fe87c05224a89d');
+    expect(hex(decodeBase64(withOpk.chainKey))).toBe('d85de129709261e8161670fa0634ed55005bce907c736c0f81728b0adacc700a');
     const noOpk = initiate(false).sessionKeys;
-    expect(hex(decodeBase64(noOpk.rootKey))).toBe('84cf190f8e6f05df0c3af32b5d1e716ba5a932193acc0c875ada5d4241304015');
-    expect(hex(decodeBase64(noOpk.chainKey))).toBe('e78b11e76ff22433a9db7b79065b396eb02f33d433ec8aa642a2b4355899ae7f');
+    expect(hex(decodeBase64(noOpk.rootKey))).toBe('c8af857754a9fe0f788b206764f5aad98169a32d52eb010a55cb6bf2045ee7d6');
+    expect(hex(decodeBase64(noOpk.chainKey))).toBe('72dda38984ae66abbb52e6ec1ba8f6cc1c94ecef6ca9f7da571a78e531c3932b');
   });
 
-  it('the one-time prekey changes the result (DH2 is in the KDF input)', () => {
+  it('the one-time prekey changes the result (DH4 is in the KDF input)', () => {
     expect(initiate(true).sessionKeys.rootKey).not.toBe(initiate(false).sessionKeys.rootKey);
+  });
+
+  it('the fourth DH binds the responder identity: a different IK_B secret on the responder side yields different keys', () => {
+    const { initPacket, sessionKeys } = initiate(false);
+    const other = nacl.box.keyPair.fromSecretKey(new Uint8Array(32).fill(0x77));
+    const responded = x3dhRespond({ initPacket, signedPreKeySecretKey: spkB.secretKey, identityDhSecretKey: other.secretKey, oneTimePreKeySecretKey: null });
+    expect(responded.rootKey).not.toBe(sessionKeys.rootKey);
   });
 
   it('rejects a bundle whose identity binding does not verify', () => {
@@ -102,7 +110,7 @@ describe('x3dh (pure, current 3-DH construction pinned before T2.9/T2.13)', () =
     const { initPacket } = initiate(true);
     let code: string | null = null;
     try {
-      x3dhRespond({ initPacket, signedPreKeySecretKey: spkB.secretKey, oneTimePreKeySecretKey: null });
+      x3dhRespond({ initPacket, signedPreKeySecretKey: spkB.secretKey, identityDhSecretKey: ikDhB.secretKey, oneTimePreKeySecretKey: null });
     } catch (e) {
       expect(isProtocolError(e)).toBe(true);
       code = protocolErrorCode(e);
@@ -114,7 +122,7 @@ describe('x3dh (pure, current 3-DH construction pinned before T2.9/T2.13)', () =
     const { initPacket } = initiate(false);
     let code: string | null = null;
     try {
-      x3dhRespond({ initPacket, signedPreKeySecretKey: new Uint8Array(16), oneTimePreKeySecretKey: null });
+      x3dhRespond({ initPacket, signedPreKeySecretKey: new Uint8Array(16), identityDhSecretKey: ikDhB.secretKey, oneTimePreKeySecretKey: null });
     } catch (e) {
       code = protocolErrorCode(e);
     }

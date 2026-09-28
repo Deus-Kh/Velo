@@ -6,8 +6,11 @@ import { verifySignedPreKeyBundle } from './bundle';
 import { verifyIdentityBinding } from '../identity/binding';
 import type { PreKeyBundle } from './types';
 
-/** "x3dh-v1" — HKDF info for the handshake. Wire-format constant (R8). */
-export const INFO_X3DH_V1 = new Uint8Array([120, 51, 100, 104, 45, 118, 49]);
+/** "WhisperText" — Signal's X3DH HKDF info label (libsignal derive_keys). Wire constant (R8). */
+export const INFO_X3DH = new Uint8Array([87, 104, 105, 115, 112, 101, 114, 84, 101, 120, 116]);
+
+/** Signal's discontinuity prefix: 32 bytes of 0xFF ahead of the DH outputs. */
+const X3DH_PREFIX = new Uint8Array(32).fill(0xff);
 
 export type X3DHInitPacket = {
   peerUserId: string;
@@ -18,8 +21,8 @@ export type X3DHInitPacket = {
 };
 
 export type X3DHSessionKeys = {
-  rootKey: string; // base64 32 bytes
-  chainKey: string; // base64 32 bytes
+  rootKey: string; // base64 32 bytes — the shared secret SK the ratchet starts from
+  chainKey: string; // base64 32 bytes — libsignal's second output; unused by the standard bootstrap
 };
 
 function concatBytes(arrays: Uint8Array[]): Uint8Array {
@@ -42,28 +45,38 @@ function requireLength(bytes: Uint8Array, expected: number, what: string): void 
   }
 }
 
+function key(b64: string, what: string): Uint8Array {
+  const bytes = decodeBase64(b64);
+  requireLength(bytes, 32, what);
+  return bytes;
+}
+
+/**
+ * Signal's X3DH key derivation:
+ *   IKM := 0xFF×32 ‖ DH1 ‖ DH2 ‖ DH3 [‖ DH4]
+ *   HKDF-SHA256(salt = none, IKM, info = "WhisperText", 64) → SK ‖ chainKey
+ * Byte-identical to libsignal for the T2.15 vectors.
+ */
 function deriveSessionKeys(dhParts: Uint8Array[]): X3DHSessionKeys {
-  const okm = hkdfSha256({ ikm: concatBytes(dhParts), info: INFO_X3DH_V1, length: 64 });
+  const okm = hkdfSha256({ ikm: concatBytes([X3DH_PREFIX, ...dhParts]), info: INFO_X3DH, length: 64 });
   return { rootKey: encodeBase64(okm.slice(0, 32)), chainKey: encodeBase64(okm.slice(32, 64)) };
 }
 
 /**
- * Initiator side of the handshake. Pure: the caller fetched the bundle and
- * holds the identity DH secret; nothing here touches storage or network.
- *
- * Today's construction (pinned; T2.9 adds the fourth DH, T2.13 the identity
- * checks): DH1 = DH(EK_A, SPK_B), DH2 = DH(EK_A, OPK_B) when present,
- * DH3 = DH(IK_A, SPK_B). The bundle's signed-prekey signature and its
- * identity binding are verified here so the pure core never trusts an
- * unverified bundle (T2.13). Comparing the identity with the pin is the
- * caller's job (identity/trust.ts) because the pin lives in storage.
- *
- * `ephemeral` is injectable for frozen-vector tests only.
+ * Initiator side of X3DH (spec T2.9, Signal's order):
+ *   DH1 = DH(IK_A, SPK_B)   identity of A ↔ signed prekey of B
+ *   DH2 = DH(EK_A, IK_B)    ephemeral of A ↔ identity of B   (the fourth DH, P1-5)
+ *   DH3 = DH(EK_A, SPK_B)
+ *   DH4 = DH(EK_A, OPK_B)   when a one-time prekey was issued
+ * The bundle's signed-prekey signature and identity binding are verified
+ * here so the pure core never trusts an unverified bundle. Comparing the
+ * identity with the pin is the caller's job (identity/trust.ts).
+ * Pure; `ephemeral` is injectable for frozen-vector tests only.
  */
 export function x3dhInitiate(params: {
   bundle: PreKeyBundle;
   peerUserId: string;
-  identityDhPublicKey: string; // base64, ours
+  identityDhPublicKey: string; // base64, ours (IK_A)
   identityDhSecretKey: Uint8Array; // ours
   ephemeral?: nacl.BoxKeyPair;
 }): { initPacket: X3DHInitPacket; sessionKeys: X3DHSessionKeys; theirSignedPreKeyPublicKey: string } {
@@ -73,20 +86,21 @@ export function x3dhInitiate(params: {
   requireLength(params.identityDhSecretKey, 32, 'identityDhSecretKey');
 
   const eph = params.ephemeral ?? nacl.box.keyPair();
-  const spkPub = decodeBase64(bundle.signedPreKey.publicKey);
-  requireLength(spkPub, 32, 'signedPreKey.publicKey');
+  const spkPub = key(bundle.signedPreKey.publicKey, 'signedPreKey.publicKey');
+  const ikB = key(bundle.identityDhPublicKey, 'identityDhPublicKey');
 
-  const dhParts: Uint8Array[] = [nacl.scalarMult(eph.secretKey, spkPub)];
+  const dhParts: Uint8Array[] = [
+    nacl.scalarMult(params.identityDhSecretKey, spkPub), // DH1
+    nacl.scalarMult(eph.secretKey, ikB), // DH2
+    nacl.scalarMult(eph.secretKey, spkPub), // DH3
+  ];
 
   let oneTimePreKeyId: number | null = null;
   if (bundle.oneTimePreKey) {
-    const opkPub = decodeBase64(bundle.oneTimePreKey.publicKey);
-    requireLength(opkPub, 32, 'oneTimePreKey.publicKey');
-    dhParts.push(nacl.scalarMult(eph.secretKey, opkPub));
+    const opkPub = key(bundle.oneTimePreKey.publicKey, 'oneTimePreKey.publicKey');
+    dhParts.push(nacl.scalarMult(eph.secretKey, opkPub)); // DH4
     oneTimePreKeyId = bundle.oneTimePreKey.keyId;
   }
-
-  dhParts.push(nacl.scalarMult(params.identityDhSecretKey, spkPub));
 
   return {
     initPacket: {
@@ -102,23 +116,30 @@ export function x3dhInitiate(params: {
 }
 
 /**
- * Responder side. Pure: the caller looks up the signed-prekey secret and the
- * one-time prekey secret named by the packet (and deletes the latter after
- * this returns). A packet that names a one-time prekey whose secret is gone
- * cannot be completed: the session must be re-established.
+ * Responder side. The caller looks up its signed-prekey secret, its identity
+ * DH secret, and the one-time prekey secret named by the packet (deleting
+ * the latter after this returns). The initiator's identity key in the
+ * packet must already have been authenticated against the pin
+ * (identity/trust.ts) — this function computes, it does not decide trust.
  */
 export function x3dhRespond(params: {
   initPacket: X3DHInitPacket;
   signedPreKeySecretKey: Uint8Array;
+  identityDhSecretKey: Uint8Array; // ours (IK_B)
   oneTimePreKeySecretKey: Uint8Array | null;
 }): X3DHSessionKeys {
   const { initPacket } = params;
   requireLength(params.signedPreKeySecretKey, 32, 'signedPreKeySecretKey');
+  requireLength(params.identityDhSecretKey, 32, 'identityDhSecretKey');
 
-  const ephPub = decodeBase64(initPacket.ephPublicKey);
-  requireLength(ephPub, 32, 'initPacket.ephPublicKey');
+  const ephPub = key(initPacket.ephPublicKey, 'initPacket.ephPublicKey');
+  const ikA = key(initPacket.initiatorIdentityDhPublicKey, 'initPacket.initiatorIdentityDhPublicKey');
 
-  const dhParts: Uint8Array[] = [nacl.scalarMult(params.signedPreKeySecretKey, ephPub)];
+  const dhParts: Uint8Array[] = [
+    nacl.scalarMult(params.signedPreKeySecretKey, ikA), // DH1
+    nacl.scalarMult(params.identityDhSecretKey, ephPub), // DH2
+    nacl.scalarMult(params.signedPreKeySecretKey, ephPub), // DH3
+  ];
 
   if (initPacket.oneTimePreKeyId !== null) {
     if (!params.oneTimePreKeySecretKey) {
@@ -127,12 +148,8 @@ export function x3dhRespond(params: {
       });
     }
     requireLength(params.oneTimePreKeySecretKey, 32, 'oneTimePreKeySecretKey');
-    dhParts.push(nacl.scalarMult(params.oneTimePreKeySecretKey, ephPub));
+    dhParts.push(nacl.scalarMult(params.oneTimePreKeySecretKey, ephPub)); // DH4
   }
-
-  const initiatorIdentityDhPub = decodeBase64(initPacket.initiatorIdentityDhPublicKey);
-  requireLength(initiatorIdentityDhPub, 32, 'initPacket.initiatorIdentityDhPublicKey');
-  dhParts.push(nacl.scalarMult(params.signedPreKeySecretKey, initiatorIdentityDhPub));
 
   return deriveSessionKeys(dhParts);
 }

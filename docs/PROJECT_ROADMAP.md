@@ -137,7 +137,7 @@ What a user can actually do today: 1:1 text with replies, receipts, typing, pres
 | Encrypted backup w/ PIN escrow | ✅ | ✅ | — | ❌ | ❌ deferred |
 | E2EE calls | ✅ | ✅ | ✅ | ❌ | ❌ deferred |
 | Disappearing messages | ✅ | ✅ | ✅ | ❌ | ✅ Phase 7' |
-| Verified against reference impl. | n/a | n/a | n/a | ❌ | ✅ T2.15 (libsignal vectors) |
+| Verified against reference impl. | n/a | n/a | n/a | ✅ X3DH, KDFs, message keys, fingerprint byte-identical to libsignal 0.103 (T2.15, green since T2.9) | done |
 
 ### 2.2 Product parity
 
@@ -264,7 +264,7 @@ Fix: XChaCha20-Poly1305 with `AD = IK_A || IK_B || canonicalHeader` (decision D3
 
 **P1-4 · `header.pn` never read** `[CORE]` (reachable only after P1-0) → T2.8
 
-**P1-5 · X3DH omits `DH(EK_A, IK_B)`** `[CORE]` — decision D2 = fix. → T2.9
+**P1-5 · X3DH omits `DH(EK_A, IK_B)`** `[CORE]` — decision D2 = fix. → T2.9 — **fixed 2026-09-28 (T2.9)**
 
 **P1-6 · Signed prekey never rotates** `[CORE]` (`prekeys.ts:38-55`) → T2.10
 
@@ -421,6 +421,8 @@ Extraction happens in T2.1. Secrets (`*.pem`, `*.keystore`, service-account JSON
 **T2.1 — done 2026-09-28.** `packages/protocol` (`@velo/protocol`) holds `primitives/{base64,encoding,utf8,kdf}`, `ratchet/{chain,root,dh,session}`, `handshake/{bundle,types}`, `identity/fingerprint`, `types/session` — all `git mv`, zero behaviour change, chain/root/session KDF outputs frozen as vectors (R8). `createSessionFromX3DH` split: pure builder in the package, persistence wrapper in the client. Consumed as TypeScript source without npm workspaces: `tsconfig` `paths`, Metro `extraNodeModules` + a `resolveRequest` that pins the package's shared deps (`tweetnacl`, `tweetnacl-util`, `@noble/hashes`, `@babel/runtime`) to the app's copies (bundle source map shows one tweetnacl), Jest `moduleNameMapper`. Purity enforced twice: package `.eslintrc.js` `no-restricted-imports` and a vitest test that also forbids `await`. Still in the client after T2.1: `messageV2.ts`, `x3dh.ts`, `prekeyBundle.ts`, `sessionBootstrap.ts`, key stores.
 
 **T2.2 — done 2026-09-28.** `ratchet/message.ts` in the package: `ratchetEncrypt(session, plaintext)` and `ratchetDecrypt(session, envelope)` are synchronous, never mutate the input, and return the next session, the derived message keys and (on decrypt) the consumed skipped-key id. The only client touchpoint is `chat/ratchetAdapter.ts`, which runs the pure step and persists keys first, then the session, or nothing at all on throw (R7). `crypto/messageV2.ts` deleted. Behaviour pinned with frozen vectors; one deliberate change: message keys derived during a decrypt that then fails authentication are no longer archived (they were written before `secretbox.open` ran). The `ad` argument arrives with the AEAD in T2.5.
+
+**2b progress — T2.9 done 2026-09-28** (one commit, both sides): Signal's X3DH with the fourth DH; every libsignal vector is green. Next in order: T2.10.
 
 **2b progress — T2.6 done 2026-09-28** (two commits: per-step gap and counter bounds → epoch-aware retention with pruning and `UNKNOWN_OLD_MESSAGE`). S12 green in under 50 ms. Known-red: S16 only (key archive, T2.14). Next in order: T2.9.
 

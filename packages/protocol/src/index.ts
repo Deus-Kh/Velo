@@ -54,7 +54,7 @@ export type { ProtoVersion, AnySession, RatchetSessionV2 } from './types/session
 
 export { verifySignedPreKeyBundle } from './handshake/bundle';
 export type { PreKeyBundle } from './handshake/types';
-export { x3dhInitiate, x3dhRespond, INFO_X3DH_V1, type X3DHInitPacket, type X3DHSessionKeys } from './handshake/x3dh';
+export { x3dhInitiate, x3dhRespond, INFO_X3DH, type X3DHInitPacket, type X3DHSessionKeys } from './handshake/x3dh';
 
 export {
   computeSafetyNumber,

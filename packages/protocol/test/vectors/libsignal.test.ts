@@ -4,7 +4,7 @@
  * Passing today: the primitives Velo already shares with Signal (X25519,
  * HKDF-SHA256, the 0x01/0x02 chain KDF).
  * `it.fails` until the named task adopts Signal's constants:
- *  - X3DH            → T2.9 (DH order, 0xFF prefix, "WhisperText", fourth DH)
+ *  - X3DH            → green since T2.9 (Signal's DH order, 0xFF prefix, "WhisperText", fourth DH)
  *  - KDF_RK          → green since T2.0 adopted "WhisperRatchet"
  *  - message keys    → green since T2.5 (WhisperMessageKeys expansion; Velo takes 88 bytes, the first 80 are Signal's)
  *  - safety number   → green since T2.13 (libsignal numeric fingerprint)
@@ -67,7 +67,7 @@ describe('libsignal vectors: primitives (pass today)', () => {
 });
 
 describe('libsignal vectors: constructions (red until the named task)', () => {
-  it.fails('X3DH shared secret matches libsignal (T2.9: DH order, 0xFF prefix, WhisperText, fourth DH)', () => {
+  it('X3DH shared secret matches libsignal (T2.9: DH order, 0xFF prefix, WhisperText, fourth DH)', () => {
     for (const v of vectors.x3dh) {
       const ikSignB = nacl.sign.keyPair.fromSeed(new Uint8Array(32).fill(0x99)); // Velo signs the SPK with Ed25519
       const spkPub = fromHex(v.inputs.signedPreKeyB.pub);
@@ -90,10 +90,11 @@ describe('libsignal vectors: constructions (red until the named task)', () => {
       const responded = x3dhRespond({
         initPacket,
         signedPreKeySecretKey: fromHex(v.inputs.signedPreKeyB.priv),
+        identityDhSecretKey: fromHex(v.inputs.identityB.priv),
         oneTimePreKeySecretKey: v.inputs.oneTimePreKeyB ? fromHex(v.inputs.oneTimePreKeyB.priv) : null,
       });
       expect(responded).toEqual(sessionKeys);
-      expect(hex(Buffer.from(sessionKeys.rootKey, 'base64')), 'root key differs: Velo omits DH(EK_A, IK_B), orders DHs differently, has no 0xFF prefix and uses info "x3dh-v1"').toBe(v.rootKey);
+      expect(hex(Buffer.from(sessionKeys.rootKey, 'base64'))).toBe(v.rootKey);
       expect(hex(Buffer.from(sessionKeys.chainKey, 'base64'))).toBe(v.chainKey);
     }
   });

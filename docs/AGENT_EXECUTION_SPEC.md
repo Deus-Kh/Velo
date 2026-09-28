@@ -591,11 +591,13 @@ Implement §8.1 step 2 exactly. `pn` is read in exactly one place.
 ---
 
 ## T2.9 — Fourth DH and Signal's X3DH constants
-**Tier** CORE · **Fixes** P1-5 · **Est** 1d · **Decision** D2 = fix
+**Tier** CORE · **Fixes** P1-5 · **Est** 1d · **Decision** D2 = fix · **Status:** done 2026-09-28
 
 `DH1 = DH(IK_A, SPK_B)`, `DH2 = DH(EK_A, IK_B)`, `DH3 = DH(EK_A, SPK_B)`, `DH4 = DH(EK_A, OPK_B)`; IKM = `0xFF×32 || DH1 || DH2 || DH3 [|| DH4]`; HKDF info `"WhisperText"`. Both sides in one commit.
 
 **Acceptance:** initiator and responder derive identical SK with and without OPK; T2.15 X3DH vectors pass; S01, S02, S08, S15 pass.
+
+**Status 2026-09-28:** done in one commit, both sides. `handshake/x3dh.ts` now computes DH1 = DH(IK_A, SPK_B), DH2 = DH(EK_A, IK_B), DH3 = DH(EK_A, SPK_B), DH4 = DH(EK_A, OPK_B), IKM = `0xFF×32 ‖ DH1 ‖ DH2 ‖ DH3 [‖ DH4]`, HKDF-SHA256 with info `WhisperText` (constant `INFO_X3DH`; `x3dh-v1` is gone). `x3dhRespond` takes the responder's identity DH secret (`identityDhSecretKey`) for DH2; the client wrapper loads it from the Keychain and the harness client from its store. **The T2.15 X3DH vectors are green: every libsignal-comparable assertion (X25519, HKDF, X3DH, KDF_RK, KDF_CK, message keys, fingerprint) now matches the reference.** Frozen X3DH vectors re-pinned (wire change within the v3 series). DEVIATION-2 resolved. Bundles from a peer whose identity DH key was substituted already failed the binding check (T2.13); the fourth DH additionally binds the responder's identity into the secret itself, as in Signal.
 
 ---
 
@@ -755,7 +757,7 @@ skipMessageKeys(work, dhPub, until):
 |---|---|---|---|
 | 1 | removed | legacy shared-secret | pre-history |
 | 2 | removed 2026-09-28 | `{header:{n,pn,dhPub}, nonce, ciphertext}` + optional `initPacket`; header unauthenticated; non-standard bootstrap | Open Beta 0.1 |
-| 3 | **current** | `{header:{n,pn,dhPub}, ciphertext, mac}` + optional `initPacket` on the session-creating message. Standard bootstrap (T2.0, `WhisperRatchet`), message keys expanded with `WhisperMessageKeys` into cipher key + MAC key + derived nonce (no nonce on the wire), MAC-SHA256 over `IK_sign_sender || IK_sign_receiver || canonicalHeader || ciphertext` truncated to 16 bytes, secretbox payload (D3 = C, no new primitive), identity binding in bundles and identity lookups (T2.13). Still pending in this version: SPK signature over `keyId || pub` (T2.10), X3DH constants (T2.9). **One bump, one migration: all existing sessions reset.** | T2.0–T2.13, 2026-09-28 |
+| 3 | **current** | `{header:{n,pn,dhPub}, ciphertext, mac}` + optional `initPacket` on the session-creating message. Standard bootstrap (T2.0, `WhisperRatchet`), message keys expanded with `WhisperMessageKeys` into cipher key + MAC key + derived nonce (no nonce on the wire), MAC-SHA256 over `IK_sign_sender || IK_sign_receiver || canonicalHeader || ciphertext` truncated to 16 bytes, secretbox payload (D3 = C, no new primitive), identity binding in bundles and identity lookups (T2.13). Still pending in this version: SPK signature over `keyId || pub` (T2.10). **One bump, one migration: all existing sessions reset.** | T2.0–T2.13, 2026-09-28 |
 | 4 | Phase 3' | header encrypted under `HKs`/`NHKs` (T3.6, conditional) | T3.6 |
 
 Every bump: update this table, the server validator, `Message.ts`, and the client's supported-versions constant.
@@ -787,7 +789,7 @@ Canonical list in T2.4. Each scenario file states the checklist row it automates
 | ID | Deviation | Rationale | Status |
 |---|---|---|---|
 | `DEVIATION-1` | HKDF directional split instead of an initial DH ratchet | — | **Was the P1-0 bug. Removed by T2.0 on 2026-09-28.** |
-| `DEVIATION-2` | X3DH omits `DH(EK_A, IK_B)` | — | **Resolved by T2.9 (D2 = fix).** |
+| `DEVIATION-2` | X3DH omits `DH(EK_A, IK_B)` | — | **Resolved by T2.9 on 2026-09-28 (D2 = fix); X3DH is byte-identical to libsignal.** |
 | `DEVIATION-3` | Message keys retained 30 days for offline history | superseded by the local store | **Removed by T2.14** (fallback only if T2.14 slips) |
 | `DEVIATION-4` | Skipped keys bounded by count *and* epoch (`MAX_SKIP_TOTAL = 1000`, `MAX_SKIP_EPOCHS = 5`, per-step gap 100) | DoS resistance with multi-epoch tolerance | **Active since 2026-09-28 (T2.6)** |
 | `DEVIATION-5` | Two identity keys (Ed25519 signing + X25519 DH) bound by a signature, versus Signal's single Curve25519 identity with XEdDSA; the safety number hashes `IK_sign || IK_dh` (64 bytes, no type byte) where libsignal hashes `0x05 || key` | avoids a new signature scheme; binding is verified on every bundle and `initPacket`; the fingerprint construction itself is libsignal's and is vector-tested with libsignal's key encoding | **Active since 2026-09-28 (T2.13, D10)** |
