@@ -6,6 +6,7 @@ import { MessageModel } from "../models/Message";
 import { sendMessagePushToUser } from "../push/firebase";
 import { makeConversationId } from "../utils/conversation";
 import { services } from "../lib/services";
+import { PRESENCE_HEARTBEAT_MS } from "../lib/presence";
 import { haveConversation } from "../lib/socketAuthz";
 import { markDelivered, messageExpiry } from "../lib/delivery";
 import { setRealtimeServer } from "../lib/realtime";
@@ -67,23 +68,22 @@ function isValidObjectIdString(v: unknown): v is string {
   return typeof v === "string" && /^[a-fA-F0-9]{24}$/.test(v);
 }
 
-const onlineConnectionCounts = new Map<string, number>();
-const lastSeenByUserId = new Map<string, number>();
-
-function isUserOnline(userId: string) {
-  return (onlineConnectionCounts.get(userId) ?? 0) > 0;
-}
-
-function getPresencePayload(userId: string) {
+// T4.3 (P2-4): presence lives in services.presence (Redis in production, shared by every
+// process; memory in development and tests), never in this module's memory.
+async function getPresencePayload(userId: string) {
   return {
     userId,
-    online: isUserOnline(userId),
-    lastSeenAt: lastSeenByUserId.get(userId) ?? null,
+    online: await services.presence.isOnline(userId),
+    lastSeenAt: await services.presence.lastSeen(userId),
   };
 }
 
-function emitPresence(io: Server, userId: string) {
-  io.to(`presence:${userId}`).emit("presence:update", getPresencePayload(userId));
+async function emitPresence(io: Server, userId: string) {
+  try {
+    io.to(`presence:${userId}`).emit("presence:update", await getPresencePayload(userId));
+  } catch (e) {
+    console.warn('[socket] presence emit failed:', (e as Error)?.message ?? e);
+  }
 }
 
 /**
@@ -121,8 +121,14 @@ export function setupSocket(io: Server) {
   io.on("connection", (socket) => {
     const userId = String(socket.data.userId);
     socket.join(userId); // room per userId
-    onlineConnectionCounts.set(userId, (onlineConnectionCounts.get(userId) ?? 0) + 1);
-    emitPresence(io, userId);
+    services.presence
+      .connected(userId, socket.id)
+      .then(() => emitPresence(io, userId))
+      .catch((e) => console.warn('[socket] presence connect failed:', (e as Error)?.message ?? e));
+    // Keep this socket's presence entry alive across the TTL (a dead process stops refreshing).
+    const heartbeat = setInterval(() => {
+      services.presence.heartbeat(userId, socket.id).catch(() => {});
+    }, PRESENCE_HEARTBEAT_MS);
 
     // Authorization: caller must share a conversation with the peer.
     socket.on("presence:subscribe", async (dto: { peerUserId?: string | null }) => {
@@ -134,7 +140,7 @@ export function setupSocket(io: Server) {
       }
 
       socket.join(`presence:${peerUserId}`);
-      socket.emit("presence:update", getPresencePayload(peerUserId));
+      socket.emit("presence:update", await getPresencePayload(peerUserId));
     });
 
     // Authorization: leaving a room you never joined is a no-op; nothing to check.
@@ -366,7 +372,7 @@ export function setupSocket(io: Server) {
           unreadCount: senderUnreadCount, // Sender's actual unread count from peer
         });
 
-        if (!isUserOnline(String(dto.toUserId))) {
+        if (!(await services.presence.isOnline(String(dto.toUserId)))) {
           // T3.3: a data-only wake-up naming the message; the device fetches and decrypts it.
           await sendMessagePushToUser({
             toUserId: String(dto.toUserId),
@@ -479,16 +485,11 @@ export function setupSocket(io: Server) {
     });
 
     socket.on("disconnect", () => {
-      const nextCount = Math.max(0, (onlineConnectionCounts.get(userId) ?? 1) - 1);
-
-      if (nextCount === 0) {
-        onlineConnectionCounts.delete(userId);
-        lastSeenByUserId.set(userId, Date.now());
-      } else {
-        onlineConnectionCounts.set(userId, nextCount);
-      }
-
-      emitPresence(io, userId);
+      clearInterval(heartbeat);
+      services.presence
+        .disconnected(userId, socket.id)
+        .then(() => emitPresence(io, userId))
+        .catch((e) => console.warn('[socket] presence disconnect failed:', (e as Error)?.message ?? e));
     });
   });
 }

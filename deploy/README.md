@@ -27,6 +27,10 @@ sudo systemctl daemon-reload
 sudo systemctl enable velo-server
 ```
 
+`REDIS_URL` is required in production: rate limits, presence and the
+socket.io adapter (T4.3) share state through it, so two server processes
+behind the proxy behave as one.
+
 `FIREBASE_SERVICE_ACCOUNT_PATH` must point outside the checkout (for example
 `/etc/velo/firebase-admin.json`, mode 0640, owner root:velo). The service
 refuses to start when a required variable is missing.

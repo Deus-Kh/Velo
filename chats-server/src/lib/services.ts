@@ -2,6 +2,7 @@ import type Redis from 'ioredis';
 import { FixedWindowLimiter } from './fixedWindowLimiter';
 import { createKvStore, type KeyValueStore } from './kvStore';
 import { LoginThrottle } from './loginThrottle';
+import { createPresenceStore, type PresenceStore } from './presence';
 
 /**
  * Boot-time wiring of the store-backed services. Routers and the socket layer
@@ -28,6 +29,8 @@ interface Services {
   bundlePairLimiter: FixedWindowLimiter;
   /** Fresh bundle issues per requester across all targets. */
   bundleIssueLimiter: FixedWindowLimiter;
+  /** T4.3: who has a live socket, shared across processes. */
+  presence: PresenceStore;
 }
 
 function build(redis: Redis | null): Services {
@@ -38,6 +41,7 @@ function build(redis: Redis | null): Services {
     messageSendLimiter: new FixedWindowLimiter(kv, { prefix: 'rl:msg', ...MESSAGE_SEND_LIMIT }),
     bundlePairLimiter: new FixedWindowLimiter(kv, { prefix: 'rl:bundle:pair', ...BUNDLE_PAIR_LIMIT }),
     bundleIssueLimiter: new FixedWindowLimiter(kv, { prefix: 'rl:bundle:req', ...BUNDLE_ISSUE_LIMIT }),
+    presence: createPresenceStore(redis),
   };
 }
 

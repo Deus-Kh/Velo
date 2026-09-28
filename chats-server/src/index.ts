@@ -1,5 +1,6 @@
 import http from 'http';
 import { Server } from 'socket.io';
+import { createAdapter } from '@socket.io/redis-adapter';
 import mongoose from 'mongoose';
 import { config } from './config';
 import { initRedis, closeRedis } from './redis';
@@ -33,6 +34,11 @@ async function main() {
     maxHttpBufferSize: SOCKET_MAX_HTTP_BUFFER_SIZE,
   });
 
+  // T4.3 (P2-4): with Redis, rooms and emits are shared across processes (io.to(userId),
+  // presence rooms, emitToUser from HTTP routes). Without Redis (development) one process is enough.
+  const pubSub = redis ? { pub: redis.duplicate(), sub: redis.duplicate() } : null;
+  if (pubSub) io.adapter(createAdapter(pubSub.pub, pubSub.sub));
+
   setupSocket(io);
   setRealtimeServer(io);
 
@@ -46,7 +52,10 @@ async function main() {
       new Promise<void>((resolve, reject) => {
         server.close((err) => (err ? reject(err) : resolve()));
       }),
-    closeSockets: () => io.close(),
+    closeSockets: async () => {
+      io.close();
+      if (pubSub) await Promise.all([pubSub.pub.quit(), pubSub.sub.quit()]);
+    },
     closeRedis,
     disconnectDb: () => mongoose.disconnect(),
     exit: (code) => process.exit(code),

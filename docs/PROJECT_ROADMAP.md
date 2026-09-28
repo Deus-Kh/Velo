@@ -291,7 +291,7 @@ Fix: after T2.0, an inbound `initPacket` whose identity matches the pin but whos
   **Status 2026-09-25:** resolved by T1.10. Access tokens live 15 minutes; refresh tokens (32 random bytes, stored only as SHA-256) rotate on every use inside a per-login family, and presenting a rotated-out token revokes the whole family (reuse detection). `POST /auth/logout` revokes the family; a password change revokes every family and hands the caller a fresh pair. Client: refresh token in the Keychain (device-only), access token in memory only, proactive refresh before expiry and reactive refresh on 401 with a single in-flight request, socket re-auth on reconnect, and a session-lost path that lands on Login. Legacy pre-T1.10 access tokens keep working until they expire. Verified by 9 route tests (rotation, reuse → family revoked, expired, concurrent refresh, logout, change-password) and client unit tests for the JWT and single-flight helpers.
 - **P2-2 · Effectively zero tests; client type-check fails** `[CORE]` → T1.0, T2.4
 - **P2-3 · Stabilization checklist never run** `[CORE]` → T2.12
-- **P2-4 · Presence and push routing in process memory** `[CORE]` → T4.3
+- **P2-4 · Presence and push routing in process memory** `[CORE]` → T4.3 — **fixed 2026-09-28 (presence in Redis with TTL + heartbeat; socket.io Redis adapter)**
 - **P2-5 · No build step, no process manager** `[CORE]` → T4.1, T4.2
 - **P2-6 · Pagination on a client-supplied timestamp** `[PARITY]` → T3.2 — **fixed 2026-09-28 (undelivered cursor is `seq`; the legacy history route keeps its timestamp cursor until it is removed)**
 - **P2-7 · `cors({ origin: true, credentials: true })`** `[PARITY]` → T4.4
@@ -437,6 +437,8 @@ Extraction happens in T2.1. Secrets (`*.pem`, `*.keystore`, service-account JSON
 **4' progress — T4.1 done 2026-09-28** (one commit): the production process runs the compiled `dist/` build; nodemon and the TypeScript loaders are development-only; a manifest test keeps it that way. Next in order: T4.2 (process manager, graceful shutdown, restart on crash).
 
 **4' progress — T4.2 done 2026-09-28** (one commit): systemd unit under `deploy/`, hardened and restarting on crash without flapping; one in-process shutdown path for signals and crashes with a force-exit deadline; `/health` reports readiness. Host install is a human step (`deploy/README.md`). Next in order: T4.3 (Redis: socket.io adapter, presence, rate limits, refresh-token families).
+
+**4' progress — T4.3 done 2026-09-28** (one commit): socket.io Redis adapter, presence shared through Redis with expiry and heartbeat, push routing correct across processes; rate limits were already on Redis; refresh-token families stay in MongoDB (durable, shared). Next in order: T4.4 (CORS pinned to known origins).
 
 **2b progress — T2.14 done 2026-09-28** (one commit, D7 = A): plaintext stored locally in sealed records, message keys never archived, history read from the device with the server asked only for newer messages, one-time migration of the old archive. **The known-red registry is empty: every scenario the harness owns is green.** Remaining in Phase 2: T2.12 (manual two-device checklist, owner).
 
