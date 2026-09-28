@@ -58,7 +58,7 @@ describe('S27 server ordering', () => {
     expect(ab.seq).toBe(1);
     expect(ac.seq).toBe(1);
 
-    const again = server.storeMessage('A', { toUserId: 'B', clientMessageId: ab.clientMessageId, createdAt: 0, protoVersion: 3, v3: ab.v3, initPacket: ab.initPacket });
+    const again = server.storeMessage('A', { toUserId: 'B', clientMessageId: ab.clientMessageId, createdAt: 0, protoVersion: 4, v4: ab.v4, initPacket: ab.initPacket });
     expect(again.serverMessageId).toBe(ab.serverMessageId);
     expect(again.seq).toBe(1);
   });

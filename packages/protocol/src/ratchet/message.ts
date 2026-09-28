@@ -6,32 +6,37 @@ import { dhRatchet } from './dh';
 import type { RatchetSessionV2 } from '../types/session';
 import { ProtocolError } from '../errors';
 import { openMessage, sealMessage, type AssociatedData, type MessageEnvelope } from './envelope';
-import type { MessageHeader } from './header';
+import { openHeader, sealHeader, type MessageHeader } from './header';
 import { MAX_MESSAGE_NUMBER, MAX_SKIP_EPOCHS, MAX_SKIP_PER_STEP, MAX_SKIP_TOTAL, REPLAY_WINDOW } from './limits';
 
 export type { MessageHeader } from './header';
 export type { MessageEnvelope, AssociatedData } from './envelope';
-/** @deprecated v2 names kept for one release; the envelope is version 3. */
-export type V2Header = MessageHeader;
-/** @deprecated see MessageEnvelope. */
-export type V2Encrypted = MessageEnvelope;
 
 /**
  * T3.4: a step returns the next session, the envelope or plaintext, and
- * nothing else. No message key leaves the step (there is no archive since
- * T2.14, so nothing needs one), and every intermediate key the step
- * derived is wiped before it returns, on success and on failure.
+ * nothing else. No message key leaves the step, and every intermediate key
+ * the step derived is wiped before it returns, on success and on failure.
+ * T3.6: the encrypt step also returns the plaintext header it sealed (the
+ * sender's own bookkeeping; not secret to the sender).
  */
 export type RatchetEncryptResult = {
   session: RatchetSessionV2;
   envelope: MessageEnvelope;
+  header: MessageHeader;
 };
 
 export type RatchetDecryptResult = {
   session: RatchetSessionV2;
   plaintext: string;
+  /** The header as decrypted (T3.6). */
+  header: MessageHeader;
   /** Set when the message was decrypted with a previously skipped key. */
   consumedSkippedKeyId: string | null;
+};
+
+export type EncryptOptions = {
+  /** Frozen-vector tests only: the 24-byte header nonce. */
+  headerNonce?: Uint8Array;
 };
 
 /**
@@ -98,17 +103,42 @@ function rememberReceived(session: RatchetSessionV2, id: string): string[] {
   return list.length > REPLAY_WINDOW ? list.slice(list.length - REPLAY_WINDOW) : list;
 }
 
+export type HeaderEpoch = 'current' | 'next' | 'previous';
+
 /**
- * Pure sending step. Synchronous, no I/O, never mutates `session`.
- * `ad` binds the envelope to the sender/receiver identity pair (T2.5).
+ * DecryptHeader (Double Ratchet §4, T3.6): trial-decrypt the encrypted
+ * header under the current receiving header key, then the next one (a new
+ * epoch), then the retained keys of previous epochs (a late message).
+ * Returns null when it opens under none: the receiver cannot tell a
+ * modified header from a message of a session it does not have.
+ */
+export function decryptHeader(session: RatchetSessionV2, envelope: MessageEnvelope): { header: MessageHeader; epoch: HeaderEpoch; epochDhPub: string | null } | null {
+  const enc = envelope.encHeader;
+  if (session.headerKeyRecv) {
+    const header = openHeader({ headerKey: decodeBase64(normalizeB64(session.headerKeyRecv)), encHeader: enc });
+    if (header) return { header, epoch: 'current', epochDhPub: session.DHrPublicKey };
+  }
+  const next = openHeader({ headerKey: decodeBase64(normalizeB64(session.nextHeaderKeyRecv)), encHeader: enc });
+  if (next) return { header: next, epoch: 'next', epochDhPub: null };
+  for (const [dhPub, hk] of Object.entries(session.epochHeaderKeys ?? {})) {
+    const header = openHeader({ headerKey: decodeBase64(normalizeB64(hk)), encHeader: enc });
+    if (header) return { header, epoch: 'previous', epochDhPub: dhPub };
+  }
+  return null;
+}
+
+/**
+ * Pure sending step (RatchetEncryptHE). Synchronous, no I/O, never mutates
+ * `session`. The header is sealed under HKs; `ad` binds the envelope to the
+ * sender/receiver identity pair and to the encrypted header (T2.5, T3.6).
  * Persistence is the caller's job and must happen only after this returns.
  */
-export function ratchetEncrypt(session: RatchetSessionV2, plaintext: string, ad: AssociatedData): RatchetEncryptResult {
+export function ratchetEncrypt(session: RatchetSessionV2, plaintext: string, ad: AssociatedData, opts: EncryptOptions = {}): RatchetEncryptResult {
   if (!session.DHsPublicKey) {
     throw new ProtocolError('STORAGE_CORRUPTION', 'Session missing DHsPublicKey', { what: 'DHsPublicKey' });
   }
-  if (!session.chainKeySend) {
-    // A responder that has not received yet has no sending chain (§8.1).
+  if (!session.chainKeySend || !session.headerKeySend) {
+    // A responder that has not received yet has no sending chain and no sending header key (§8.1).
     throw new ProtocolError('SESSION_RESET_REQUIRED', 'Session has no sending chain yet', { what: 'chainKeySend' });
   }
 
@@ -117,39 +147,55 @@ export function ratchetEncrypt(session: RatchetSessionV2, plaintext: string, ad:
   wipe(ck);
   try {
     const header: MessageHeader = { n: session.Ns, pn: session.PN, dhPub: session.DHsPublicKey };
-    const envelope = sealMessage({ messageKey, header, plaintext, ad }); // consumes (wipes) messageKey
+    const encHeader = sealHeader({ headerKey: decodeBase64(normalizeB64(session.headerKeySend)), header, nonce: opts.headerNonce });
+    const envelope = sealMessage({ messageKey, encHeader, plaintext, ad }); // consumes (wipes) messageKey
 
     const next: RatchetSessionV2 = {
       ...session,
       chainKeySend: encodeBase64(nextChainKey),
       Ns: session.Ns + 1,
     };
-    return { session: next, envelope };
+    return { session: next, envelope, header };
   } finally {
     wipe(messageKey, nextChainKey);
   }
 }
 
 /**
- * Pure receiving step (spec §8.1). Synchronous, no I/O, never mutates
- * `session`. On any throw the caller must persist nothing (R7).
+ * Pure receiving step (RatchetDecryptHE, spec §8.1). Synchronous, no I/O,
+ * never mutates `session`. On any throw the caller must persist nothing (R7).
  *
+ *  0. decrypt the header under HKr, else NHKr (new epoch), else a retained
+ *     previous-epoch key (late message); none → DECRYPT_FAILED;
  *  1. skipped-key fast path; 1b. explicit replay window (T3.4);
- *  2. if the peer's ratchet key is new (or there is none yet): drain the
- *     previous receiving chain to header.pn into the skipped keys (T2.8),
- *     then perform a full DH ratchet step — never merely adopt (R13);
+ *  2. new epoch: drain the previous receiving chain to header.pn into the
+ *     skipped keys (T2.8), then a full DH ratchet step (R13), which also
+ *     rotates the header keys;
  *  3. derive forward on the current receiving chain to header.n, keeping
  *     the skipped keys (T2.7);
  *  4-6. derive the target key, authenticate (MAC over identities and the
- *     canonical header, T2.5), decrypt, commit.
- * Every chain key and message key derived along the way is wiped before
- * the step returns, whether it returns or throws (T3.4).
+ *     encrypted header, T2.5/T3.6), decrypt, commit.
+ * Every chain key, message key and header key copy derived along the way is
+ * wiped before the step returns, whether it returns or throws (T3.4).
  */
 export function ratchetDecrypt(session: RatchetSessionV2, envelope: MessageEnvelope, ad: AssociatedData): RatchetDecryptResult {
-  const incomingDhPub = normalizeB64(envelope.header.dhPub);
-  const targetN = envelope.header.n;
+  // 0. The header must open under a key this session knows.
+  const opened = decryptHeader(session, envelope);
+  if (!opened) {
+    throw new ProtocolError('DECRYPT_FAILED', 'Header does not open under any known header key', { stage: 'header' });
+  }
+  const { header, epoch } = opened;
+  const incomingDhPub = normalizeB64(header.dhPub);
+  const targetN = header.n;
   requireCounter(targetN, 'header.n');
-  requireCounter(envelope.header.pn, 'header.pn');
+  requireCounter(header.pn, 'header.pn');
+  // A header sealed under a known key must name that key's epoch.
+  if (epoch === 'current' && incomingDhPub !== session.DHrPublicKey) {
+    throw new ProtocolError('DECRYPT_FAILED', 'Header names a ratchet key that does not belong to its header key', { stage: 'header' });
+  }
+  if (epoch === 'previous' && incomingDhPub !== opened.epochDhPub) {
+    throw new ProtocolError('DECRYPT_FAILED', 'Header names a ratchet key that does not belong to its header key', { stage: 'header' });
+  }
 
   // 1. Skipped-key fast path.
   const retained: Record<string, string> = { ...(session.skippedKeys || {}) };
@@ -162,6 +208,7 @@ export function ratchetDecrypt(session: RatchetSessionV2, envelope: MessageEnvel
     return {
       session: { ...session, skippedKeys: retained, recentlyReceived: rememberReceived(session, skippedId) },
       plaintext,
+      header,
       consumedSkippedKeyId: skippedId,
     };
   }
@@ -171,19 +218,23 @@ export function ratchetDecrypt(session: RatchetSessionV2, envelope: MessageEnvel
     throw new ProtocolError('REPLAY_DETECTED', 'Message already received', { n: targetN });
   }
 
+  // A previous epoch with no retained key for this counter: never ratchet backwards (T2.6).
+  if (epoch === 'previous') {
+    throw new ProtocolError('UNKNOWN_OLD_MESSAGE', 'Message from a previous epoch whose keys are no longer retained', { n: targetN });
+  }
+
   let work = session;
 
   // 2. New peer ratchet key: drain the old chain to header.pn (T2.8), then ratchet (R13).
-  if (!work.DHrPublicKey || work.DHrPublicKey !== incomingDhPub) {
-    // A previous epoch whose keys were evicted (or never retained): never ratchet backwards (T2.6).
-    if ((work.peerEpochHistory ?? []).includes(incomingDhPub)) {
-      throw new ProtocolError('UNKNOWN_OLD_MESSAGE', 'Message from a previous epoch whose keys are no longer retained', { n: targetN });
+  if (epoch === 'next') {
+    if ((work.peerEpochHistory ?? []).includes(incomingDhPub) || incomingDhPub === work.DHrPublicKey) {
+      throw new ProtocolError('DECRYPT_FAILED', 'A new-epoch header reuses a known ratchet key', { stage: 'header' });
     }
     if (work.DHrPublicKey && work.chainKeyRecv) {
-      requireGap(envelope.header.pn, work.Nr, 'header.pn');
+      requireGap(header.pn, work.Nr, 'header.pn');
       let oldCk = decodeBase64(work.chainKeyRecv);
       let oldNr = work.Nr;
-      while (oldNr < envelope.header.pn) {
+      while (oldNr < header.pn) {
         const step = chainKdf(oldCk);
         retained[skippedKeyId(work.DHrPublicKey, oldNr)] = encodeBase64(step.messageKey);
         wipe(oldCk, step.messageKey);
@@ -233,6 +284,7 @@ export function ratchetDecrypt(session: RatchetSessionV2, envelope: MessageEnvel
     return {
       session: pruneSkippedKeys({ ...work, chainKeyRecv: encodeBase64(ck), Nr: nr, skippedKeys: retained, recentlyReceived: rememberReceived(work, skippedId) }),
       plaintext,
+      header,
       consumedSkippedKeyId: null,
     };
   } finally {

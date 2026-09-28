@@ -25,7 +25,7 @@ describe('S25 peer reset', () => {
     const fresh = B!.send('A', 'fresh start'); // B bootstraps a new session toward A
     expect(fresh.initPacket).not.toBeNull();
     expect(A!.inbox.map((m) => m.text)).toEqual(['b1', 'fresh start']);
-    expect(A!.sessionState('B')!.DHrPublicKey).toBe(fresh.v3.header.dhPub);
+    expect(A!.sessionState('B')!.DHrPublicKey).toBe(B!.sentHeader(fresh.clientMessageId).dhPub);
 
     A!.send('B', 'a2');
     B!.send('A', 'b2');

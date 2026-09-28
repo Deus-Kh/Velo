@@ -26,9 +26,10 @@ describe('S05 reorder across a DH ratchet', () => {
     B!.send('A', 'b1'); // A ratchets: epoch A2
     const a2 = A!.send('B', 'a2'); // epoch A2, n = 0, pn = 2
 
-    expect(a2.v3.header.dhPub, 'a direction change must start a new epoch (T2.0)').not.toBe(a1.v3.header.dhPub);
-    expect(a1b.v3.header.dhPub).toBe(a1.v3.header.dhPub);
-    expect(a2.v3.header.pn, 'pn carries the length of the previous sending chain').toBe(2);
+    const h = (dto: typeof a1) => A!.sentHeader(dto.clientMessageId); // T3.6: headers are encrypted on the wire
+    expect(h(a2).dhPub, 'a direction change must start a new epoch (T2.0)').not.toBe(h(a1).dhPub);
+    expect(h(a1b).dhPub).toBe(h(a1).dhPub);
+    expect(h(a2).pn, 'pn carries the length of the previous sending chain').toBe(2);
 
     network.reorder('B', 'reverse'); // a2 first, then a1b
     const results = network.release('B');

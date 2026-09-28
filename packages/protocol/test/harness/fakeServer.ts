@@ -31,8 +31,8 @@ export type SendMessageDTO = {
   toUserId: string;
   clientMessageId: string;
   createdAt: number;
-  protoVersion: 3;
-  v3: MessageEnvelope;
+  protoVersion: 4;
+  v4: MessageEnvelope;
   initPacket: X3DHInitPacket | null;
 };
 
@@ -41,8 +41,8 @@ export type NewMessageDTO = {
   conversationId: string;
   fromUserId: string;
   toUserId: string;
-  protoVersion: 3;
-  v3: MessageEnvelope;
+  protoVersion: 4;
+  v4: MessageEnvelope;
   initPacket: X3DHInitPacket | null;
   clientMessageId: string;
   createdAt: number;
@@ -187,15 +187,15 @@ export class FakeServer {
     // Dedupe by (sender, clientMessageId): a resend after delivery gets the same id and is not re-emitted.
     const delivered = this.receipts.find((r) => r.fromUserId === fromUserId && r.clientMessageId === dto.clientMessageId);
     const existing = this.messages.find((m) => m.fromUserId === fromUserId && m.clientMessageId === dto.clientMessageId)
-      ?? (delivered ? { serverMessageId: delivered.serverMessageId, conversationId, fromUserId, toUserId: dto.toUserId, protoVersion: 3 as const, v3: dto.v3, initPacket: dto.initPacket, clientMessageId: dto.clientMessageId, createdAt: delivered.createdAt, seq: delivered.seq } : undefined);
+      ?? (delivered ? { serverMessageId: delivered.serverMessageId, conversationId, fromUserId, toUserId: dto.toUserId, protoVersion: 4 as const, v4: dto.v4, initPacket: dto.initPacket, clientMessageId: dto.clientMessageId, createdAt: delivered.createdAt, seq: delivered.seq } : undefined);
 
     const stored: NewMessageDTO = existing ?? {
       serverMessageId: 'srv-' + String(++this.seq),
       conversationId,
       fromUserId,
       toUserId: dto.toUserId,
-      protoVersion: 3,
-      v3: dto.v3,
+      protoVersion: 4,
+      v4: dto.v4,
       initPacket: dto.initPacket,
       clientMessageId: dto.clientMessageId,
       createdAt: dto.createdAt,

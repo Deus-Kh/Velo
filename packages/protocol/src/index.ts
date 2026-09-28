@@ -36,20 +36,30 @@ export { initInitiatorSession, initResponderSession, sessionHasReceived, glareWi
 export {
   ratchetEncrypt,
   ratchetDecrypt,
+  decryptHeader,
   skippedKeyId,
   pruneSkippedKeys,
+  type HeaderEpoch,
+  type EncryptOptions,
   type MessageHeader,
   type MessageEnvelope,
   type AssociatedData,
-  type V2Header,
-  type V2Encrypted,
   type RatchetEncryptResult,
   type RatchetDecryptResult,
 } from './ratchet/message';
-export { canonicalHeaderBytes, decodeCanonicalHeader, WIRE_VERSION } from './ratchet/header';
+export {
+  canonicalHeaderBytes,
+  decodeCanonicalHeader,
+  sealHeader,
+  openHeader,
+  encryptedHeaderBytes,
+  WIRE_VERSION,
+  ENCRYPTED_HEADER_LENGTH,
+  HEADER_NONCE_LENGTH,
+} from './ratchet/header';
 export { MAX_SKIP_PER_STEP, MAX_SKIP_TOTAL, MAX_SKIP_EPOCHS, MAX_MESSAGE_NUMBER, PEER_EPOCH_HISTORY, REPLAY_WINDOW } from './ratchet/limits';
 export { expandMessageKey, type ExpandedMessageKeys } from './ratchet/messageKeys';
-export { sealMessage, openMessage, decryptWithMessageKey, associatedDataBytes, MAC_LENGTH } from './ratchet/envelope';
+export { sealMessage, openMessage, associatedDataBytes, MAC_LENGTH } from './ratchet/envelope';
 
 export type { ProtoVersion, AnySession, RatchetSessionV2 } from './types/session';
 

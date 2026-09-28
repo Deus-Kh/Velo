@@ -15,6 +15,7 @@ import { type AssociatedData, type MessageEnvelope } from '../src/ratchet/envelo
 import { MAX_MESSAGE_NUMBER, MAX_SKIP_PER_STEP } from '../src/ratchet/limits';
 import { ratchetDecrypt, ratchetEncrypt } from '../src/ratchet/message';
 import { initInitiatorSession, initResponderSession } from '../src/ratchet/session';
+import { sealHeader, type MessageHeader } from '../src/ratchet/header';
 import type { RatchetSessionV2 } from '../src/types/session';
 
 const AB: AssociatedData = {
@@ -33,6 +34,12 @@ function deepFreeze<T>(value: T): T {
 const HK_A = encodeBase64(new Uint8Array(32).fill(0xa1));
 const NHK_B = encodeBase64(new Uint8Array(32).fill(0xb2));
 const snapshot = <T,>(v: T): T => JSON.parse(JSON.stringify(v)) as T;
+/** T3.6: forge a header field under the sender's real header key. */
+const reseal = (sender: RatchetSessionV2, env: MessageEnvelope, header: MessageHeader, patch: Partial<MessageHeader>): MessageEnvelope => ({
+  ...env,
+  encHeader: sealHeader({ headerKey: encodeBase64ToBytes(sender.headerKeySend!), header: { ...header, ...patch } }),
+});
+const encodeBase64ToBytes = (b64: string) => Uint8Array.from(Buffer.from(b64, 'base64'));
 
 function pair() {
   const spk = nacl.box.keyPair.fromSecretKey(new Uint8Array(32).fill(7));
@@ -79,12 +86,16 @@ describe('T3.4 audit: the pure steps never mutate their inputs', () => {
     expectRefusal(b, e1.envelope, BA, 'HEADER_TAMPERED');
     // replay of a consumed message
     expectRefusal(b, e0.envelope, AB, 'REPLAY_DETECTED');
-    // counters out of range
-    expectRefusal(b, { ...e1.envelope, header: { ...e1.envelope.header, n: MAX_MESSAGE_NUMBER } }, AB, 'HEADER_TAMPERED');
+    // counters out of range (forged under the real header key)
+    expectRefusal(b, reseal(a, e1.envelope, e1.header, { n: MAX_MESSAGE_NUMBER }), AB, 'HEADER_TAMPERED');
     // too large a gap
-    expectRefusal(b, { ...e1.envelope, header: { ...e1.envelope.header, n: e1.envelope.header.n + MAX_SKIP_PER_STEP + 1 } }, AB, 'TOO_MANY_SKIPPED');
-    // an unknown ratchet key: ratchet attempt, then refusal
-    expectRefusal(b, { ...e1.envelope, header: { ...e1.envelope.header, dhPub: encodeBase64(nacl.box.keyPair().publicKey) } }, AB, 'DECRYPT_FAILED');
+    expectRefusal(b, reseal(a, e1.envelope, e1.header, { n: e1.header.n + MAX_SKIP_PER_STEP + 1 }), AB, 'TOO_MANY_SKIPPED');
+    // a header under a key this session does not know (T3.6)
+    expectRefusal(b, { ...e1.envelope, encHeader: sealHeader({ headerKey: nacl.randomBytes(32), header: e1.header }) }, AB, 'DECRYPT_FAILED');
+    // a flipped byte of the encrypted header
+    const flipped = encodeBase64ToBytes(e1.envelope.encHeader);
+    flipped[0] = flipped[0]! ^ 1;
+    expectRefusal(b, { ...e1.envelope, encHeader: encodeBase64(flipped) }, AB, 'DECRYPT_FAILED');
 
     // an old counter whose key is gone (consume m1, then forge n = 0 on a session whose window forgot it)
     b = ratchetDecrypt(b, e1.envelope, AB).session;

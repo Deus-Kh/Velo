@@ -5,7 +5,8 @@ import { initInitiatorSession, initResponderSession } from '../src/ratchet/sessi
 import { pruneSkippedKeys, ratchetDecrypt, ratchetEncrypt, skippedKeyId, type MessageEnvelope } from '../src/ratchet/message';
 import { chainKdf } from '../src/ratchet/chain';
 import { MAX_MESSAGE_NUMBER, MAX_SKIP_EPOCHS, MAX_SKIP_PER_STEP, MAX_SKIP_TOTAL, REPLAY_WINDOW } from '../src/ratchet/limits';
-import { decryptWithMessageKey, MAC_LENGTH, type AssociatedData } from '../src/ratchet/envelope';
+import { MAC_LENGTH, type AssociatedData } from '../src/ratchet/envelope';
+import { openHeader, sealHeader, type MessageHeader } from '../src/ratchet/header';
 import type { RatchetSessionV2 } from '../src/types/session';
 import { protocolErrorCode } from '../src/errors';
 
@@ -35,6 +36,13 @@ function pair() {
 
 const snapshot = (s: RatchetSessionV2) => JSON.parse(JSON.stringify(s));
 
+/** T3.6: re-seal a modified header under the sender's current header key (an attacker holding HKs). */
+function reseal(sender: RatchetSessionV2, env: MessageEnvelope, patch: Partial<MessageHeader>): MessageEnvelope {
+  const header = openHeader({ headerKey: decodeBase64(sender.headerKeySend!), encHeader: env.encHeader });
+  if (!header) throw new Error('reseal: header does not open under the sender key');
+  return { ...env, encHeader: sealHeader({ headerKey: decodeBase64(sender.headerKeySend!), header: { ...header, ...patch } }) };
+}
+
 function codeOf(fn: () => unknown): string | null {
   try {
     fn();
@@ -53,9 +61,11 @@ describe('ratchetEncrypt / ratchetDecrypt', () => {
     const e1 = ratchetEncrypt(a, 'hello', AB);
     expect(a).toEqual(a0);
     expect(e1.session.Ns).toBe(1);
-    expect(e1.envelope.header).toEqual({ n: 0, pn: 0, dhPub: dhsA0.publicKey });
+    expect(e1.header).toEqual({ n: 0, pn: 0, dhPub: dhsA0.publicKey });
+    expect(JSON.stringify(e1.envelope), 'the wire carries no plaintext header field (T3.6)').not.toContain(dhsA0.publicKey);
+    expect(openHeader({ headerKey: decodeBase64(a.headerKeySend!), encHeader: e1.envelope.encHeader })).toEqual(e1.header);
     expect(decodeBase64(e1.envelope.mac).length).toBe(MAC_LENGTH);
-    expect(Object.keys(e1).sort()).toEqual(['envelope', 'session']); // T3.4: no key material leaves the step
+    expect(Object.keys(e1).sort()).toEqual(['envelope', 'header', 'session']); // T3.4: no key material leaves the step
     a = e1.session;
 
     const d1 = ratchetDecrypt(b, e1.envelope, AB);
@@ -66,11 +76,12 @@ describe('ratchetEncrypt / ratchetDecrypt', () => {
     expect(d1.session.DHsPublicKey, 'responder rotated its ratchet key on the first inbound message (R13)').not.toBe(spkB.publicKey);
     expect(d1.session.chainKeySend, 'responder now has a sending chain').not.toBeNull();
     expect(d1.consumedSkippedKeyId).toBeNull();
-    expect(Object.keys(d1).sort()).toEqual(['consumedSkippedKeyId', 'plaintext', 'session']);
+    expect(Object.keys(d1).sort()).toEqual(['consumedSkippedKeyId', 'header', 'plaintext', 'session']);
+    expect(d1.header).toEqual(e1.header);
     b = d1.session;
 
     const e2 = ratchetEncrypt(b, 'reply', BA);
-    expect(e2.envelope.header.dhPub).toBe(b.DHsPublicKey);
+    expect(e2.header.dhPub).toBe(b.DHsPublicKey);
     const d2 = ratchetDecrypt(a, e2.envelope, BA);
     expect(d2.plaintext).toBe('reply');
     expect(d2.session.DHsPublicKey, 'initiator ratchets when the reply carries a new key').not.toBe(dhsA0.publicKey);
@@ -82,23 +93,16 @@ describe('ratchetEncrypt / ratchetDecrypt', () => {
     expect(codeOf(() => ratchetEncrypt(b, 'too early', BA))).toBe('SESSION_RESET_REQUIRED');
   });
 
-  it('is byte-for-byte reproducible for fixed keys (frozen vector, R8; nonce is derived)', () => {
+  it('is byte-for-byte reproducible for fixed keys (frozen vector, R8; payload nonce derived, header nonce pinned)', () => {
     const { a } = pair();
-    const e = ratchetEncrypt(a, 'frozen', AB);
+    const headerNonce = new Uint8Array(24).fill(0x5a); // the header nonce is random on the wire; pinned here
+    const e = ratchetEncrypt(a, 'frozen', AB, { headerNonce });
     expect(hex(decodeBase64(e.envelope.ciphertext))).toBe('2ad488a2e6636032fbb66ba73aae921c3bb409152f7a');
-    expect(hex(decodeBase64(e.envelope.mac))).toBe('c58e798ea0191c43db8494fa87a760de');
+    expect(hex(decodeBase64(e.envelope.mac))).toBe('eadbffa40a6900b05b8462e262d6835d');
+    expect(hex(decodeBase64(e.envelope.encHeader))).toBe('5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a0e7c9e2f8c82787c58a42a6d0e20f4e08d69f0759bc6c5f762887d0f292cc62923b7d3285280246bdb703b023cf69222a441bed5f319d78659fa8b3af1');
     expect(encodeBase64(chainKdf(decodeBase64(a.chainKeySend!)).messageKey)).toBe('odK3b3KVPxNIFmsQy11o7+UusV0W5yDf8mw1TzKgtkg=');
     expect(hex(decodeBase64(e.session.chainKeySend!))).toBe('e3d95e3d9b1273732c117e750ded362b4d9c8980cce236ab4fea21c614763558');
-    expect(ratchetEncrypt(a, 'frozen', AB).envelope).toEqual(e.envelope);
-  });
-
-  it('a stored message key opens the archived envelope (legacy migration path) with the right AD only', () => {
-    const { a, b } = pair();
-    const e = ratchetEncrypt(a, 'archived', AB);
-    ratchetDecrypt(b, e.envelope, AB);
-    const mkB64 = encodeBase64(chainKdf(decodeBase64(a.chainKeySend!)).messageKey);
-    expect(decryptWithMessageKey({ messageKeyB64: mkB64, envelope: e.envelope, ad: AB })).toBe('archived');
-    expect(codeOf(() => decryptWithMessageKey({ messageKeyB64: mkB64, envelope: e.envelope, ad: BA }))).toBe('HEADER_TAMPERED');
+    expect(ratchetEncrypt(a, 'frozen', AB, { headerNonce }).envelope).toEqual(e.envelope);
   });
 
   it('decrypts out-of-order messages within an epoch via skipped keys and reports the consumed id', () => {
@@ -151,8 +155,8 @@ describe('ratchetEncrypt / ratchetDecrypt', () => {
     const e1 = ratchetEncrypt(a, 'm1', AB);
     const before = snapshot(b);
 
-    // pn changed: same key is derived, MAC fails, payload opens → HEADER_TAMPERED.
-    const pnTampered: MessageEnvelope = { ...e1.envelope, header: { ...e1.envelope.header, pn: e1.envelope.header.pn + 7 } };
+    // pn changed (forged under the real header key): same key is derived, MAC fails, payload opens → HEADER_TAMPERED.
+    const pnTampered = reseal(a, e1.envelope, { pn: e1.header.pn + 7 });
     expect(codeOf(() => ratchetDecrypt(b, pnTampered, AB))).toBe('HEADER_TAMPERED');
     // Re-attributed to a different sender pair: HEADER_TAMPERED (acceptance: "a ciphertext re-attributed fails").
     expect(codeOf(() => ratchetDecrypt(b, e1.envelope, BA))).toBe('HEADER_TAMPERED');
@@ -160,8 +164,12 @@ describe('ratchetEncrypt / ratchetDecrypt', () => {
     // Missing or short MAC.
     expect(codeOf(() => ratchetDecrypt(b, { ...e1.envelope, mac: '' }, AB))).toBe('HEADER_TAMPERED');
     // n changed: a different key is derived, nothing opens → DECRYPT_FAILED.
-    const nTampered: MessageEnvelope = { ...e1.envelope, header: { ...e1.envelope.header, n: e1.envelope.header.n + 1 } };
+    const nTampered = reseal(a, e1.envelope, { n: e1.header.n + 1 });
     expect(codeOf(() => ratchetDecrypt(b, nTampered, AB))).toBe('DECRYPT_FAILED');
+    // A byte of the encrypted header flipped on the wire: opens under no key → DECRYPT_FAILED (T3.6).
+    const flipped = decodeBase64(e1.envelope.encHeader);
+    flipped[flipped.length - 1] = flipped[flipped.length - 1]! ^ 1;
+    expect(codeOf(() => ratchetDecrypt(b, { ...e1.envelope, encHeader: encodeBase64(flipped) }, AB))).toBe('DECRYPT_FAILED');
     expect(b).toEqual(before);
     expect(ratchetDecrypt(b, e1.envelope, AB).plaintext).toBe('m1');
   });
@@ -202,7 +210,7 @@ describe('ratchetEncrypt / ratchetDecrypt', () => {
     b = eb.session;
     a = ratchetDecrypt(a, eb.envelope, BA).session; // A ratchets: new epoch
     const next = ratchetEncrypt(a, 'a-next', AB);
-    const forgedPn = { ...next.envelope, header: { ...next.envelope.header, pn: next.envelope.header.pn + MAX_SKIP_PER_STEP + 1 } };
+    const forgedPn = reseal(a, next.envelope, { pn: next.header.pn + MAX_SKIP_PER_STEP + 1 });
     expect(codeOf(() => ratchetDecrypt(b, forgedPn, AB))).toBe('TOO_MANY_SKIPPED');
   });
 
@@ -210,8 +218,8 @@ describe('ratchetEncrypt / ratchetDecrypt', () => {
     const { a, b } = pair();
     const e = ratchetEncrypt(a, 'x', AB);
     for (const bad of [MAX_MESSAGE_NUMBER, 2 ** 32 - 1, -1, 1.5]) {
-      expect(codeOf(() => ratchetDecrypt(b, { ...e.envelope, header: { ...e.envelope.header, n: bad } }, AB))).toBe('HEADER_TAMPERED');
-      expect(codeOf(() => ratchetDecrypt(b, { ...e.envelope, header: { ...e.envelope.header, pn: bad } }, AB))).toBe('HEADER_TAMPERED');
+      expect(codeOf(() => ratchetDecrypt(b, reseal(a, e.envelope, { n: bad }), AB))).toBe('HEADER_TAMPERED');
+      expect(codeOf(() => ratchetDecrypt(b, reseal(a, e.envelope, { pn: bad }), AB))).toBe('HEADER_TAMPERED');
     }
   });
 
@@ -239,16 +247,22 @@ describe('ratchetEncrypt / ratchetDecrypt', () => {
     // 2 epochs back decrypts from its retained key.
     const twoBack = held[held.length - 3]!;
     expect(ratchetDecrypt(b, twoBack, AB).plaintext).toBe('held-' + String(held.length - 3));
-    // The oldest epochs were evicted: a known previous epoch without keys is UNKNOWN_OLD_MESSAGE, never a ratchet backwards.
+    // The oldest epochs were evicted together with their header keys (T3.6): a message from one of them
+    // opens under no key and is DECRYPT_FAILED, never a ratchet backwards; the receiver cannot even tell it
+    // from a replay of a consumed message of that epoch. Within the retained epochs the codes stay precise.
     const before = snapshot(b);
-    expect(codeOf(() => ratchetDecrypt(b, held[0]!, AB))).toBe('UNKNOWN_OLD_MESSAGE');
+    expect(codeOf(() => ratchetDecrypt(b, held[0]!, AB))).toBe('DECRYPT_FAILED');
+    expect(codeOf(() => ratchetDecrypt(b, seen[0]!, AB))).toBe('DECRYPT_FAILED');
     expect(b).toEqual(before);
-    // T3.4: a consumed message from that same evicted epoch is a replay, not an unknown old message.
-    expect(codeOf(() => ratchetDecrypt(b, seen[0]!, AB))).toBe('REPLAY_DETECTED');
+    // A retained previous epoch: its consumed message is a replay; a never-received one beyond its keys is UNKNOWN_OLD_MESSAGE.
+    expect(codeOf(() => ratchetDecrypt(b, seen[seen.length - 3]!, AB))).toBe('REPLAY_DETECTED');
+    const twoBackDecrypted = ratchetDecrypt(b, twoBack, AB).session; // consumes held-(k-2); its epoch now has no keys left
+    expect(codeOf(() => ratchetDecrypt(twoBackDecrypted, twoBack, AB))).toBe('REPLAY_DETECTED');
     expect(b).toEqual(before);
-    // A never-seen epoch key is still treated as new (S18): ratchet attempt, then DECRYPT_FAILED.
-    const alien = { ...held[0]!, header: { ...held[0]!.header, dhPub: pairB64(0x99).publicKey } };
+    // A header sealed under a key this session never had (S18): opens under nothing → DECRYPT_FAILED (T3.6).
+    const alien = { ...held[0]!, encHeader: sealHeader({ headerKey: nacl.randomBytes(32), header: { n: 0, pn: 0, dhPub: pairB64(0x99).publicKey } }) };
     expect(codeOf(() => ratchetDecrypt(b, alien, AB))).toBe('DECRYPT_FAILED');
+    expect(b).toEqual(before);
   });
 
   it('never retains more than MAX_SKIP_TOTAL skipped keys; eviction is oldest-epoch-first and deterministic', () => {
@@ -298,17 +312,17 @@ describe('ratchetEncrypt / ratchetDecrypt', () => {
     b = eb1.session;
     a = ratchetDecrypt(a, eb1.envelope, BA).session; // A ratchets: epoch A2
     const a2 = ratchetEncrypt(a, 'a2', AB); // A2, n = 0, pn = 2
-    expect(a2.envelope.header.pn).toBe(2);
-    expect(a2.envelope.header.dhPub).not.toBe(a1.envelope.header.dhPub);
+    expect(a2.header.pn).toBe(2);
+    expect(a2.header.dhPub).not.toBe(a1.header.dhPub);
 
     const d2 = ratchetDecrypt(b, a2.envelope, AB);
     expect(d2.plaintext).toBe('a2');
-    expect(Object.keys(d2.session.skippedKeys ?? {})).toEqual([skippedKeyId(a1.envelope.header.dhPub, 1)]);
+    expect(Object.keys(d2.session.skippedKeys ?? {})).toEqual([skippedKeyId(a1.header.dhPub, 1)]);
     b = d2.session;
 
     const d1b = ratchetDecrypt(b, a1b.envelope, AB);
     expect(d1b.plaintext).toBe('a1b');
-    expect(d1b.consumedSkippedKeyId).toBe(skippedKeyId(a1.envelope.header.dhPub, 1));
+    expect(d1b.consumedSkippedKeyId).toBe(skippedKeyId(a1.header.dhPub, 1));
     expect(Object.keys(d1b.session.skippedKeys ?? {})).toHaveLength(0);
   });
 

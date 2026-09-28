@@ -10,6 +10,7 @@ import { dhRatchet } from '../src/ratchet/dh';
 import { ratchetDecrypt, ratchetEncrypt } from '../src/ratchet/message';
 import type { AssociatedData } from '../src/ratchet/envelope';
 import { initInitiatorSession, initResponderSession } from '../src/ratchet/session';
+import { sealHeader } from '../src/ratchet/header';
 import type { RatchetSessionV2 } from '../src/types/session';
 
 function codeOf(fn: () => unknown): string | null {
@@ -99,10 +100,12 @@ describe('throw sites map to the taxonomy', () => {
     b = ratchetDecrypt(b, e0.envelope, AD).session;
 
     expect(codeOf(() => ratchetDecrypt(b, e0.envelope, AD))).toBe('REPLAY_DETECTED');
-    const e1 = ratchetEncrypt(a, 'x', AD).envelope;
+    const e1r = ratchetEncrypt(a, 'x', AD);
+    const e1 = e1r.envelope;
     const flipped = new Uint8Array(decodeBase64(e1.ciphertext).map((x) => x ^ 1));
     expect(codeOf(() => ratchetDecrypt(b, { ...e1, ciphertext: encodeBase64(flipped) }, AD))).toBe('DECRYPT_FAILED');
-    expect(codeOf(() => ratchetDecrypt(b, { ...e1, header: { ...e1.header, pn: 5 } }, AD))).toBe('HEADER_TAMPERED');
+    const pnForged = { ...e1, encHeader: sealHeader({ headerKey: decodeBase64(a.headerKeySend!), header: { ...e1r.header, pn: 5 } }) };
+    expect(codeOf(() => ratchetDecrypt(b, pnForged, AD))).toBe('HEADER_TAMPERED');
     expect(codeOf(() => ratchetEncrypt({ ...a, DHsPublicKey: null as unknown as string }, 'x', AD))).toBe('STORAGE_CORRUPTION');
     expect(codeOf(() => ratchetEncrypt(pair().b, 'x', AD)), 'responder before first receive').toBe('SESSION_RESET_REQUIRED');
     expect(codeOf(() => ratchetEncrypt(a, 'x', { ...AD, senderIdentityKey: encodeBase64(new Uint8Array(3)) }))).toBe('INVALID_KEY_LENGTH');

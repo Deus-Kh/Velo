@@ -9,6 +9,8 @@ const nacl = require('tweetnacl');
 const { encodeBase64 } = require('tweetnacl-util');
 const { initInitiatorSession, initResponderSession } = require(path.join(__dirname, '..', '..', 'src', 'ratchet', 'session.ts'));
 const { ratchetEncrypt, ratchetDecrypt } = require(path.join(__dirname, '..', '..', 'src', 'ratchet', 'message.ts'));
+const { sealHeader } = require(path.join(__dirname, '..', '..', 'src', 'ratchet', 'header.ts'));
+const { decodeBase64 } = require('tweetnacl-util');
 
 const n = Number(process.argv[2]);
 const sharedSecret = encodeBase64(new Uint8Array(32).fill(0xaa));
@@ -21,11 +23,13 @@ const b = initResponderSession({ peerUserId: 'a', sharedSecret, headerKeyA, next
 
 const AD = { senderIdentityKey: encodeBase64(new Uint8Array(32).fill(1)), receiverIdentityKey: encodeBase64(new Uint8Array(32).fill(2)) };
 const e = ratchetEncrypt(a, 'x', AD);
-const forged = { ...e.envelope, header: { ...e.envelope.header, n } };
+// T3.6: the header is encrypted; the forger here holds the sender's header key.
+const reseal = (patch) => ({ ...e.envelope, encHeader: sealHeader({ headerKey: decodeBase64(a.headerKeySend), header: { ...e.header, ...patch } }) });
+const forged = reseal({ n });
 
 // Warm up the transpiled modules and the hash implementation so the timed call measures the bound, not module loading.
 try {
-  ratchetDecrypt(b, { ...forged, header: { ...forged.header, n: 1 } }, AD);
+  ratchetDecrypt(b, reseal({ n: 1 }), AD);
 } catch (_) {
   /* expected */
 }

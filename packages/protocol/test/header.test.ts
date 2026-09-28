@@ -3,7 +3,7 @@ import { encodeBase64 } from 'tweetnacl-util';
 import { describe, expect, it } from 'vitest';
 import { protocolErrorCode } from '../src/errors';
 import { associatedDataBytes } from '../src/ratchet/envelope';
-import { canonicalHeaderBytes, decodeCanonicalHeader, WIRE_VERSION } from '../src/ratchet/header';
+import { canonicalHeaderBytes, decodeCanonicalHeader, encryptedHeaderBytes, openHeader, sealHeader, ENCRYPTED_HEADER_LENGTH, WIRE_VERSION } from '../src/ratchet/header';
 import { expandMessageKey } from '../src/ratchet/messageKeys';
 import { rng } from './harness';
 
@@ -47,15 +47,49 @@ describe('canonicalHeaderBytes (R4)', () => {
   });
 });
 
+describe('sealHeader / openHeader (T3.6)', () => {
+  const header = { n: 1, pn: 2, dhPub: encodeBase64(new Uint8Array(32).fill(3)) };
+  const key = () => new Uint8Array(32).fill(0x11);
+
+  it('round-trips under the same key, is fixed-size, and the key is consumed', () => {
+    const k = key();
+    const enc = sealHeader({ headerKey: k, header });
+    expect(k.every((x) => x === 0)).toBe(true);
+    expect(encryptedHeaderBytes(enc).length).toBe(ENCRYPTED_HEADER_LENGTH);
+    expect(openHeader({ headerKey: key(), encHeader: enc })).toEqual(header);
+    expect(enc).not.toContain(header.dhPub.slice(0, 20));
+  });
+
+  it('opens under no other key, not after a flipped byte, and not with a wrong-length field', () => {
+    const enc = sealHeader({ headerKey: key(), header });
+    expect(openHeader({ headerKey: new Uint8Array(32).fill(0x12), encHeader: enc })).toBeNull();
+    const bytes = encryptedHeaderBytes(enc);
+    bytes[30] = bytes[30]! ^ 1;
+    expect(openHeader({ headerKey: key(), encHeader: encodeBase64(bytes) })).toBeNull();
+    expect(openHeader({ headerKey: key(), encHeader: encodeBase64(bytes.slice(1)) })).toBeNull();
+    expect(openHeader({ headerKey: key(), encHeader: 'not base64!' })).toBeNull();
+    expect(protocolErrorCode((() => { try { encryptedHeaderBytes(encodeBase64(new Uint8Array(5))); } catch (e) { return e; } return null; })())).toBe('HEADER_TAMPERED');
+  });
+
+  it('is deterministic for an injected nonce and never repeats a nonce otherwise', () => {
+    const nonce = new Uint8Array(24).fill(7);
+    expect(sealHeader({ headerKey: key(), header, nonce })).toBe(sealHeader({ headerKey: key(), header, nonce }));
+    const seen = new Set<string>();
+    for (let i = 0; i < 200; i += 1) seen.add(sealHeader({ headerKey: key(), header }).slice(0, 32));
+    expect(seen.size).toBe(200);
+  });
+});
+
 describe('associatedDataBytes', () => {
-  it('is IK_sign_sender ‖ IK_sign_receiver ‖ canonical header', () => {
+  it('is IK_sign_sender ‖ IK_sign_receiver ‖ encrypted header (T3.6)', () => {
     const a = nacl.sign.keyPair().publicKey;
     const b = nacl.sign.keyPair().publicKey;
     const header = { n: 1, pn: 2, dhPub: encodeBase64(new Uint8Array(32).fill(3)) };
-    const ad = associatedDataBytes({ senderIdentityKey: encodeBase64(a), receiverIdentityKey: encodeBase64(b) }, header);
-    expect(hex(ad)).toBe(hex(a) + hex(b) + hex(canonicalHeaderBytes(header)));
+    const enc = sealHeader({ headerKey: new Uint8Array(32).fill(9), header });
+    const ad = associatedDataBytes({ senderIdentityKey: encodeBase64(a), receiverIdentityKey: encodeBase64(b) }, enc);
+    expect(hex(ad)).toBe(hex(a) + hex(b) + hex(encryptedHeaderBytes(enc)));
     // Direction matters: swapping sender and receiver changes the AD.
-    const swapped = associatedDataBytes({ senderIdentityKey: encodeBase64(b), receiverIdentityKey: encodeBase64(a) }, header);
+    const swapped = associatedDataBytes({ senderIdentityKey: encodeBase64(b), receiverIdentityKey: encodeBase64(a) }, enc);
     expect(hex(swapped)).not.toBe(hex(ad));
   });
 });

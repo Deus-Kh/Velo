@@ -11,18 +11,19 @@ import nacl from 'tweetnacl';
 import { encodeBase64 } from 'tweetnacl-util';
 import { describe, expect, it } from 'vitest';
 import { MAX_SKIP_PER_STEP } from '../../src/ratchet/limits';
-import { makeWorld } from '../harness';
-import type { NewMessageDTO } from '../harness';
+import { alienHeader, flipEncHeader, makeWorld, resealHeader } from '../harness';
+import type { NewMessageDTO, VirtualClient } from '../harness';
 
-type Case = { name: string; code: string; tamper: (dto: NewMessageDTO) => NewMessageDTO };
+type Case = { name: string; code: string; tamper: (dto: NewMessageDTO, sender: VirtualClient) => NewMessageDTO };
 
 describe('S28 nothing persists before authentication', () => {
   const cases: Case[] = [
-    { name: 'ciphertext modified', code: 'DECRYPT_FAILED', tamper: (d) => ({ ...d, v3: { ...d.v3, ciphertext: encodeBase64(new Uint8Array(40).fill(1)) } }) },
-    { name: 'mac modified (payload intact)', code: 'HEADER_TAMPERED', tamper: (d) => ({ ...d, v3: { ...d.v3, mac: encodeBase64(new Uint8Array(16)) } }) },
-    { name: 'pn modified (header)', code: 'HEADER_TAMPERED', tamper: (d) => ({ ...d, v3: { ...d.v3, header: { ...d.v3.header, pn: d.v3.header.pn + 1 } } }) },
-    { name: 'counter gap too large', code: 'TOO_MANY_SKIPPED', tamper: (d) => ({ ...d, v3: { ...d.v3, header: { ...d.v3.header, n: d.v3.header.n + MAX_SKIP_PER_STEP + 1 } } }) },
-    { name: 'unknown ratchet key', code: 'DECRYPT_FAILED', tamper: (d) => ({ ...d, v3: { ...d.v3, header: { ...d.v3.header, dhPub: encodeBase64(nacl.box.keyPair().publicKey) } } }) },
+    { name: 'ciphertext modified', code: 'DECRYPT_FAILED', tamper: (d) => ({ ...d, v4: { ...d.v4, ciphertext: encodeBase64(new Uint8Array(40).fill(1)) } }) },
+    { name: 'mac modified (payload intact)', code: 'HEADER_TAMPERED', tamper: (d) => ({ ...d, v4: { ...d.v4, mac: encodeBase64(new Uint8Array(16)) } }) },
+    { name: 'encrypted header byte flipped', code: 'DECRYPT_FAILED', tamper: (d) => flipEncHeader(d) },
+    { name: 'pn modified under the real header key', code: 'HEADER_TAMPERED', tamper: (d, A) => resealHeader(A, d, { pn: A.sentHeader(d.clientMessageId).pn + 1 }) },
+    { name: 'counter gap too large (real header key)', code: 'TOO_MANY_SKIPPED', tamper: (d, A) => resealHeader(A, d, { n: A.sentHeader(d.clientMessageId).n + MAX_SKIP_PER_STEP + 1 }) },
+    { name: 'header under an unknown key', code: 'DECRYPT_FAILED', tamper: (d) => alienHeader(d) },
   ];
 
   for (const c of cases) {
@@ -34,7 +35,7 @@ describe('S28 nothing persists before authentication', () => {
       const before = B!.serialize();
       const heldBefore = server.heldCiphertextCount('A:B');
 
-      const stop = network.tamper(c.tamper);
+      const stop = network.tamper((d) => c.tamper(d, A!));
       A!.send('B', 'attacked');
       stop();
 

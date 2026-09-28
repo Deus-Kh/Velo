@@ -38,7 +38,7 @@ describe('S23 glare', () => {
     const toB = network.release('B');
     expect(toB.map((r) => (r.ok ? 'ok' : r.code))).toEqual(['ok']);
     expect(B!.inbox.map((m) => m.text)).toEqual(['a1']);
-    expect(B!.sessionState('A')!.DHrPublicKey).toBe(a1.v3.header.dhPub);
+    expect(B!.sessionState('A')!.DHrPublicKey).toBe(A!.sentHeader(a1.clientMessageId).dhPub);
 
     // From here on, one session: B's reply decrypts on A's primary and retires the secondary.
     B!.send('A', 'b3');

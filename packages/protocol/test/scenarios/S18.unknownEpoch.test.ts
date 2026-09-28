@@ -2,15 +2,13 @@
  * S18 — Message from an unknown epoch.
  * Checklist: none (adversarial / desync).
  * Defect covered: none — the receiver must fail with a typed error and keep
- * its session (T2.2/T2.3). After T2.5 the code becomes HEADER_TAMPERED when
- * the header is what was modified; a genuinely unknown epoch stays
- * DECRYPT_FAILED.
+ * its session (T2.2/T2.3). Since T3.6 an unknown epoch means a header that
+ * opens under none of the receiver's header keys: DECRYPT_FAILED, session
+ * unchanged, and the genuine stream continues.
  * Expected before fixes: pass (typed error). After: pass.
  */
-import nacl from 'tweetnacl';
-import { encodeBase64 } from 'tweetnacl-util';
 import { describe, expect, it } from 'vitest';
-import { makeWorld } from '../harness';
+import { alienHeader, makeWorld } from '../harness';
 
 describe('S18 message from an unknown epoch', () => {
   it('is rejected with a ProtocolError and the session is unchanged', () => {
@@ -22,7 +20,7 @@ describe('S18 message from an unknown epoch', () => {
 
     const before = B!.sessionState('A');
     const genuine = network.log.at(-1)!.dto; // T3.1: delivered ciphertext is gone from the server; the wire log has it
-    const alien = { ...genuine, v3: { ...genuine.v3, header: { dhPub: encodeBase64(nacl.box.keyPair().publicKey), n: 0, pn: 0 } } };
+    const alien = alienHeader(genuine); // T3.6: a header sealed under a key this session does not know
 
     const r = network.deliverNow('B', alien);
     expect(r.ok).toBe(false);

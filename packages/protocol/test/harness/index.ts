@@ -8,6 +8,7 @@ export type { NewMessageDTO, SendMessageDTO, ServerIdentity } from './fakeServer
 export { MemoryStore } from './memoryStore';
 export { Network } from './network';
 export type { DeliveryResult } from './network';
+export { flipEncHeader, resealHeader, alienHeader } from './tamper';
 export { VirtualClient } from './virtualClient';
 
 export type Clock = { now: () => number; advance: (ms: number) => void };

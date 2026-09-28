@@ -123,7 +123,7 @@ export class Network {
   duplicate(userId: string, index = 0): void {
     const q = this.queue(userId);
     const dto = q[index];
-    if (dto) q.push({ ...dto, v3: { ...dto.v3, header: { ...dto.v3.header } } });
+    if (dto) q.push({ ...dto, v4: { ...dto.v4 } });
   }
 
   drop(userId: string, index = 0): NewMessageDTO | null {

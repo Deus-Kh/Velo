@@ -10,6 +10,7 @@ import { describe, expect, it } from 'vitest';
 import { wipe } from '../src/primitives/zeroize';
 import { chainKdf } from '../src/ratchet/chain';
 import { openMessage, sealMessage, type AssociatedData } from '../src/ratchet/envelope';
+import { sealHeader } from '../src/ratchet/header';
 import { expandMessageKey } from '../src/ratchet/messageKeys';
 import { ratchetDecrypt, ratchetEncrypt } from '../src/ratchet/message';
 import { kdfRootKey } from '../src/ratchet/root';
@@ -60,7 +61,10 @@ describe('T3.4 zeroization', () => {
     const { messageKey } = chainKdf(new Uint8Array(32).fill(5));
     const copy = new Uint8Array(messageKey);
     const header = { n: 0, pn: 0, dhPub: encodeBase64(new Uint8Array(32).fill(8)) };
-    const envelope = sealMessage({ messageKey, header, plaintext: 'secret', ad: AD });
+    const headerKey = new Uint8Array(32).fill(6);
+    const encHeader = sealHeader({ headerKey, header });
+    expect(isZero(headerKey), 'sealHeader consumes the header key').toBe(true);
+    const envelope = sealMessage({ messageKey, encHeader, plaintext: 'secret', ad: AD });
     expect(isZero(messageKey)).toBe(true);
 
     const mkForOpen = new Uint8Array(copy);
@@ -76,10 +80,10 @@ describe('T3.4 zeroization', () => {
   it('a ratchet step returns no key material and keeps working after its internals were wiped', () => {
     let { a, b } = pair();
     const e = ratchetEncrypt(a, 'one', AD);
-    expect(Object.keys(e).sort()).toEqual(['envelope', 'session']);
+    expect(Object.keys(e).sort()).toEqual(['envelope', 'header', 'session']);
     a = e.session;
     const d = ratchetDecrypt(b, e.envelope, AD);
-    expect(Object.keys(d).sort()).toEqual(['consumedSkippedKeyId', 'plaintext', 'session']);
+    expect(Object.keys(d).sort()).toEqual(['consumedSkippedKeyId', 'header', 'plaintext', 'session']);
     expect(d.plaintext).toBe('one');
     b = d.session;
 

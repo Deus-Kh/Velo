@@ -7,10 +7,8 @@
  * a receipt (no ciphertext) remains so the sender learns the state.
  * Expected: green from the start (written with T3.1).
  */
-import nacl from 'tweetnacl';
-import { encodeBase64 } from 'tweetnacl-util';
 import { describe, expect, it } from 'vitest';
-import { makeWorld } from '../harness';
+import { flipEncHeader, makeWorld } from '../harness';
 
 describe('S26 delete-on-delivery', () => {
   it('the server holds no ciphertext once the recipient has decrypted; receipts remain', () => {
@@ -46,7 +44,7 @@ describe('S26 delete-on-delivery', () => {
     const { server, network, clients } = makeWorld();
     const { A, B } = clients;
     A!.send('B', 'ok');
-    const stop = network.tamper((dto) => ({ ...dto, v3: { ...dto.v3, header: { ...dto.v3.header, dhPub: encodeBase64(nacl.box.keyPair().publicKey) } } }));
+    const stop = network.tamper(flipEncHeader); // T3.6: the header is encrypted; a flipped byte is all an on-path attacker can do
     A!.send('B', 'tampered on the wire');
     stop();
 
