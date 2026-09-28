@@ -7,7 +7,6 @@ import {
   Pressable,
   ActivityIndicator,
   RefreshControl,
-  AppState,
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
@@ -24,10 +23,8 @@ import { useAuthStore } from '../store/auth.store';
 import { ensureSocketConnected, getSocket } from '../shared/socket/socket';
 import { useAppearanceStore } from '../store/appearance.store';
 import { useChatListStore } from '../store/chat-list.store';
-import { useNotificationPreferencesStore } from '../store/notification-preferences.store';
-import { getNotificationPreferencesForUser } from '../store/notification-preferences.store';
 import { useAppUiStore } from '../store/app-ui.store';
-import { displayIncomingMessageNotification } from '../shared/notifications/notifee';
+import { ingestLiveMessage } from '../shared/notifications/pushIngest';
 import { formatHandle, shortSecureId } from '../shared/utils/identity';
 
 type ChatOpenHandler = (chat: { peerUserId: string; peerUsername?: string }) => void;
@@ -238,9 +235,6 @@ export default function ChatListScreen({
   const archivedConversationIds = useChatListStore((s) => s.archivedConversationIds);
   const togglePinnedConversation = useChatListStore((s) => s.togglePinnedConversation);
   const toggleArchivedConversation = useChatListStore((s) => s.toggleArchivedConversation);
-  const notificationPreferencesByUserId = useNotificationPreferencesStore(
-    (s) => s.preferencesByUserId,
-  );
   const activeChatPeerUserId = useAppUiStore((s) => s.activeChatPeerUserId);
 
   const [q, setQ] = useState('');
@@ -584,30 +578,31 @@ export default function ChatListScreen({
             return next;
           });
 
-          const preferences = getNotificationPreferencesForUser(
-            notificationPreferencesByUserId,
-            useAuthStore.getState().userId,
-          );
-          const isAppActive = AppState.currentState === 'active';
+          // T3.3: a message for a chat that is not open is decrypted, stored and acked
+          // here (the open chat handles its own), then notified: sender name from local
+          // data, text only if the user enabled previews (pushPolicy decides).
           const isCurrentChatOpen = activeChatPeerUserId === evt.fromUserId;
-
-          if (isAppActive && !isCurrentChatOpen && preferences.inAppAlertsEnabled) {
-            const matchingConversation = conversationsRef.current.find(
-              (conv) =>
-                conv.conversationId === evt.conversationId || conv.peerUserId === evt.fromUserId,
-            );
-
-            displayIncomingMessageNotification({
-              title: matchingConversation?.peerUsername || 'New message',
-              body: preferences.showMessagePreview
-                ? 'New encrypted message'
-                : 'You received a new message',
-              conversationId: evt.conversationId,
-              fromUserId: evt.fromUserId,
-              soundEnabled: preferences.soundEnabled,
-              vibrationEnabled: preferences.vibrationEnabled,
-            }).catch((notificationError) => {
-              console.warn('[ChatListScreen] Failed to display local notification:', notificationError);
+          if (!isCurrentChatOpen && myUserId && evt.protoVersion === 3 && evt.v3) {
+            ingestLiveMessage({
+              myUserId,
+              item: {
+                serverMessageId: String(evt.serverMessageId),
+                conversationId: evt.conversationId,
+                fromUserId: String(evt.fromUserId),
+                toUserId: String(evt.toUserId ?? myUserId),
+                protoVersion: 3,
+                v3: evt.v3,
+                initPacket: evt.initPacket ?? null,
+                replyTo: evt.replyTo ?? null,
+                clientMessageId: String(evt.clientMessageId ?? ''),
+                createdAt: Number(evt.createdAt ?? Date.now()),
+                seq: typeof evt.seq === 'number' ? evt.seq : null,
+                status: evt.status,
+                deliveredAt: evt.deliveredAt ?? null,
+                readAt: evt.readAt ?? null,
+              },
+            }).catch((ingestError) => {
+              console.warn('[ChatListScreen] Failed to ingest live message:', ingestError);
             });
           }
 
@@ -643,7 +638,6 @@ export default function ChatListScreen({
     activeChatPeerUserId,
     isAuthenticated,
     myUserId,
-    notificationPreferencesByUserId,
     refreshConversationsSilently,
   ]);
 

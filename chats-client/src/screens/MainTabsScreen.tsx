@@ -22,6 +22,7 @@ import { useAuthStore } from '../store/auth.store';
 import { useContactsStore } from '../store/contacts.store';
 import { useAppUiStore } from '../store/app-ui.store';
 import { cancelConversationNotifications } from '../shared/notifications/notifee';
+import { usePushHandlers } from '../shared/notifications/pushHandlers';
 import { Icon } from '../components/Icon';
 
 import { useColorScheme } from 'react-native';
@@ -103,6 +104,9 @@ export default function MainTabsScreen() {
   const userId = useAuthStore((s) => s.userId);
   const recordRecentContact = useContactsStore((s) => s.recordRecentContact);
   const setActiveChatPeerUserId = useAppUiStore((s) => s.setActiveChatPeerUserId);
+  const pendingOpenChatPeerUserId = useAppUiStore((s) => s.pendingOpenChatPeerUserId);
+  const setPendingOpenChatPeerUserId = useAppUiStore((s) => s.setPendingOpenChatPeerUserId);
+  const savedContactsByUser = useContactsStore((s) => s.savedContactsByUser);
 
   const [tab, setTab] = useState<TabKey>('chats');
   const [activeChat, setActiveChat] = useState<ActiveChat | null>(null);
@@ -122,6 +126,16 @@ export default function MainTabsScreen() {
     setActiveChat(chat);
     setActiveChatPeerUserId(chat.peerUserId);
   }, [recordRecentContact, setActiveChatPeerUserId, userId]);
+
+  // T3.3: push in the foreground, notification taps, and the notification that launched the app.
+  usePushHandlers(Boolean(userId));
+
+  useEffect(() => {
+    if (!pendingOpenChatPeerUserId || !userId) return;
+    const contact = (savedContactsByUser[userId] ?? []).find((c) => c.peerUserId === pendingOpenChatPeerUserId);
+    openChat({ peerUserId: pendingOpenChatPeerUserId, peerUsername: contact?.peerUsername });
+    setPendingOpenChatPeerUserId(null);
+  }, [openChat, pendingOpenChatPeerUserId, savedContactsByUser, setPendingOpenChatPeerUserId, userId]);
 
   const finishCloseChat = useCallback(() => {
     setActiveChat(null);

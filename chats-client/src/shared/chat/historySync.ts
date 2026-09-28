@@ -14,7 +14,7 @@ export function receiptsCursorKey(myUserId: string, peerUserId: string): string 
   return `msgsync:v1:${myUserId}:${peerUserId}`;
 }
 
-function envelopeOf(it: HistoryItem): MessageEnvelope | null {
+export function envelopeOf(it: Pick<HistoryItem, 'v3'>): MessageEnvelope | null {
   const h = it.v3?.header;
   if (!h || typeof h.n !== 'number' || typeof h.pn !== 'number' || typeof h.dhPub !== 'string') return null;
   if (typeof it.v3?.ciphertext !== 'string' || typeof it.v3?.mac !== 'string') return null;
@@ -41,6 +41,62 @@ function toStored(it: HistoryItem, direction: 'in' | 'out', text: string): Store
   };
 }
 
+export type IngestCallbacks = {
+  onIdentityChanged?: (reason: string) => void;
+  onResetRequired?: (reason: string) => void;
+};
+
+/**
+ * The one inbound ingest path (T3.1/T3.3): decrypt each item from `peerUserId`
+ * through the T2.11 receive path, store the plaintext, and ack so the server
+ * deletes the ciphertext. The ack is sent only for messages this device now
+ * holds (or has already consumed): a message that fails to decrypt is left on
+ * the server for a retry after the user acts. Used by the chat's history
+ * sync, by the chat list for messages of chats that are not open, and by the
+ * push wake-up.
+ */
+export async function ingestUndeliveredItems(params: {
+  myUserId: string;
+  peerUserId: string;
+  items: HistoryItem[];
+  callbacks?: IngestCallbacks;
+}): Promise<{ received: StoredMessage[]; ackedIds: string[] }> {
+  const { myUserId, peerUserId, items, callbacks } = params;
+  const received: StoredMessage[] = [];
+  const acked: string[] = [];
+
+  for (const it of items) {
+    if (String(it.fromUserId) === String(myUserId) || it.protoVersion !== 3) continue;
+    const envelope = envelopeOf(it);
+    if (!envelope) continue;
+    try {
+      const r = await receiveIncoming({ myUserId, peerUserId, initPacket: it.initPacket ?? null, encrypted: envelope });
+      const record = toStored(it, 'in', r.plaintext);
+      if (record) {
+        await upsertStoredMessage({ myUserId, peerUserId, message: record });
+        received.push(record);
+        acked.push(it.serverMessageId);
+      }
+    } catch (e) {
+      const code = protocolErrorCode(e);
+      if (code === 'IDENTITY_MISMATCH') callbacks?.onIdentityChanged?.('initiator identity does not match the pinned identity');
+      else if (code === 'MISSING_BOOTSTRAP' || code === 'SESSION_RESET_REQUIRED') callbacks?.onResetRequired?.('missing session and initPacket for inbound history item');
+      else if (code === 'REPLAY_DETECTED' || code === 'UNKNOWN_OLD_MESSAGE') acked.push(it.serverMessageId); // already consumed: nothing left to fetch
+      else console.warn('Ingest: message not decryptable', { serverMessageId: it.serverMessageId, code });
+    }
+  }
+
+  // The server deletes the ciphertext of what this device now holds.
+  if (acked.length) {
+    try {
+      await messagesApi.ackDelivered(acked);
+    } catch (e) {
+      console.warn('Ingest: delivered ack failed (will retry next sync):', e);
+    }
+  }
+  return { received, ackedIds: acked };
+}
+
 export type SyncResult = {
   /** Inbound messages decrypted and stored by this sync, ascending. */
   received: StoredMessage[];
@@ -50,10 +106,9 @@ export type SyncResult = {
 
 /**
  * T3.1: pull what the server still holds for this pair. Undelivered inbound
- * messages are decrypted through the normal receive path, stored, and then
- * acked so the server deletes their ciphertext (ack only after the message
- * is stored: R7 for the server copy). Receipts for our own messages update
- * the stored copies. Nothing is fetched twice: delivered ciphertext is gone.
+ * messages go through `ingestUndeliveredItems`; receipts for our own messages
+ * update the stored copies. Nothing is fetched twice: delivered ciphertext is
+ * gone.
  */
 export async function syncNewerFromServer(params: {
   myUserId: string;
@@ -104,37 +159,17 @@ export async function syncNewerFromServer(params: {
       if (patched) updated.push(patched);
     }
 
-    const stored: string[] = [];
     for (const it of items) {
       if (typeof it.seq === 'number') after = Math.max(after ?? 0, it.seq); // T3.2: the cursor is the server sequence
-      if (String(it.fromUserId) === String(myUserId) || it.protoVersion !== 3) continue;
-      const envelope = envelopeOf(it);
-      if (!envelope) continue;
-      try {
-        const r = await receiveIncoming({ myUserId, peerUserId, initPacket: it.initPacket ?? null, encrypted: envelope });
-        const record = toStored(it, 'in', r.plaintext);
-        if (record) {
-          await upsertStoredMessage({ myUserId, peerUserId, message: record });
-          received.push(record);
-          stored.push(it.serverMessageId);
-        }
-      } catch (e) {
-        const code = protocolErrorCode(e);
-        if (code === 'IDENTITY_MISMATCH') params.onIdentityChanged('initiator identity does not match the pinned identity');
-        else if (code === 'MISSING_BOOTSTRAP' || code === 'SESSION_RESET_REQUIRED') params.onResetRequired('missing session and initPacket for inbound history item');
-        else if (code === 'REPLAY_DETECTED' || code === 'UNKNOWN_OLD_MESSAGE') stored.push(it.serverMessageId); // already consumed: nothing left to fetch
-        else console.warn('History sync: message not decryptable', { serverMessageId: it.serverMessageId, code });
-      }
     }
+    const ingested = await ingestUndeliveredItems({
+      myUserId,
+      peerUserId,
+      items,
+      callbacks: { onIdentityChanged: params.onIdentityChanged, onResetRequired: params.onResetRequired },
+    });
+    received.push(...ingested.received);
 
-    // The server deletes the ciphertext of what this device now holds.
-    if (stored.length) {
-      try {
-        await messagesApi.ackDelivered(stored);
-      } catch (e) {
-        console.warn('History sync: delivered ack failed (will retry next sync):', e);
-      }
-    }
     if (items.length < SYNC_PAGE || after === undefined) break; // no seq on this page: nothing to page on
   }
 

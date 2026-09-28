@@ -19,6 +19,8 @@ export async function ensureMessageNotificationChannel() {
 }
 
 export async function displayIncomingMessageNotification(params: {
+  /** T3.3: one id per message so a re-fetch never shows it twice. */
+  id?: string;
   title: string;
   body: string;
   conversationId: string;
@@ -29,7 +31,7 @@ export async function displayIncomingMessageNotification(params: {
   const channelId = await ensureMessageNotificationChannel();
 
   await notifee.displayNotification({
-    id: `message:${params.conversationId}:${Date.now()}`,
+    id: params.id ?? `message:${params.conversationId}:${Date.now()}`,
     title: params.title,
     body: params.body,
     android: {

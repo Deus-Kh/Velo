@@ -145,7 +145,7 @@ What a user can actually do today: 1:1 text with replies, receipts, typing, pres
 |---|---|---|---|
 | 1:1 text, reply/quote | ✅ | ✅ | ✅ |
 | Read receipts / typing / presence | ✅ with toggles (no presence) | ⚠️ always-on, no toggles, subscribable by anyone | ✅ toggles + relationship check (P2-10) |
-| Push notifications | ✅ data-only, decrypted on device | ⚠️ Android OS-rendered only; no handler; no iOS | ✅ T3.3 |
+| Push notifications | ✅ data-only, decrypted on device | ✅ data-only wake-up, fetched and decrypted on the device, rendered with the local contact name and an honest preview toggle (T3.3, Android); iOS parked | done (Android) |
 | iOS build | ✅ | ❌ cannot connect | ⏸ T1.16 deferred by owner (2026-09-28): Android only for now |
 | Reactions, edit, delete, forward | ✅ | ❌ | ✅ Phase 7' |
 | Images / video / files / voice notes | ✅ | ❌ | ✅ Phase 8' |
@@ -274,7 +274,7 @@ Fix: XChaCha20-Poly1305 with `AD = IK_A || IK_B || canonicalHeader` (decision D3
 
 **P1-9 · Push has no client handler; iOS unconfigured; payload leaks sender and pair; token pruning bug; preview toggle is a no-op** `[PARITY]` *(new)*
 No `setBackgroundMessageHandler`/`onMessage`/tap handler exists. Server `notification.title` is the sender's username and `data.conversationId` is the participant pair (`push/firebase.ts:69,85-90`). Any FCM error deletes the token (107–109).
-Fix: data-only pushes carrying only `type` + `serverMessageId`; client resolves the sender name locally and renders via notifee; tap deep-links; iOS Firebase configured; prune only on `registration-token-not-registered`. → T3.3
+Fix: data-only pushes carrying only `type` + `serverMessageId`; client resolves the sender name locally and renders via notifee; tap deep-links; iOS Firebase configured; prune only on `registration-token-not-registered`. → T3.3 — **fixed for Android 2026-09-28 (T3.3); iOS remains parked with T1.16**
 
 **P1-10 · No local message store; keys kept forever; reinstall and "reset" destroy history** `[CORE]` *(new, replaces P1-7)* — **fixed 2026-09-28: client side by T2.14 (D7 = A), server delete-on-delivery, receipts and TTL by T3.1**
 `useChatE2EE.ts:562-608` refetches ciphertext from the server on every open, so every message key must be kept (`v2MessageKeyStore.ts`). Reinstall makes all history `[Encrypted]` forever; "Reset secure session" (`useChatE2EE.ts:820-832`) deletes the keys it would need.
@@ -426,6 +426,8 @@ Extraction happens in T2.1. Secrets (`*.pem`, `*.keystore`, service-account JSON
 
 **3' progress — T3.2 done 2026-09-28** (two commits): the server hands out a per-conversation sequence number atomically on send; ordering, the undelivered cursor and the client's chat list use it; the sender's clock is display only. S27 in the harness. Next in order: T3.3 (push done right).
 
+**3' progress — T3.3 done for Android 2026-09-28** (two commits): the push is a data-only wake-up; the device fetches, decrypts, stores, acks and renders with the local contact name; taps open the chat from any app state; the preview toggle is honest. A live message for a chat that is not open now goes through the same ingest path, so delivery ticks no longer wait for the chat to be opened. iOS stays parked. Next in order: T3.4 (zeroization, replay window, mutation audit).
+
 **2b progress — T2.14 done 2026-09-28** (one commit, D7 = A): plaintext stored locally in sealed records, message keys never archived, history read from the device with the server asked only for newer messages, one-time migration of the old archive. **The known-red registry is empty: every scenario the harness owns is green.** Remaining in Phase 2: T2.12 (manual two-device checklist, owner).
 
 **2b progress — T2.11 done 2026-09-28** (two commits): bootstrap persists only after the first message decrypts, bootstrap replay refused, glare converges on the lower user id without losing messages, a peer's local reset is adopted automatically. Next in order: T2.14.
@@ -458,7 +460,7 @@ Extraction happens in T2.1. Secrets (`*.pem`, `*.keystore`, service-account JSON
 |---|---|---|
 | T3.1 Delete-on-delivery + TTL + `GET /messages/undelivered?after=seq` | Server keeps only undelivered ciphertext (30-day TTL). **Done 2026-09-28** (cursor is `createdAtClient` until T3.2) | 2d |
 | T3.2 Server sequence numbers; compound cursor | P2-6, P2-9. **Done 2026-09-28** | 1d |
-| T3.3 Push done right | Data-only payload; background handler; notifee render; tap deep-link; iOS APNs; token-prune fix; honest preview toggle | 3d |
+| T3.3 Push done right | Data-only payload; background handler; notifee render; tap deep-link; iOS APNs; token-prune fix; honest preview toggle. **Done for Android 2026-09-28; iOS parked** | 3d |
 | T3.4 Key zeroization + replay window + no-mutation-before-auth audit | `fill(0)`; typed `REPLAY_DETECTED` vs `UNKNOWN_OLD_MESSAGE` | 2d |
 | T3.5 PQ-readiness | Handshake IKM accepts a KEM secret without another wire bump | 1d |
 | T3.6 Header encryption (P1-8) | **Only if weeks 9–11 are on schedule**; otherwise documented | 5d |
