@@ -21,10 +21,10 @@ let sb: Socket;
 let sc: Socket;
 let serverMessageId: string;
 
-const v2Payload = () => ({
+const v3Payload = () => ({
   header: { n: 0, pn: 0, dhPub: 'D'.repeat(44) },
-  nonce: 'N'.repeat(32),
   ciphertext: 'C'.repeat(64),
+  mac: 'M'.repeat(24),
 });
 
 async function messageStatus(id: string): Promise<string> {
@@ -45,8 +45,8 @@ beforeAll(async () => {
     toUserId: B.userId,
     clientMessageId: 'cm-1',
     createdAt: Date.now(),
-    protoVersion: 2,
-    v2: v2Payload(),
+    protoVersion: 3,
+    v3: v3Payload(),
   });
   expect(ack.ok).toBe(true);
   serverMessageId = ack.serverMessageId;
@@ -67,12 +67,12 @@ describe('handshake', () => {
 describe('message:send', () => {
   it('refuses self-send and unknown recipients', async () => {
     const self = await emitAck<{ ok: boolean; code: string }>(sa, 'message:send', {
-      toUserId: A.userId, clientMessageId: 'cm-self', createdAt: Date.now(), protoVersion: 2, v2: v2Payload(),
+      toUserId: A.userId, clientMessageId: 'cm-self', createdAt: Date.now(), protoVersion: 3, v3: v3Payload(),
     });
     expect(self).toMatchObject({ ok: false, code: 'SELF_SEND' });
 
     const ghost = await emitAck<{ ok: boolean; code: string }>(sa, 'message:send', {
-      toUserId: '65f0000000000000000000ff', clientMessageId: 'cm-ghost', createdAt: Date.now(), protoVersion: 2, v2: v2Payload(),
+      toUserId: '65f0000000000000000000ff', clientMessageId: 'cm-ghost', createdAt: Date.now(), protoVersion: 3, v3: v3Payload(),
     });
     expect(ghost).toMatchObject({ ok: false, code: 'NOT_FOUND' });
   });

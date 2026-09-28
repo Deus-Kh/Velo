@@ -547,11 +547,13 @@ Target structure and migration map as in v1 T2.1 (`primitives/`, `ratchet/`, `ha
 ---
 
 ## T2.5 — AEAD with identity-bound associated data
-**Tier** CORE · **Fixes** P1-1 · **Est** 2d · **Depends** T2.13 · **Requires** D3 sign-off for `@noble/ciphers`
+**Tier** CORE · **Fixes** P1-1 · **Est** 2d · **Depends** T2.13 · **Requires** D3 sign-off for `@noble/ciphers` · **Status:** done 2026-09-28 with **D3 = C** (owner): no new primitive; Signal's encrypt-then-MAC from `tweetnacl` + `@noble/hashes`
 
 `ratchet/header.ts` `canonicalHeaderBytes(h)`: `u8 version | u32be dhPubLen | dhPub | u32be n | u32be pn` (R4). `primitives/aead.ts`: `xchacha20poly1305(key, nonce, ad)` from `@noble/ciphers`; `ad = IK_A || IK_B || canonicalHeaderBytes(header)`. Message key split per Signal (`WhisperMessageKeys` → 32-byte key + 24-byte nonce input, or random 24-byte nonce — document the choice). If D3 is refused, fall back to v1 Option A (prefix the AD inside `secretbox` and `nacl.verify` it after opening).
 
 **Acceptance:** S13, S14 pass (`HEADER_TAMPERED` / `DECRYPT_FAILED`); a ciphertext re-attributed to a different sender pair fails; `canonicalHeaderBytes` byte-identical over 1000 randomised round-trips; §8.2 updated.
+
+**Status 2026-09-28:** done in two commits. D3 was decided as **C**: the owner asked to avoid another library, and Signal itself uses encrypt-then-MAC rather than an AEAD, so `ratchet/envelope.ts` builds exactly that from existing primitives: `expandMessageKey` (`ratchet/messageKeys.ts`) = HKDF-SHA256(mk, `WhisperMessageKeys`, 88) → cipher key ‖ MAC key ‖ 24-byte nonce (the first 80 bytes are libsignal's cipher key, MAC key and iv; the T2.15 message-key vector is green); `sealMessage` = secretbox under the cipher key with the derived nonce, then HMAC-SHA256(macKey, `IK_sign_sender ‖ IK_sign_receiver ‖ canonicalHeaderBytes ‖ ciphertext`) truncated to 16 bytes; `openMessage` verifies the MAC (constant-time `nacl.verify`) before returning anything. `ratchet/header.ts` implements the R4 canonical bytes with a decoder and a 1000-round-trip test. The nonce is derived, not transmitted: every message key is used once, so DEVIATION-6 is removed. `ratchetEncrypt/Decrypt(session, …, ad)` take `AssociatedData` (both identity signing keys); the client adapter supplies them from the Keychain and the trust pin (`crypto/associatedData.ts`), which T2.13 guarantees exists before any session. Error classes: if the payload opens under the derived key but the MAC fails, the header or identities were modified → `HEADER_TAMPERED`; otherwise `DECRYPT_FAILED`. A tampered `dhPub` or `n` derives a different key and is therefore `DECRYPT_FAILED` (indistinguishable from a corrupt message), a tampered `pn` or a re-attributed pair is `HEADER_TAMPERED`; S13/S14 assert exactly this and that nothing tampered is ever accepted. Wire v3 end to end: session `protoVersion: 3` (older sessions discarded on load), client DTOs and history read `v3 {header, ciphertext, mac}`, server accepts `protoVersion: 3` only (`UNSUPPORTED_PROTO_VERSION`), `Message.v3` schema, history route returns `v3`. Known-red is now S12 and S16.
 
 ---
 
@@ -750,8 +752,8 @@ skipMessageKeys(work, dhPub, until):
 | Ver | Status | Envelope | Introduced |
 |---|---|---|---|
 | 1 | removed | legacy shared-secret | pre-history |
-| 2 | **current** | `{header:{n,pn,dhPub}, nonce, ciphertext}` + optional `initPacket`; header unauthenticated; non-standard bootstrap | Open Beta 0.1 |
-| 3 | Phase 2 | standard bootstrap (T2.0) + identity-bound AD + XChaCha20-Poly1305 (T2.5) + identity binding in bundles/packets (T2.13) + SPK signature over `keyId || pub` (T2.10). **One bump, one migration: all existing sessions reset.** | T2.0–T2.13 |
+| 2 | removed 2026-09-28 | `{header:{n,pn,dhPub}, nonce, ciphertext}` + optional `initPacket`; header unauthenticated; non-standard bootstrap | Open Beta 0.1 |
+| 3 | **current** | `{header:{n,pn,dhPub}, ciphertext, mac}` + optional `initPacket` on the session-creating message. Standard bootstrap (T2.0, `WhisperRatchet`), message keys expanded with `WhisperMessageKeys` into cipher key + MAC key + derived nonce (no nonce on the wire), MAC-SHA256 over `IK_sign_sender || IK_sign_receiver || canonicalHeader || ciphertext` truncated to 16 bytes, secretbox payload (D3 = C, no new primitive), identity binding in bundles and identity lookups (T2.13). Still pending in this version: SPK signature over `keyId || pub` (T2.10), X3DH constants (T2.9). **One bump, one migration: all existing sessions reset.** | T2.0–T2.13, 2026-09-28 |
 | 4 | Phase 3' | header encrypted under `HKs`/`NHKs` (T3.6, conditional) | T3.6 |
 
 Every bump: update this table, the server validator, `Message.ts`, and the client's supported-versions constant.
@@ -787,7 +789,7 @@ Canonical list in T2.4. Each scenario file states the checklist row it automates
 | `DEVIATION-3` | Message keys retained 30 days for offline history | superseded by the local store | **Removed by T2.14** (fallback only if T2.14 slips) |
 | `DEVIATION-4` | Skipped keys bounded by count *and* epoch | DoS resistance with multi-epoch tolerance | Active after T2.7 |
 | `DEVIATION-5` | Two identity keys (Ed25519 signing + X25519 DH) bound by a signature, versus Signal's single Curve25519 identity with XEdDSA; the safety number hashes `IK_sign || IK_dh` (64 bytes, no type byte) where libsignal hashes `0x05 || key` | avoids a new signature scheme; binding is verified on every bundle and `initPacket`; the fingerprint construction itself is libsignal's and is vector-tested with libsignal's key encoding | **Active since 2026-09-28 (T2.13, D10)** |
-| `DEVIATION-6` | Random 24-byte AEAD nonce instead of a KDF-derived nonce | XChaCha nonce space makes random nonces safe; simpler | Active after T2.5 — or removed if the Signal derivation is adopted for vector parity |
+| `DEVIATION-6` | Random 24-byte AEAD nonce instead of a KDF-derived nonce | — | **Removed by T2.5 (2026-09-28): the nonce is derived from the message key with `WhisperMessageKeys`, as in Signal.** |
 
 ## 8.6 Glossary
 **IK** identity key · **SPK** signed prekey · **OPK** one-time prekey · **EK** ephemeral key · **RK/CK/MK** root/chain/message key · **DHs/DHr** self/remote ratchet keys · **Ns/Nr/PN** counters · **AD** associated data · **binding signature** Ed25519 signature by IK_sign over IK_dh · **pin** the locally stored identity of a peer.

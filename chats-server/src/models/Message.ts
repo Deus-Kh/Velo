@@ -1,16 +1,16 @@
 import { Schema, model, Types } from 'mongoose';
 import { makeConversationId } from '../utils/conversation';
 
-const V2Schema = new Schema(
+/** Wire v3 envelope (T2.5): {header, ciphertext, mac}. The nonce is derived, never stored. */
+const V3Schema = new Schema(
   {
     header: {
       n: { type: Number, required: true },
       pn: { type: Number, required: true },
-      // позже (3.6) добавим dhPub
       dhPub: { type: String, required: true },
     },
-    nonce: { type: String, required: true },
     ciphertext: { type: String, required: true },
+    mac: { type: String, required: true },
   },
   { _id: false }
 );
@@ -40,10 +40,10 @@ const MessageSchema = new Schema(
     fromUserId: { type: Types.ObjectId, ref: 'User', required: true, index: true },
     toUserId: { type: Types.ObjectId, ref: 'User', required: true, index: true },
 
-    protoVersion: { type: Number, default: 2, index: true },
+    protoVersion: { type: Number, default: 3, index: true },
 
-    // v2 payload
-    v2: { type: V2Schema, default: null },
+    // v3 envelope
+    v3: { type: V3Schema, default: null },
     initPacket: { type: InitPacketSchema, default: null },
     replyTo: { type: ReplyToSchema, default: null },
 

@@ -20,18 +20,19 @@ type V2Header = {
   dhPub: string; // base64 X25519 public key
 };
 
-type V2Payload = {
+/** Wire v3 envelope (T2.5): no nonce on the wire, MAC over identities + canonical header + ciphertext. */
+type V3Payload = {
   header: V2Header;
-  nonce: string;
   ciphertext: string;
+  mac: string;
 };
 
 type SendMessageDTO = {
   toUserId: string;
   clientMessageId: string;
   createdAt: number;
-  protoVersion?: 2;
-  v2?: V2Payload | null; // v2
+  protoVersion?: 3;
+  v3?: V3Payload | null; // v3 envelope (T2.5)
   replyTo?: {
     serverMessageId?: string | null;
     clientMessageId?: string | null;
@@ -183,43 +184,46 @@ export function setupSocket(io: Server) {
           return ack?.({ ok: false, error: "Invalid createdAt" });
         }
 
-        const protoVersion = dto?.protoVersion ?? 2;
-        if (protoVersion !== 2) {
+        const protoVersion = dto?.protoVersion ?? 0;
+        if (protoVersion !== 3) {
           console.warn("[socket] reject message: unsupported protoVersion", {
             protoVersion: dto?.protoVersion,
-            dto,
+            from: userId,
           });
           return ack?.({
             ok: false,
-            error: "Only protoVersion 2 is supported in the current development mode",
+            code: "UNSUPPORTED_PROTO_VERSION",
+            error: "Only protoVersion 3 is supported",
           });
         }
 
-        const v2 = dto.v2;
+        const v3 = dto.v3;
         if (
-          !v2 ||
-          !v2.header ||
-          typeof v2.header.n !== "number" ||
-          typeof v2.header.pn !== "number" ||
-          v2.header.n < 0 ||
-          v2.header.pn < 0 ||
-          !isNonEmptyString(v2.header.dhPub, 20) ||
-          !isNonEmptyString(v2.nonce, 8) ||
-          !isNonEmptyString(v2.ciphertext, 8)
+          !v3 ||
+          !v3.header ||
+          typeof v3.header.n !== "number" ||
+          typeof v3.header.pn !== "number" ||
+          !Number.isInteger(v3.header.n) ||
+          !Number.isInteger(v3.header.pn) ||
+          v3.header.n < 0 ||
+          v3.header.pn < 0 ||
+          !isNonEmptyString(v3.header.dhPub, 20) ||
+          !isNonEmptyString(v3.ciphertext, 8) ||
+          !isNonEmptyString(v3.mac, 8)
         ) {
-          console.warn("[socket] reject message: invalid v2 payload", {
-            hasV2: !!dto.v2,
-            header: dto.v2?.header,
-            nonceLen: dto.v2?.nonce?.length,
-            cipherLen: dto.v2?.ciphertext?.length,
+          console.warn("[socket] reject message: invalid v3 payload", {
+            hasV3: !!dto.v3,
+            header: dto.v3?.header,
+            cipherLen: dto.v3?.ciphertext?.length,
+            macLen: dto.v3?.mac?.length,
           });
-          return ack?.({ ok: false, error: "Invalid v2 payload" });
+          return ack?.({ ok: false, error: "Invalid v3 payload" });
         }
 
-        if (v2.ciphertext.length > MAX_CIPHERTEXT_B64_LENGTH) {
+        if (v3.ciphertext.length > MAX_CIPHERTEXT_B64_LENGTH) {
           console.warn("[socket] reject message: ciphertext too large", {
             from: userId,
-            cipherLen: v2.ciphertext.length,
+            cipherLen: v3.ciphertext.length,
           });
           return ack?.({
             ok: false,
@@ -251,7 +255,7 @@ export function setupSocket(io: Server) {
           fromUserId: userId,
           toUserId: dto.toUserId,
           protoVersion,
-          v2,
+          v3,
           replyTo: dto.replyTo ?? null,
           initPacket: dto.initPacket ?? null,
           clientMessageId: dto.clientMessageId,
@@ -266,7 +270,7 @@ export function setupSocket(io: Server) {
               members: [userId, dto.toUserId].sort(),
               lastMessageAt: dto.createdAt,
               lastProtoVersion: protoVersion,
-              lastMessagePreview: `${v2.header.n ? '' : ''}(Encrypted message)`,
+              lastMessagePreview: '(Encrypted message)',
             },
             $inc: {
               [`unreadCounts.${dto.toUserId}`]: 1,
@@ -313,7 +317,7 @@ export function setupSocket(io: Server) {
           fromUserId: String(userId),
           toUserId: String(dto.toUserId),
           protoVersion,
-          v2: doc.v2,
+          v3: doc.v3,
           replyTo: (doc as any).replyTo ?? null,
           initPacket: initPacketToSend,
           clientMessageId: dto.clientMessageId,
@@ -332,7 +336,7 @@ export function setupSocket(io: Server) {
           fromUserId: String(userId),
           toUserId: String(dto.toUserId),
           protoVersion,
-          v2: doc.v2,
+          v3: doc.v3,
           replyTo: (doc as any).replyTo ?? null,
           initPacket: initPacketToSend,
           clientMessageId: dto.clientMessageId,

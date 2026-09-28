@@ -253,11 +253,11 @@ Fix: full per-user wipe on logout (sessions, message keys, OPK secrets, pins, pe
 `sessionStore.ts:81-103` gives both sides a fresh `DHs` and `DHrPublicKey: null`; `messageV2.ts:108-112` adopts the first inbound `dhPub` without ratcheting; `messageV2.ts:90` reuses `DHsPublicKey` forever; `dhRatchet.ts:124` is the only place a new `DHs` is made and nothing ever triggers it. The protocol degenerates to two static HMAC chains: **no post-compromise security**, `rootKey` never read again. v1's DEVIATION-1 was this bug, not a design choice.
 Fix: standard Double Ratchet initialisation — initiator ratchets against the responder's signed prekey at session creation; responder's initial `DHs` is the SPK pair copied into the session; a null `DHr` on first receive **triggers a full ratchet step** instead of adoption; the HKDF directional split is deleted. Wire bump shared with P1-1. → T2.0
 
-**P1-1 · Message header not authenticated; ciphertext not bound to identities** `[CORE]`
+**P1-1 · Message header not authenticated; ciphertext not bound to identities** `[CORE]` — **fixed 2026-09-28 (T2.5)**
 `messageV2.ts:74` seals plaintext only; `n`, `pn`, `dhPub` are malleable and acted on before authentication.
 Fix: XChaCha20-Poly1305 with `AD = IK_A || IK_B || canonicalHeader` (decision D3 = B). → T2.5
 
-**P1-2 · Unbounded skip loop — remote client freeze** `[CORE]`
+**P1-2 · Unbounded skip loop — remote client freeze** `[CORE]` — **fixed 2026-09-28 (T2.5)**
 `messageV2.ts:156-192` on attacker-chosen `header.n`; server checks only `n >= 0`. → T2.6
 
 **P1-3 · Ratchet step discards skipped keys** `[CORE]` (`dhRatchet.ts:150`; reachable only after P1-0) → T2.7
@@ -421,6 +421,8 @@ Extraction happens in T2.1. Secrets (`*.pem`, `*.keystore`, service-account JSON
 **T2.1 — done 2026-09-28.** `packages/protocol` (`@velo/protocol`) holds `primitives/{base64,encoding,utf8,kdf}`, `ratchet/{chain,root,dh,session}`, `handshake/{bundle,types}`, `identity/fingerprint`, `types/session` — all `git mv`, zero behaviour change, chain/root/session KDF outputs frozen as vectors (R8). `createSessionFromX3DH` split: pure builder in the package, persistence wrapper in the client. Consumed as TypeScript source without npm workspaces: `tsconfig` `paths`, Metro `extraNodeModules` + a `resolveRequest` that pins the package's shared deps (`tweetnacl`, `tweetnacl-util`, `@noble/hashes`, `@babel/runtime`) to the app's copies (bundle source map shows one tweetnacl), Jest `moduleNameMapper`. Purity enforced twice: package `.eslintrc.js` `no-restricted-imports` and a vitest test that also forbids `await`. Still in the client after T2.1: `messageV2.ts`, `x3dh.ts`, `prekeyBundle.ts`, `sessionBootstrap.ts`, key stores.
 
 **T2.2 — done 2026-09-28.** `ratchet/message.ts` in the package: `ratchetEncrypt(session, plaintext)` and `ratchetDecrypt(session, envelope)` are synchronous, never mutate the input, and return the next session, the derived message keys and (on decrypt) the consumed skipped-key id. The only client touchpoint is `chat/ratchetAdapter.ts`, which runs the pure step and persists keys first, then the session, or nothing at all on throw (R7). `crypto/messageV2.ts` deleted. Behaviour pinned with frozen vectors; one deliberate change: message keys derived during a decrypt that then fails authentication are no longer archived (they were written before `secretbox.open` ran). The `ad` argument arrives with the AEAD in T2.5.
+
+**2b progress — T2.5 done 2026-09-28** (two commits; D3 = C: no new library, Signal's encrypt-then-MAC from `tweetnacl` + `@noble/hashes`). Wire v3 is now live end to end: identities and the canonical header are in the MAC, the nonce is derived, S13/S14 green, message-key vector green. Known-red: S12, S16. Next in order: T2.6.
 
 **2b progress — T2.13 done 2026-09-28** (five commits: binding + fingerprint primitives → server identity change handling and prekey purge → initPacket synthesis removed → pin enforcement on both sides → identity-changed state and UI). S20, S21 and S10 green; libsignal fingerprint vector green; a reinstalled peer is blocked with the security-warning banner until the user verifies or accepts. Next in order: T2.5.
 
