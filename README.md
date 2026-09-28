@@ -1,5 +1,7 @@
 # Velo — Secure Messenger
 
+[![ci](https://github.com/Deus-Kh/Velo/actions/workflows/ci.yml/badge.svg?branch=dev)](https://github.com/Deus-Kh/Velo/actions/workflows/ci.yml)
+
 An end-to-end encrypted messenger built with React Native and Node.js. Identity is a username and an email address — no phone number, no contact upload. The server relays and briefly stores ciphertext; it never sees message bodies.
 
 ![Platform](https://img.shields.io/badge/platform-Android%20%7C%20iOS-blue) ![License](https://img.shields.io/badge/license-ISC-green) ![Status](https://img.shields.io/badge/status-open%20beta%200.1%20%2B%20phase%201-orange)

@@ -111,5 +111,5 @@ describe('numeric fingerprint', () => {
     expect(swappedDh.display).not.toBe(fromA.display);
     const otherUser = computeSafetyNumber({ myUserId: 'A', myIdentity: a, theirUserId: 'C', theirIdentity: b });
     expect(otherUser.display).not.toBe(fromA.display);
-  });
+  }, 30_000); // 5200-iteration fingerprints, several of them; slow under coverage instrumentation
 });

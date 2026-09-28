@@ -446,6 +446,8 @@ Extraction happens in T2.1. Secrets (`*.pem`, `*.keystore`, service-account JSON
 
 **4' progress — T4.6 done 2026-09-28** (one commit): Prometheus metrics with no user identifiers (delivery latency, device-reported decrypt failures by code, prekey depletion, push results, HTTP and sockets), a bearer-protected `/metrics`, alert rules and a Grafana dashboard under `deploy/`. Next in order: T4.7 (GitHub Actions CI).
 
+**4' progress — T4.7 done 2026-09-28** (one commit): GitHub Actions with five jobs (secrets, protocol with a coverage gate, server, client, Android debug build); the app's Jest environment mocks its native modules so the template smoke test runs. Branch protection is a repository setting (human). Next in order: T4.8 (error taxonomy in the UI).
+
 **2b progress — T2.14 done 2026-09-28** (one commit, D7 = A): plaintext stored locally in sealed records, message keys never archived, history read from the device with the server asked only for newer messages, one-time migration of the old archive. **The known-red registry is empty: every scenario the harness owns is green.** Remaining in Phase 2: T2.12 (manual two-device checklist, owner).
 
 **2b progress — T2.11 done 2026-09-28** (two commits): bootstrap persists only after the first message decrypts, bootstrap replay refused, glare converges on the lower user id without losing messages, a peer's local reset is adopted automatically. Next in order: T2.14.

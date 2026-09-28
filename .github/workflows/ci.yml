@@ -1,0 +1,146 @@
+# CI (T4.7). Every job must be green before a merge to dev or main.
+# Jobs: secrets (scan + gitleaks), protocol (typecheck, lint, tests with a
+# coverage gate), server (typecheck, tests against an in-memory MongoDB,
+# build), client (typecheck, lint, jest, Metro bundle), android (debug APK).
+name: ci
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  NODE_VERSION: '20'
+
+jobs:
+  secrets:
+    name: secret scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Velo secret scan (whole tree)
+        run: node tools/secret-scan.js --all
+      - name: gitleaks (history)
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}
+
+  protocol:
+    name: protocol package
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: packages/protocol
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: packages/protocol/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run lint
+      - name: tests with coverage gate (thresholds in vitest.config.mts)
+        run: npm run test:coverage
+      - name: vectors are what the installed libsignal produces
+        run: npx vitest run test/vectors/regenerate.test.ts
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: protocol-coverage
+          path: packages/protocol/coverage/coverage-summary.json
+          if-no-files-found: ignore
+
+  server:
+    name: server
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: chats-server
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: chats-server/package-lock.json
+      - name: cache the mongod binary used by mongodb-memory-server
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/mongodb-binaries
+          key: mongodb-binaries-${{ runner.os }}-${{ hashFiles('chats-server/package-lock.json') }}
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+
+  client:
+    name: client
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: |
+            chats-client/package-lock.json
+            packages/protocol/package-lock.json
+      # The client consumes the protocol package as source; its imports resolve
+      # from the package's own node_modules under tsc, so both installs are needed.
+      - run: npm ci
+        working-directory: packages/protocol
+      - run: npm ci
+        working-directory: chats-client
+      - run: npx tsc --noEmit
+        working-directory: chats-client
+      - run: npm run lint
+        working-directory: chats-client
+      - run: npm test -- --ci
+        working-directory: chats-client
+      - name: Metro release bundle (module resolution smoke)
+        working-directory: chats-client
+        run: npx react-native bundle --platform android --dev false --entry-file index.js --bundle-output /tmp/velo.bundle --reset-cache
+
+  android:
+    name: android debug build
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    needs: [client]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: chats-client/package-lock.json
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+      - run: npm ci
+        working-directory: chats-client
+      - name: assembleDebug (no signing secrets involved)
+        working-directory: chats-client/android
+        run: ./gradlew assembleDebug --no-daemon --stacktrace
+      - uses: actions/upload-artifact@v4
+        with:
+          name: velo-debug-apk
+          path: chats-client/android/app/build/outputs/apk/debug/*.apk
+          retention-days: 7

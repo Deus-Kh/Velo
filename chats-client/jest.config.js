@@ -1,11 +1,15 @@
 module.exports = {
   preset: 'react-native',
+  // T4.7: native modules mocked so App and screens render under Jest.
+  setupFiles: ['<rootDir>/jest.setup.js'],
   // The RN preset transforms only react-native packages inside node_modules.
   // @noble/* ship ESM-only builds, so they must be transformed too.
   transformIgnorePatterns: [
-    'node_modules/(?!((jest-)?react-native|@react-native(-community)?|@noble)/)',
+    'node_modules/(?!((jest-)?react-native|react-native-.*|@react-native(-community)?|@noble|@react-navigation|nativewind)/)',
   ],
   moduleNameMapper: {
+    // Tailwind/NativeWind stylesheet imports are inert under Jest.
+    '\.css$': '<rootDir>/jest.style-mock.js',
     // The protocol package is consumed as TypeScript source (see metro.config.js).
     '^@velo/protocol$': '<rootDir>/../packages/protocol/src/index.ts',
     // Shared crypto deps resolve to the app's copies, exactly as Metro does,
