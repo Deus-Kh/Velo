@@ -1,6 +1,7 @@
 import nacl from 'tweetnacl';
 import { decodeBase64 } from 'tweetnacl-util';
 import type { PreKeyBundle } from './types';
+import { ProtocolError } from '../errors';
 
 export function verifySignedPreKeyBundle(bundle: PreKeyBundle): void {
   const identityPk = decodeBase64(bundle.identitySignPublicKey); // Ed25519 pub
@@ -10,6 +11,9 @@ export function verifySignedPreKeyBundle(bundle: PreKeyBundle): void {
   const ok = nacl.sign.detached.verify(signedPreKeyPk, signature, identityPk);
 
   if (!ok) {
-    throw new Error('Invalid signedPreKey signature (possible MITM / key tampering)');
+    throw new ProtocolError('IDENTITY_BINDING_INVALID', 'Invalid signedPreKey signature (possible MITM / key tampering)', {
+      what: 'signedPreKeySignature',
+      keyId: bundle.signedPreKey.keyId,
+    });
   }
 }

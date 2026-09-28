@@ -1,22 +1,6 @@
 import { sendAuto } from '../socket/sendAuto';
-import {
-  listPendingMessages,
-  removePendingMessage,
-  upsertPendingMessage,
-  type PendingMessageErrorCode,
-} from '../storage/pendingMessageStore';
-
-function classifyPendingMessageError(error: unknown): PendingMessageErrorCode {
-  const message = error instanceof Error ? error.message : String(error ?? '');
-
-  if (message.includes('Socket')) return 'socket_unavailable';
-  if (message.includes('Missing v2 session and initPacket')) return 'missing_bootstrap';
-  if (message.includes('No v2 session')) return 'no_session';
-  if (message.includes('Decrypt')) return 'decrypt_failed';
-  if (message.includes('storage')) return 'storage_corruption';
-  if (message) return 'send_failed';
-  return 'unknown';
-}
+import { listPendingMessages, removePendingMessage, upsertPendingMessage } from '../storage/pendingMessageStore';
+import { classifyPendingMessageError } from './protocolErrors';
 
 export async function drainPendingMessagesForUser(myUserId: string): Promise<void> {
   const pending = await listPendingMessages(myUserId);

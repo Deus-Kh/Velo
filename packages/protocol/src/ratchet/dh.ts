@@ -3,6 +3,7 @@ import { encodeBase64, decodeBase64 } from 'tweetnacl-util';
 import type { RatchetSessionV2 } from '../types/session';
 import { kdfRootKey } from './root';
 import { normalizeB64 } from '../primitives/base64';
+import { ProtocolError } from '../errors';
 
 /**
  * Applies a DH ratchet step when we detect peer dhPub change.
@@ -16,7 +17,7 @@ import { normalizeB64 } from '../primitives/base64';
  */
 export function applyDhRatchet(session: RatchetSessionV2, newPeerDhPubB64: string): RatchetSessionV2 {
   if (!session.DHsPrivateKey) {
-    throw new Error('Session missing DHs private key');
+    throw new ProtocolError('STORAGE_CORRUPTION', 'Session missing DHs private key', { what: 'DHsPrivateKey' });
   }
 
   // Normalize all stored b64 inputs to avoid silent decode mismatches
@@ -27,8 +28,12 @@ export function applyDhRatchet(session: RatchetSessionV2, newPeerDhPubB64: strin
   const dhrNewPub = decodeBase64(peerDhPubB64);
 
   // X25519 keys must be 32 bytes
-  if (dhsPriv.length !== 32) throw new Error('Bad DHsPrivateKey length');
-  if (dhrNewPub.length !== 32) throw new Error('Bad peer DH public key length');
+  if (dhsPriv.length !== 32) {
+    throw new ProtocolError('INVALID_KEY_LENGTH', 'Bad DHsPrivateKey length', { what: 'DHsPrivateKey', length: dhsPriv.length });
+  }
+  if (dhrNewPub.length !== 32) {
+    throw new ProtocolError('INVALID_KEY_LENGTH', 'Bad peer DH public key length', { what: 'peerDhPublicKey', length: dhrNewPub.length });
+  }
 
   // 1) Reset counters and skipped keys (MVP)
   const PN = session.Ns;

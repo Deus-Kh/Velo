@@ -5,6 +5,7 @@ import { utf8Decode, utf8Encode } from '../primitives/utf8';
 import { chainKdf } from './chain';
 import { applyDhRatchet } from './dh';
 import type { RatchetSessionV2 } from '../types/session';
+import { ProtocolError } from '../errors';
 
 /** Wire header of a v2 message. */
 export type V2Header = {
@@ -58,7 +59,9 @@ function openWithMessageKey(mkB64: string, envelope: V2Encrypted): string {
   const cipher = decodeBase64(normalizeB64(envelope.ciphertext));
 
   const plain = nacl.secretbox.open(cipher, nonce, mk);
-  if (!plain) throw new Error('secretbox.open failed');
+  if (!plain) {
+    throw new ProtocolError('DECRYPT_FAILED', 'secretbox.open failed', { n: envelope.header.n, pn: envelope.header.pn });
+  }
 
   return utf8Decode(plain);
 }
@@ -76,7 +79,7 @@ export function ratchetEncrypt(
   options?: { nonce?: Uint8Array },
 ): RatchetEncryptResult {
   if (!session.DHsPublicKey) {
-    throw new Error('Session missing DHsPublicKey');
+    throw new ProtocolError('STORAGE_CORRUPTION', 'Session missing DHsPublicKey', { what: 'DHsPublicKey' });
   }
 
   const ck = decodeBase64(session.chainKeySend);
@@ -84,7 +87,10 @@ export function ratchetEncrypt(
 
   const nonce = options?.nonce ?? nacl.randomBytes(24);
   if (nonce.length !== nacl.secretbox.nonceLength) {
-    throw new Error('nonce must be ' + String(nacl.secretbox.nonceLength) + ' bytes');
+    throw new ProtocolError('INVALID_KEY_LENGTH', 'nonce must be ' + String(nacl.secretbox.nonceLength) + ' bytes', {
+      what: 'nonce',
+      length: nonce.length,
+    });
   }
   const cipherBytes = nacl.secretbox(utf8Encode(plaintext), nonce, messageKey);
 
@@ -132,7 +138,13 @@ export function ratchetDecrypt(session: RatchetSessionV2, envelope: V2Encrypted)
   if (targetN < work.Nr) {
     const id = skippedKeyId(incomingDhPub, targetN);
     const mkB64 = skipped[id];
-    if (!mkB64) throw new Error('Replay or unknown old message');
+    // No skipped key for an old counter: the message was already consumed or
+    // its key was never retained. libsignal treats this as a duplicate; T2.6
+    // will be able to tell an evicted key (UNKNOWN_OLD_MESSAGE) apart once
+    // eviction is tracked.
+    if (!mkB64) {
+      throw new ProtocolError('REPLAY_DETECTED', 'Replay or unknown old message', { n: targetN, nr: work.Nr });
+    }
 
     const plaintext = openWithMessageKey(mkB64, envelope);
     delete skipped[id];
@@ -165,7 +177,9 @@ export function ratchetDecrypt(session: RatchetSessionV2, envelope: V2Encrypted)
     nr += 1;
   }
 
-  if (!messageKey) throw new Error('Failed to derive message key');
+  if (!messageKey) {
+    throw new ProtocolError('DECRYPT_FAILED', 'Failed to derive message key', { n: targetN, nr: work.Nr });
+  }
 
   const plaintext = openWithMessageKey(encodeBase64(messageKey), envelope);
 

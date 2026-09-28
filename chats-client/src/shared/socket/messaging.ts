@@ -8,7 +8,7 @@ import type { ReplyReference } from '../chat/types';
 
 import { loadSession } from '../storage/sessionStore';
 import { decryptAndPersist, encryptAndPersist } from '../chat/ratchetAdapter';
-import type { RatchetSessionV2 } from '@velo/protocol';
+import { ProtocolError, protocolErrorCode, type ProtocolErrorCode, type RatchetSessionV2 } from '@velo/protocol';
 import type { X3DHInitPacket } from '../crypto/x3dh';
 import { ensureV2SessionFromIncoming } from '../crypto/sessionBootstrap';
 
@@ -39,7 +39,7 @@ export async function sendMessageV2(params: {
   });
 
   if (!session || session.protoVersion !== 2) {
-    throw new Error('No v2 session for this peer');
+    throw new ProtocolError('NO_SESSION', 'No v2 session for this peer');
   }
 
   const { encrypted } = await encryptAndPersist({
@@ -61,7 +61,7 @@ export async function sendMessageV2(params: {
 
   return new Promise((resolve, reject) => {
     socket.emit('message:send', dto, (ack: any) => {
-      if (!ack?.ok) return reject(new Error(ack?.error || 'Send failed'));
+      if (!ack?.ok) return reject(new ProtocolError('SEND_FAILED', ack?.error || 'Send failed'));
       resolve({ serverMessageId: ack.serverMessageId });
     });
   });
@@ -85,7 +85,7 @@ export async function subscribeToMessages(onMessage: (m: {
   readAt?: number | null;
 }) => void, options?: {
   peerUserId?: string;
-  onFailure?: (reason: string) => void;
+  onFailure?: (reason: string, code: ProtocolErrorCode | null) => void;
 }): Promise<() => void> {
   const socket = await ensureSocketConnected();
 
@@ -127,11 +127,9 @@ export async function subscribeToMessages(onMessage: (m: {
       }
 
       if (!session || session.protoVersion !== 2) {
-        throw new Error(
-          msg.initPacket
-            ? 'Failed to establish v2 session from incoming initPacket'
-            : 'Missing v2 session and initPacket for incoming message'
-        );
+        throw msg.initPacket
+          ? new ProtocolError('SESSION_RESET_REQUIRED', 'Failed to establish v2 session from incoming initPacket')
+          : new ProtocolError('MISSING_BOOTSTRAP', 'Missing v2 session and initPacket for incoming message');
       }
 
       const { plaintext } = await decryptAndPersist({
@@ -176,7 +174,7 @@ export async function subscribeToMessages(onMessage: (m: {
       });
     } catch (e) {
       console.warn('Decrypt failed:', e);
-      options?.onFailure?.(e instanceof Error ? e.message : 'Unknown realtime decrypt failure');
+      options?.onFailure?.(e instanceof Error ? e.message : 'Unknown realtime decrypt failure', protocolErrorCode(e));
     }
   };
 

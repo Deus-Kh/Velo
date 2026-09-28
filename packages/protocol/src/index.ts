@@ -11,6 +11,15 @@
  * X3DH handshake still lives in the client.
  */
 
+export {
+  ProtocolError,
+  isProtocolError,
+  protocolErrorCode,
+  PROTOCOL_ERROR_CODES,
+  type ProtocolErrorCode,
+  type ProtocolErrorContext,
+} from './errors';
+
 export { normalizeB64 } from './primitives/base64';
 export { encodeKey, decodeKey } from './primitives/encoding';
 export { utf8Encode, utf8Decode } from './primitives/utf8';

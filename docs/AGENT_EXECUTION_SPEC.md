@@ -454,9 +454,11 @@ Target structure and migration map as in v1 T2.1 (`primitives/`, `ratchet/`, `ha
 ---
 
 ## T2.3 — Typed error taxonomy
-**Tier** CORE · **Est** 1d
+**Tier** CORE · **Est** 1d · **Status:** done 2026-09-28
 
 `ProtocolError` with codes `MISSING_BOOTSTRAP | NO_SESSION | STALE_SESSION | DECRYPT_FAILED | REPLAY_DETECTED | UNKNOWN_OLD_MESSAGE | SEND_FAILED | STORAGE_CORRUPTION | TOO_MANY_SKIPPED | HEADER_TAMPERED | INVALID_KEY_LENGTH | SESSION_RESET_REQUIRED | IDENTITY_MISMATCH | IDENTITY_BINDING_INVALID`. `context` never carries key material (R3). Replace every bare `throw new Error` in the package; the client maps codes to strings (§8.3).
+
+**Status 2026-09-28:** done. `src/errors.ts` (`ProtocolError`, `isProtocolError`, `protocolErrorCode`, `PROTOCOL_ERROR_CODES`; `context` typed as scalars only). Throw-site mapping: `secretbox.open` failure and a missing derived key → `DECRYPT_FAILED` `{n, pn}`; old counter with no skipped key → `REPLAY_DETECTED` `{n, nr}` (libsignal's duplicate-message case; `UNKNOWN_OLD_MESSAGE` is reserved until T2.6 tracks eviction); session missing `DHsPublicKey`/`DHsPrivateKey` → `STORAGE_CORRUPTION` `{what}`; wrong X25519/chain-key/nonce length → `INVALID_KEY_LENGTH` `{what, length}`; signed-prekey signature failure → `IDENTITY_BINDING_INVALID` `{what, keyId}`. `TOO_MANY_SKIPPED` (T2.6), `HEADER_TAMPERED` (T2.5), `IDENTITY_MISMATCH` (T2.13), `STALE_SESSION` (T2.11) have no throw site yet. Client: `chat/protocolErrors.ts` implements §8.3 (`presentProtocolError(code, peerName)` with `securityWarning` set only for `HEADER_TAMPERED`/`IDENTITY_MISMATCH`, `REPLAY_DETECTED` silent; `requiresSessionReset`; one `classifyPendingMessageError` replacing the two string-matching copies, with the string heuristics kept only as a fallback for non-protocol errors such as socket failures). `socket/messaging.ts` throws typed `NO_SESSION`, `MISSING_BOOTSTRAP`, `SESSION_RESET_REQUIRED`, `SEND_FAILED`; `onFailure(reason, code)` lets the hook detect a broken session by code. Tests: package 8 new (37 total) incl. "no bare throw in src/", "no key-like identifier in any context", and a runtime check that a real error's context contains none of the keys involved; client 5 new (65 total). Messages are unchanged, so nothing that still matches on text broke; the UI strings from §8.3 are wired in T2.12/Phase 12 when screens render them.
 
 ---
 

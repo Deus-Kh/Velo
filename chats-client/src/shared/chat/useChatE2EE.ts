@@ -20,13 +20,13 @@ import {
   removePendingMessage,
   removePendingMessagesForPair,
   upsertPendingMessage,
-  type PendingMessageErrorCode,
   type PendingMessageRecord,
 } from '../storage/pendingMessageStore';
 
 import { deleteSession, loadSession } from '../storage/sessionStore';
-import type { RatchetSessionV2 } from '@velo/protocol';
+import type { ProtocolErrorCode, RatchetSessionV2 } from '@velo/protocol';
 import { decryptAndPersist } from './ratchetAdapter';
+import { classifyPendingMessageError } from './protocolErrors';
 import { ensureV2SessionFromIncoming } from '../crypto/sessionBootstrap';
 import type { X3DHInitPacket } from '../crypto/x3dh';
 import { makeConversationId } from '../utils/conversation';
@@ -77,18 +77,6 @@ type StatusChangedEvent = {
   readerUserId?: string;
   deliveredByUserId?: string;
 };
-
-function classifyPendingMessageError(error: unknown): PendingMessageErrorCode {
-  const message = error instanceof Error ? error.message : String(error ?? '');
-
-  if (message.includes('Socket')) return 'socket_unavailable';
-  if (message.includes('Missing v2 session and initPacket')) return 'missing_bootstrap';
-  if (message.includes('No v2 session')) return 'no_session';
-  if (message.includes('Decrypt')) return 'decrypt_failed';
-  if (message.includes('storage')) return 'storage_corruption';
-  if (message) return 'send_failed';
-  return 'unknown';
-}
 
 // How many messages to fetch per page
 const PAGE_SIZE = 30;
@@ -175,7 +163,8 @@ function warnControlledHistoryFailure(
   console.warn(`History controlled failure: ${reason}`, meta);
 }
 
-function isPolicyBrokenSessionReason(reason: string): boolean {
+function isPolicyBrokenSessionReason(reason: string, code: ProtocolErrorCode | null = null): boolean {
+  if (code === 'MISSING_BOOTSTRAP' || code === 'SESSION_RESET_REQUIRED') return true;
   return (
     reason.includes('missing session and initPacket') ||
     reason.includes('Failed to establish v2 session from incoming initPacket')
@@ -628,8 +617,8 @@ export function useChatE2EE(peerUserId: string) {
           },
           {
             peerUserId,
-            onFailure: (reason) => {
-              if (isPolicyBrokenSessionReason(reason)) {
+            onFailure: (reason, code) => {
+              if (isPolicyBrokenSessionReason(reason, code)) {
                 markResetRequiredRef.current(reason);
               }
             },

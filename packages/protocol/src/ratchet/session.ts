@@ -2,6 +2,7 @@ import nacl from 'tweetnacl';
 import { decodeBase64, encodeBase64 } from 'tweetnacl-util';
 import { hkdfSha256 } from '../primitives/kdf';
 import type { RatchetSessionV2 } from '../types/session';
+import { ProtocolError } from '../errors';
 
 /** X25519 pair as base64; injectable so tests can pin the session bytes. */
 export interface DhKeyPairB64 {
@@ -32,7 +33,10 @@ export function createSessionFromX3DH(params: {
 }): RatchetSessionV2 {
   const chainKeyBytes = decodeBase64(params.chainKey);
   if (chainKeyBytes.length !== 32) {
-    throw new Error(`createSessionFromX3DH: chainKey must be 32 bytes, got ${chainKeyBytes.length}`);
+    throw new ProtocolError('INVALID_KEY_LENGTH', 'createSessionFromX3DH: chainKey must be 32 bytes', {
+      what: 'chainKey',
+      length: chainKeyBytes.length,
+    });
   }
 
   const expanded = hkdfSha256({
