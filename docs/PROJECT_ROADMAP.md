@@ -127,7 +127,7 @@ What a user can actually do today: 1:1 text with replies, receipts, typing, pres
 | Signed prekey rotation | ✅ | ✅ | — | ✅ 7-day rotation, 30-day retention, tagged signature (T2.10) | done |
 | Prekey drain protection | ✅ | ✅ | — | ❌ | ✅ T1.4 |
 | Encrypted local store | ✅ | ✅ | ✅ | ✅ sealed AsyncStorage records (T2.14, D7 = A; SQLite when search needs it) | done |
-| Delete-on-delivery server | ✅ | ✅ | ❌ | ❌ | ✅ T3.1 |
+| Delete-on-delivery server | ✅ | ✅ | ❌ | ✅ ciphertext deleted on the recipient's ack, receipts + 30-day TTL (T3.1) | done |
 | Multi-device (Sesame) | ✅ | ✅ | ✅ | ❌ | ❌ deferred, §10 |
 | Group E2EE (Sender Keys) | ✅ | ✅ | ❌ | ❌ | ✅ Phase 6' (per-user) |
 | Sealed sender | ✅ | ❌ | ❌ | ❌ | ❌ documented |
@@ -276,7 +276,7 @@ Fix: XChaCha20-Poly1305 with `AD = IK_A || IK_B || canonicalHeader` (decision D3
 No `setBackgroundMessageHandler`/`onMessage`/tap handler exists. Server `notification.title` is the sender's username and `data.conversationId` is the participant pair (`push/firebase.ts:69,85-90`). Any FCM error deletes the token (107–109).
 Fix: data-only pushes carrying only `type` + `serverMessageId`; client resolves the sender name locally and renders via notifee; tap deep-links; iOS Firebase configured; prune only on `registration-token-not-registered`. → T3.3
 
-**P1-10 · No local message store; keys kept forever; reinstall and "reset" destroy history** `[CORE]` *(new, replaces P1-7)* — **client side fixed 2026-09-28 (T2.14, D7 = A); server delete-on-delivery and TTL remain in T3.1**
+**P1-10 · No local message store; keys kept forever; reinstall and "reset" destroy history** `[CORE]` *(new, replaces P1-7)* — **fixed 2026-09-28: client side by T2.14 (D7 = A), server delete-on-delivery, receipts and TTL by T3.1**
 `useChatE2EE.ts:562-608` refetches ciphertext from the server on every open, so every message key must be kept (`v2MessageKeyStore.ts`). Reinstall makes all history `[Encrypted]` forever; "Reset secure session" (`useChatE2EE.ts:820-832`) deletes the keys it would need.
 Fix (the Signal model): encrypted local message DB (SQLite + SQLCipher via `@op-engineering/op-sqlite`, key in Keychain); decrypt once, store plaintext locally; **delete message keys after use**, keep only bounded skipped keys in the session; fetch only undelivered messages from the server; server deletes ciphertext after delivery and TTL-expires undelivered messages. Prerequisite for search, disappearing messages, backup, multi-device. Decision D7 pulled forward. → T2.14, T3.1
 
@@ -422,6 +422,8 @@ Extraction happens in T2.1. Secrets (`*.pem`, `*.keystore`, service-account JSON
 
 **T2.2 — done 2026-09-28.** `ratchet/message.ts` in the package: `ratchetEncrypt(session, plaintext)` and `ratchetDecrypt(session, envelope)` are synchronous, never mutate the input, and return the next session, the derived message keys and (on decrypt) the consumed skipped-key id. The only client touchpoint is `chat/ratchetAdapter.ts`, which runs the pure step and persists keys first, then the session, or nothing at all on throw (R7). `crypto/messageV2.ts` deleted. Behaviour pinned with frozen vectors; one deliberate change: message keys derived during a decrypt that then fails authentication are no longer archived (they were written before `secretbox.open` ran). The `ad` argument arrives with the AEAD in T2.5.
 
+**3' progress — T3.1 done 2026-09-28** (two commits): the server deletes ciphertext on the recipient's delivered ack and keeps a metadata-only receipt with a 30-day TTL; the client syncs from `GET /messages/undelivered`, acks only after decrypting and storing, and applies receipts to its stored copies; S26 in the harness. T2.12 (manual checklist) remains the human gate before Phase 3' formally opens; T3.1 was built ahead of it because it closes P1-10. Next in order: T3.2.
+
 **2b progress — T2.14 done 2026-09-28** (one commit, D7 = A): plaintext stored locally in sealed records, message keys never archived, history read from the device with the server asked only for newer messages, one-time migration of the old archive. **The known-red registry is empty: every scenario the harness owns is green.** Remaining in Phase 2: T2.12 (manual two-device checklist, owner).
 
 **2b progress — T2.11 done 2026-09-28** (two commits): bootstrap persists only after the first message decrypts, bootstrap replay refused, glare converges on the lower user id without losing messages, a peer's local reset is adopted automatically. Next in order: T2.14.
@@ -452,7 +454,7 @@ Extraction happens in T2.1. Secrets (`*.pem`, `*.keystore`, service-account JSON
 
 | Task | Detail | Est. |
 |---|---|---|
-| T3.1 Delete-on-delivery + TTL + `GET /messages/undelivered?after=seq` | Server keeps only undelivered ciphertext (30-day TTL) | 2d |
+| T3.1 Delete-on-delivery + TTL + `GET /messages/undelivered?after=seq` | Server keeps only undelivered ciphertext (30-day TTL). **Done 2026-09-28** (cursor is `createdAtClient` until T3.2) | 2d |
 | T3.2 Server sequence numbers; compound cursor | P2-6, P2-9 | 1d |
 | T3.3 Push done right | Data-only payload; background handler; notifee render; tap deep-link; iOS APNs; token-prune fix; honest preview toggle | 3d |
 | T3.4 Key zeroization + replay window + no-mutation-before-auth audit | `fill(0)`; typed `REPLAY_DETECTED` vs `UNKNOWN_OLD_MESSAGE` | 2d |

@@ -9,7 +9,9 @@ import type { MessageEnvelope } from '../../src/ratchet/message';
  *    a bundle without one when the pool is empty (keys.routes.ts);
  *  - message:send dedupes by (sender, clientMessageId); a message carries
  *    only its own initPacket (the first-initPacket synthesis was removed in
- *    T2.13); history returns stored docs.
+ *    T2.13);
+ *  - T3.1: ciphertext is held only until the recipient acks delivery; the
+ *    ack leaves a metadata-only receipt. `undelivered` is what a client syncs.
  *
  * `malicious` hooks model a compromised or on-path server: substituting the
  * bundle or the initPacket a client receives, or relabelling the sender.
@@ -58,9 +60,15 @@ export type MaliciousHooks = {
 export const MAX_UNUSED_ONE_TIME_PREKEYS = 500;
 export const MAX_SIGNED_PREKEYS_PER_USER = 5;
 
+export type Receipt = { serverMessageId: string; conversationId: string; fromUserId: string; toUserId: string; clientMessageId: string; createdAt: number; status: 'delivered' | 'read'; deliveredAt: number };
+
 export class FakeServer {
   readonly users = new Map<string, ServerUser>();
+  /** Undelivered ciphertext (T3.1: delivered messages are stripped to `receipts`). */
   readonly messages: NewMessageDTO[] = [];
+  readonly receipts: Receipt[] = [];
+  /** Conversation members, like ConversationModel (survives message deletion). */
+  readonly conversations = new Map<string, [string, string]>();
   readonly bundleIssues: Array<{ requesterId: string; targetId: string; oneTimePreKeyId: number | null }> = [];
   malicious: MaliciousHooks = {};
   /** Set by Network: routes an event to a client's socket room. */
@@ -99,9 +107,9 @@ export class FakeServer {
     u.oneTimePreKeys = [];
 
     const peers = new Set<string>();
-    for (const m of this.messages) {
-      if (m.fromUserId === userId) peers.add(m.toUserId);
-      if (m.toUserId === userId) peers.add(m.fromUserId);
+    for (const members of this.conversations.values()) {
+      if (members[0] === userId) peers.add(members[1]);
+      if (members[1] === userId) peers.add(members[0]);
     }
     for (const peerId of peers) this.emitToUser?.(peerId, 'identity:changed', { userId, identityChangedAt: u.identityChangedAt });
   }
@@ -169,8 +177,12 @@ export class FakeServer {
 
   /** message:send. Returns what the recipient is emitted (after hooks). */
   storeMessage(fromUserId: string, dto: SendMessageDTO): NewMessageDTO {
-    const existing = this.messages.find((m) => m.fromUserId === fromUserId && m.clientMessageId === dto.clientMessageId);
     const conversationId = FakeServer.conversationId(fromUserId, dto.toUserId);
+    this.conversations.set(conversationId, [fromUserId, dto.toUserId].sort() as [string, string]);
+    // Dedupe by (sender, clientMessageId): a resend after delivery gets the same id and is not re-emitted.
+    const delivered = this.receipts.find((r) => r.fromUserId === fromUserId && r.clientMessageId === dto.clientMessageId);
+    const existing = this.messages.find((m) => m.fromUserId === fromUserId && m.clientMessageId === dto.clientMessageId)
+      ?? (delivered ? { serverMessageId: delivered.serverMessageId, conversationId, fromUserId, toUserId: dto.toUserId, protoVersion: 3 as const, v3: dto.v3, initPacket: dto.initPacket, clientMessageId: dto.clientMessageId, createdAt: delivered.createdAt } : undefined);
 
     const stored: NewMessageDTO = existing ?? {
       serverMessageId: 'srv-' + String(++this.seq),
@@ -191,11 +203,32 @@ export class FakeServer {
     return out;
   }
 
-  /** History as persisted: initPacket only on the message that carried it. */
-  history(conversationId: string): NewMessageDTO[] {
+  /** GET /messages/undelivered: ciphertext still held for `userId`, oldest first. */
+  undelivered(userId: string, peerUserId?: string): NewMessageDTO[] {
     return this.messages
-      .filter((m) => m.conversationId === conversationId)
+      .filter((m) => m.toUserId === userId && (!peerUserId || m.fromUserId === peerUserId))
       .sort((a, b) => a.createdAt - b.createdAt || a.serverMessageId.localeCompare(b.serverMessageId))
       .map((m) => ({ ...m }));
+  }
+
+  /**
+   * message:delivered / POST /messages/delivered (T3.1): only the recipient may
+   * ack; the ciphertext is deleted and a receipt remains; the sender is told.
+   */
+  ackDelivered(userId: string, serverMessageId: string): 'delivered' | 'NOT_FOUND' | 'FORBIDDEN' {
+    const i = this.messages.findIndex((m) => m.serverMessageId === serverMessageId);
+    if (i < 0) return this.receipts.some((r) => r.serverMessageId === serverMessageId && r.toUserId === userId) ? 'delivered' : 'NOT_FOUND';
+    const m = this.messages[i]!;
+    if (m.toUserId !== userId) return 'FORBIDDEN';
+    this.messages.splice(i, 1);
+    const deliveredAt = ++this.seq;
+    this.receipts.push({ serverMessageId, conversationId: m.conversationId, fromUserId: m.fromUserId, toUserId: m.toUserId, clientMessageId: m.clientMessageId, createdAt: m.createdAt, status: 'delivered', deliveredAt });
+    this.emitToUser?.(m.fromUserId, 'message:status-changed', { conversationId: m.conversationId, status: 'delivered', serverMessageId, deliveredAt, deliveredByUserId: userId });
+    return 'delivered';
+  }
+
+  /** Ciphertext the server holds for a conversation (any direction). Zero once everything is delivered. */
+  heldCiphertextCount(conversationId: string): number {
+    return this.messages.filter((m) => m.conversationId === conversationId).length;
   }
 }

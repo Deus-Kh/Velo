@@ -5,6 +5,7 @@ import {
   deleteStoredMessagesForPair,
   latestStoredCreatedAt,
   listStoredMessages,
+  patchStoredMessage,
   upsertStoredMessage,
   type StoredMessage,
 } from '../messageStore';
@@ -91,6 +92,13 @@ describe('messageStore (T2.14, sealed AsyncStorage)', () => {
     const raw = (await AsyncStorage.getItem(key))!;
     await AsyncStorage.setItem(key.replace(ME, other), raw);
     expect(await listStoredMessages({ myUserId: other, peerUserId: PEER, limit: 10 })).toEqual([]);
+
+    // T3.1 receipts: patch delivery/read state in place; unknown records are reported, not created.
+    const patched = await patchStoredMessage({ myUserId: ME, peerUserId: PEER, id: 'c1', createdAt: msg(1).createdAt, patch: { status: 'read', readAt: 42 } });
+    expect(patched).toMatchObject({ id: 'c1', text: 'secret text 1', status: 'read', readAt: 42, serverMessageId: 'srv1' });
+    expect((await listStoredMessages({ myUserId: ME, peerUserId: PEER, limit: 10 }))[0]).toMatchObject({ status: 'read', readAt: 42 });
+    expect(await patchStoredMessage({ myUserId: ME, peerUserId: PEER, id: 'missing', createdAt: 1, patch: { status: 'read' } })).toBeNull();
+    expect(await countStoredMessages({ myUserId: ME, peerUserId: PEER })).toBe(1);
 
     await upsertStoredMessage({ myUserId: ME, peerUserId: 'peer-b', message: msg(2) });
     await deleteStoredMessagesForPair({ myUserId: ME, peerUserId: PEER });

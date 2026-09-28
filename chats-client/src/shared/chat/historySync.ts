@@ -1,12 +1,18 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { normalizeB64, protocolErrorCode, type MessageEnvelope } from '@velo/protocol';
-import { messagesApi, type HistoryItem } from '../api/messages.api';
+import { messagesApi, type HistoryItem, type ReceiptItem } from '../api/messages.api';
 import { deleteV2MessageKeysForPair, hasArchivedKeysForPair } from '../storage/v2MessageKeyStore';
-import { latestStoredCreatedAt, storedMessageId, upsertStoredMessage, type StoredMessage } from '../storage/messageStore';
+import { patchStoredMessage, storedMessageId, upsertStoredMessage, type StoredMessage } from '../storage/messageStore';
 import { receiveIncoming } from './incoming';
 import { decryptArchived } from './ratchetAdapter';
 
-const SYNC_PAGE = 200;
+const SYNC_PAGE = 100;
 const MAX_PAGES = 20;
+
+/** Receipt cursor per pair (server time of the last sync). Not secret. */
+export function receiptsCursorKey(myUserId: string, peerUserId: string): string {
+  return `msgsync:v1:${myUserId}:${peerUserId}`;
+}
 
 function envelopeOf(it: HistoryItem): MessageEnvelope | null {
   const h = it.v3?.header;
@@ -34,60 +40,117 @@ function toStored(it: HistoryItem, direction: 'in' | 'out', text: string): Store
   };
 }
 
+export type SyncResult = {
+  /** Inbound messages decrypted and stored by this sync, ascending. */
+  received: StoredMessage[];
+  /** Own messages whose delivery/read state changed while this device was away. */
+  updated: StoredMessage[];
+};
+
 /**
- * Pull messages the server holds that are newer than the latest stored one
- * (T2.14; T3.1 replaces this with an undelivered endpoint). Inbound items
- * are bootstrapped/decrypted through the normal receive path and stored;
- * our own items from another install cannot be decrypted and are skipped.
- * Returns the stored messages in ascending order.
+ * T3.1: pull what the server still holds for this pair. Undelivered inbound
+ * messages are decrypted through the normal receive path, stored, and then
+ * acked so the server deletes their ciphertext (ack only after the message
+ * is stored: R7 for the server copy). Receipts for our own messages update
+ * the stored copies. Nothing is fetched twice: delivered ciphertext is gone.
  */
 export async function syncNewerFromServer(params: {
   myUserId: string;
   peerUserId: string;
   onIdentityChanged: (reason: string) => void;
   onResetRequired: (reason: string) => void;
-}): Promise<StoredMessage[]> {
+}): Promise<SyncResult> {
   const { myUserId, peerUserId } = params;
-  const out: StoredMessage[] = [];
-  let after = (await latestStoredCreatedAt({ myUserId, peerUserId })) ?? 0;
+  const received: StoredMessage[] = [];
+  const updated: StoredMessage[] = [];
+  const cursorKey = receiptsCursorKey(myUserId, peerUserId);
+  let receiptsSince = 0;
+  try {
+    receiptsSince = Number((await AsyncStorage.getItem(cursorKey)) ?? 0) || 0;
+  } catch {
+    receiptsSince = 0;
+  }
 
+  let after: number | undefined;
+  let serverTime: number | null = null;
   for (let page = 0; page < MAX_PAGES; page += 1) {
-    const res = await messagesApi.getWithUser(peerUserId, { limit: SYNC_PAGE, after });
+    const res = await messagesApi.getUndelivered({
+      peerUserId,
+      limit: SYNC_PAGE,
+      after,
+      receiptsSince: page === 0 ? receiptsSince : undefined,
+    });
     const items: HistoryItem[] = Array.isArray(res.data?.items) ? res.data.items : [];
-    items.sort((a, b) => Number(a.createdAt ?? 0) - Number(b.createdAt ?? 0));
-    if (items.length === 0) break;
+    const receipts: ReceiptItem[] = page === 0 && Array.isArray(res.data?.receipts) ? res.data.receipts : [];
+    if (typeof res.data?.serverTime === 'number') serverTime = res.data.serverTime;
 
+    for (const r of receipts) {
+      const id = storedMessageId({ clientMessageId: r.clientMessageId, serverMessageId: r.serverMessageId });
+      if (!id) continue;
+      const patched = await patchStoredMessage({
+        myUserId,
+        peerUserId,
+        id,
+        createdAt: r.createdAt,
+        patch: {
+          serverMessageId: r.serverMessageId,
+          status: r.status,
+          deliveredAt: r.deliveredAt ?? null,
+          readAt: r.readAt ?? null,
+        },
+      });
+      if (patched) updated.push(patched);
+    }
+
+    const stored: string[] = [];
     for (const it of items) {
-      const createdAt = Number(it.createdAt ?? 0);
-      if (createdAt > after) after = createdAt;
-      const mine = String(it.fromUserId) === String(myUserId);
-      if (mine || it.protoVersion !== 3) continue;
+      after = Math.max(after ?? 0, Number(it.createdAt ?? 0));
+      if (String(it.fromUserId) === String(myUserId) || it.protoVersion !== 3) continue;
       const envelope = envelopeOf(it);
       if (!envelope) continue;
       try {
         const r = await receiveIncoming({ myUserId, peerUserId, initPacket: it.initPacket ?? null, encrypted: envelope });
-        const stored = toStored(it, 'in', r.plaintext);
-        if (stored) {
-          await upsertStoredMessage({ myUserId, peerUserId, message: stored });
-          out.push(stored);
+        const record = toStored(it, 'in', r.plaintext);
+        if (record) {
+          await upsertStoredMessage({ myUserId, peerUserId, message: record });
+          received.push(record);
+          stored.push(it.serverMessageId);
         }
       } catch (e) {
         const code = protocolErrorCode(e);
         if (code === 'IDENTITY_MISMATCH') params.onIdentityChanged('initiator identity does not match the pinned identity');
         else if (code === 'MISSING_BOOTSTRAP' || code === 'SESSION_RESET_REQUIRED') params.onResetRequired('missing session and initPacket for inbound history item');
-        else if (code !== 'REPLAY_DETECTED') console.warn('History sync: message not decryptable', { serverMessageId: it.serverMessageId, code });
+        else if (code === 'REPLAY_DETECTED' || code === 'UNKNOWN_OLD_MESSAGE') stored.push(it.serverMessageId); // already consumed: nothing left to fetch
+        else console.warn('History sync: message not decryptable', { serverMessageId: it.serverMessageId, code });
+      }
+    }
+
+    // The server deletes the ciphertext of what this device now holds.
+    if (stored.length) {
+      try {
+        await messagesApi.ackDelivered(stored);
+      } catch (e) {
+        console.warn('History sync: delivered ack failed (will retry next sync):', e);
       }
     }
     if (items.length < SYNC_PAGE) break;
   }
-  return out;
+
+  if (serverTime !== null) {
+    try {
+      await AsyncStorage.setItem(cursorKey, String(serverTime));
+    } catch {
+      /* cursor is a convenience; receipts are idempotent */
+    }
+  }
+  return { received, updated };
 }
 
 /**
  * One-time migration from the pre-T2.14 archive: decrypt every server
  * message this device holds an archived key for, store the plaintext, then
  * delete the archive for the pair. Idempotent: does nothing once the
- * archive is gone.
+ * archive is gone. Uses the legacy history route, which T3.1 keeps for this.
  */
 export async function migrateArchivedHistory(params: { myUserId: string; peerUserId: string }): Promise<number> {
   const { myUserId, peerUserId } = params;
@@ -96,7 +159,7 @@ export async function migrateArchivedHistory(params: { myUserId: string; peerUse
   let migrated = 0;
   let before: number | null = null;
   for (let page = 0; page < MAX_PAGES; page += 1) {
-    const res = await messagesApi.getWithUser(peerUserId, { limit: SYNC_PAGE, before: before ?? undefined });
+    const res = await messagesApi.getWithUser(peerUserId, { limit: 200, before: before ?? undefined });
     const items: HistoryItem[] = Array.isArray(res.data?.items) ? res.data.items : [];
     if (items.length === 0) break;
     for (const it of items) {
@@ -118,7 +181,7 @@ export async function migrateArchivedHistory(params: { myUserId: string; peerUse
         /* an archived key that no longer opens: skip */
       }
     }
-    if (items.length < SYNC_PAGE) break;
+    if (items.length < 200) break;
   }
   await deleteV2MessageKeysForPair({ myUserId, peerUserId });
   return migrated;

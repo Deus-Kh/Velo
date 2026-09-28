@@ -376,23 +376,27 @@ export class VirtualClient {
     }
     this.inbox.push({ fromUserId: peerUserId, text: plaintext, serverMessageId: dto.serverMessageId });
     this.storeMessage(peerUserId, { direction: 'in', text: plaintext, createdAt: dto.createdAt, serverMessageId: dto.serverMessageId });
+    // socket/messaging.ts: the delivered ack goes out only after the message decrypted (T3.1: the server then deletes it).
+    this.server.ackDelivered(this.userId, dto.serverMessageId);
     return plaintext;
   }
 
   /**
-   * useChatE2EE history (T2.14): the local store first, then only what the server holds
-   * beyond the latest stored message, decrypted through the normal receive path.
+   * useChatE2EE history (T2.14 + T3.1): the local store first, then only the
+   * ciphertext the server still holds for us, decrypted through the normal
+   * receive path (which acks, so the server deletes it).
    */
   loadHistory(peerUserId: string): Array<{ mine: boolean; text: string }> {
     const stored = this.storedMessages(peerUserId);
-    const latest = stored.length ? stored[stored.length - 1]!.createdAt : 0;
-    for (const it of this.server.history(FakeServer.conversationId(this.userId, peerUserId))) {
-      if (it.createdAt <= latest || it.fromUserId === this.userId) continue;
-      if (stored.some((m) => m.serverMessageId === it.serverMessageId)) continue;
+    for (const it of this.server.undelivered(this.userId, peerUserId)) {
+      if (stored.some((m) => m.serverMessageId === it.serverMessageId)) {
+        this.server.ackDelivered(this.userId, it.serverMessageId); // stored earlier, ack was lost
+        continue;
+      }
       try {
         this.receive(it);
       } catch {
-        /* mirrors the client: warned and skipped */
+        /* mirrors the client: warned, skipped, and left on the server */
       }
     }
     return this.storedMessages(peerUserId).map((m) => ({ mine: m.direction === 'out', text: m.text }));

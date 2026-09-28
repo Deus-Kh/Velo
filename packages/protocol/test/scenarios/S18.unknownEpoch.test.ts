@@ -21,7 +21,7 @@ describe('S18 message from an unknown epoch', () => {
     A!.send('B', 'a2');
 
     const before = B!.sessionState('A');
-    const genuine = network.server.history('A:B').at(-1)!;
+    const genuine = network.log.at(-1)!.dto; // T3.1: delivered ciphertext is gone from the server; the wire log has it
     const alien = { ...genuine, v3: { ...genuine.v3, header: { dhPub: encodeBase64(nacl.box.keyPair().publicKey), n: 0, pn: 0 } } };
 
     const r = network.deliverNow('B', alien);

@@ -14,7 +14,7 @@ const KNOWN_RED: Record<string, string> = {};
 describe('known-red registry', () => {
   it('exactly the registered scenarios use it.fails', () => {
     const files = readdirSync(__dirname).filter((f) => /^S\d\d\./.test(f));
-    expect(files).toHaveLength(25);
+    expect(files).toHaveLength(26);
     const red = files
       .filter((f) => /\bit\.fails\(/.test(readFileSync(join(__dirname, f), 'utf8')))
       .map((f) => f.slice(0, 3))

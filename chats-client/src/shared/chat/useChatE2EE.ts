@@ -436,15 +436,20 @@ export function useChatE2EE(peerUserId: string) {
           setMessages((prev) => prependMessages(prev, page.map(toUI)));
         }
 
-        const fresh = await syncNewerFromServer({
+        // T3.1: only what the server still holds (undelivered ciphertext, acked after storing) and
+        // receipts for our own messages; delivered ciphertext no longer exists on the server.
+        const sync = await syncNewerFromServer({
           myUserId: me,
           peerUserId,
           onIdentityChanged: markIdentityChanged,
           onResetRequired: markResetRequired,
         });
-        if (!cancelled && fresh.length > 0) {
-          if (oldestCreatedAtRef.current === null) oldestCreatedAtRef.current = fresh[0]!.createdAt;
-          setMessages((prev) => prependMessages(prev, fresh.map(toUI)));
+        if (!cancelled && sync.received.length > 0) {
+          if (oldestCreatedAtRef.current === null) oldestCreatedAtRef.current = sync.received[0]!.createdAt;
+          setMessages((prev) => prependMessages(prev, sync.received.map(toUI)));
+        }
+        if (!cancelled && sync.updated.length > 0) {
+          setMessages((prev) => sync.updated.reduce((acc, m) => upsertMessage(acc, toUI(m)), prev));
         }
       } catch (e) {
         console.warn('Failed to load initial history:', e);

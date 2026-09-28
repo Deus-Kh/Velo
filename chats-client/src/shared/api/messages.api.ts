@@ -32,10 +32,34 @@ export interface HistoryResponse {
   items: HistoryItem[];
 }
 
+/** T3.1: delivery/read state of one of my own messages, for a sender that was offline. */
+export interface ReceiptItem {
+  serverMessageId: string;
+  clientMessageId: string;
+  createdAt: number;
+  status: 'delivered' | 'read';
+  deliveredAt?: number | null;
+  readAt?: number | null;
+}
+
+export interface UndeliveredResponse {
+  items: HistoryItem[];
+  receipts: ReceiptItem[];
+  serverTime: number;
+}
+
 export const messagesApi = {
   /** `before`: older page (descending on the server). `after`: newer than the latest stored (ascending), T2.14 sync. */
   getWithUser: (peerUserId: string, params?: { limit?: number; before?: number; after?: number }) =>
     http.get<HistoryResponse>(`/messages/with/${peerUserId}`, { params }),
   markAsRead: (conversationId: string) =>
     http.post<{ ok: boolean; updatedCount: number }>(`/messages/mark-read/${conversationId}`),
+
+  /** T3.1: ciphertext the server still holds for me (oldest first) plus receipts for my own messages. */
+  getUndelivered: (params: { peerUserId?: string; limit?: number; after?: number; receiptsSince?: number }) =>
+    http.get<UndeliveredResponse>('/messages/undelivered', { params }),
+
+  /** T3.1: tell the server these messages are decrypted and stored here; it deletes their ciphertext. */
+  ackDelivered: (serverMessageIds: string[]) =>
+    http.post<{ ok: boolean; results: Record<string, string> }>('/messages/delivered', { serverMessageIds }),
 };

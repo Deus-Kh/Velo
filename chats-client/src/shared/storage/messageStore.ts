@@ -55,6 +55,29 @@ export async function upsertStoredMessage(params: { myUserId: string; peerUserId
   await AsyncStorage.setItem(recordKey(myUserId, peerUserId, message), sealJson(mk, message));
 }
 
+/**
+ * Update fields of one stored record (delivery/read state). Returns the
+ * updated record, or null when there is no such record on this device.
+ */
+export async function patchStoredMessage(params: {
+  myUserId: string;
+  peerUserId: string;
+  id: string;
+  createdAt: number;
+  patch: Partial<Pick<StoredMessage, 'status' | 'deliveredAt' | 'readAt' | 'serverMessageId'>>;
+}): Promise<StoredMessage | null> {
+  const { myUserId, peerUserId } = params;
+  const key = recordKey(myUserId, peerUserId, { id: params.id, createdAt: params.createdAt });
+  const raw = await AsyncStorage.getItem(key);
+  if (raw === null) return null;
+  const mk = await getOrCreateSessionMasterKey(myUserId);
+  const current = openJson<StoredMessage>(mk, raw);
+  if (!current) return null;
+  const next: StoredMessage = { ...current, ...params.patch };
+  await AsyncStorage.setItem(key, sealJson(mk, next));
+  return next;
+}
+
 /** Newest page first by key order, returned oldest → newest. `before` excludes messages at or after that time. */
 export async function listStoredMessages(params: {
   myUserId: string;
