@@ -3,6 +3,8 @@ import { messagesApi, type HistoryItem } from '../api/messages.api';
 import { conversationsApi, type ConversationListItem } from '../api/conversations.api';
 import { loadStoredSession } from '../auth/tokenStore';
 import { ingestUndeliveredItems } from '../chat/historySync';
+import { ingestGroupItems } from '../chat/groupMessaging';
+import { groupsApi } from '../api/groups.api';
 import { makeConversationId } from '../utils/conversation';
 import type { StoredMessage } from '../storage/messageStore';
 import { useAppUiStore } from '../../store/app-ui.store';
@@ -88,6 +90,27 @@ async function notifyStored(params: { myUserId: string; peerUserId: string; mess
   }
 }
 
+async function notifyStoredGroup(params: { myUserId: string; groupId: string; title: string; messages: StoredMessage[] }): Promise<void> {
+  const { myUserId, groupId, title, messages } = params;
+  await ensureStoresHydrated();
+  const preferences = getNotificationPreferencesForUser(useNotificationPreferencesStore.getState().preferencesByUserId, myUserId);
+  const appActive = AppState.currentState === 'active';
+  const chatOpenForPeer = useAppUiStore.getState().activeChatPeerUserId === 'group:' + groupId;
+  if (!shouldNotifyFor({ appActive, chatOpenForPeer, inAppAlertsEnabled: preferences.inAppAlertsEnabled })) return;
+  const conversationId = 'group:' + groupId;
+  for (const m of messages) {
+    await displayIncomingMessageNotification({
+      id: notificationIdFor(conversationId, m.serverMessageId ?? m.id),
+      title,
+      body: notificationBodyFor({ text: m.text, showMessagePreview: preferences.showMessagePreview }),
+      conversationId,
+      fromUserId: 'group:' + groupId,
+      soundEnabled: preferences.soundEnabled,
+      vibrationEnabled: preferences.vibrationEnabled,
+    });
+  }
+}
+
 /**
  * A live `message:new` for a chat that is not open: decrypt, store, ack,
  * notify. Returns the stored message, or null if it could not be ingested
@@ -111,15 +134,36 @@ export async function fetchAndIngestUndelivered(myUserId: string): Promise<Store
   const res = await messagesApi.getUndelivered({ limit: PUSH_FETCH_LIMIT });
   const items: HistoryItem[] = Array.isArray(res.data?.items) ? res.data.items : [];
   const byPeer = new Map<string, HistoryItem[]>();
+  const byGroup = new Map<string, HistoryItem[]>();
   for (const it of items) {
     const peer = String(it.fromUserId);
     if (peer === myUserId) continue;
+    if (it.g1 && it.groupId) {
+      const list = byGroup.get(String(it.groupId)) ?? [];
+      list.push(it);
+      byGroup.set(String(it.groupId), list);
+      continue;
+    }
     const list = byPeer.get(peer) ?? [];
     list.push(it);
     byPeer.set(peer, list);
   }
 
   const all: StoredMessage[] = [];
+  // T6.4: group copies, one notification per message with the group's name.
+  for (const [groupId, groupItems] of byGroup) {
+    const { received } = await ingestGroupItems({ myUserId, groupId, items: groupItems });
+    all.push(...received);
+    if (received.length) {
+      let title = 'Group message';
+      try {
+        title = (await groupsApi.get(groupId)).data.name;
+      } catch {
+        /* name unknown offline */
+      }
+      await notifyStoredGroup({ myUserId, groupId, title, messages: received });
+    }
+  }
   for (const [peerUserId, peerItems] of byPeer) {
     const { received } = await ingestUndeliveredItems({ myUserId, peerUserId, items: peerItems });
     all.push(...received);

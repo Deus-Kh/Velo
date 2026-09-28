@@ -1,0 +1,160 @@
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { useAuthStore } from '../../store/auth.store';
+import { groupPeerKey, groupsApi, type GroupView } from '../api/groups.api';
+import type { HistoryItem } from '../api/messages.api';
+import { ensureSocketConnected } from '../socket/socket';
+import { listStoredMessages, type StoredMessage } from '../storage/messageStore';
+import { distributeSenderKey, ensureOwnSenderKey, forgetDepartedMembers, handleControlContent } from './groupKeys';
+import { ingestGroupItems, sendGroupMessage, syncGroupFromServer } from './groupMessaging';
+import { subscribeToControlContent } from '../socket/messaging';
+
+/**
+ * Group chat state for one group (T6.4): the group's members and epoch,
+ * messages from the local store, send, and the live/sync receive paths.
+ * On a membership change (`group:changed`) the group is refetched, our key
+ * rotates for the new epoch, departed members' keys are forgotten (T6.5).
+ */
+export type GroupUIMessage = StoredMessage & { mine: boolean };
+
+const PAGE_SIZE = 50;
+
+function toUI(myUserId: string, m: StoredMessage): GroupUIMessage {
+  return { ...m, mine: m.direction === 'out' };
+}
+
+function upsert(list: GroupUIMessage[], m: GroupUIMessage): GroupUIMessage[] {
+  const idx = list.findIndex((x) => x.id === m.id || (m.serverMessageId && x.serverMessageId === m.serverMessageId));
+  const next = idx === -1 ? [...list, m] : list.map((x, i) => (i === idx ? { ...x, ...m } : x));
+  return next.sort((a, b) => (a.seq != null && b.seq != null ? a.seq - b.seq : a.createdAt - b.createdAt));
+}
+
+export function useGroupChat(groupId: string) {
+  const myUserId = useAuthStore((s) => s.userId);
+  const [group, setGroup] = useState<GroupView | null>(null);
+  const [messages, setMessages] = useState<GroupUIMessage[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [waitingForKeys, setWaitingForKeys] = useState<string[]>([]);
+  const [securityWarning, setSecurityWarning] = useState<{ code: string; fromUserId: string } | null>(null);
+  const groupRef = useRef<GroupView | null>(null);
+  const memberIdsRef = useRef<string[]>([]);
+
+  const onSecurityWarning = useCallback((code: string, fromUserId: string) => setSecurityWarning({ code, fromUserId }), []);
+
+  const refreshGroup = useCallback(async () => {
+    if (!myUserId) return null;
+    const res = await groupsApi.get(groupId);
+    const g = res.data;
+    const previous = memberIdsRef.current;
+    groupRef.current = g;
+    memberIdsRef.current = g.members.map((m) => m.userId);
+    setGroup(g);
+    // T6.5: a new epoch rotates our key; departed members' keys are dead.
+    await ensureOwnSenderKey({ myUserId: String(myUserId), groupId, epoch: g.epoch });
+    if (previous.length) await forgetDepartedMembers({ myUserId: String(myUserId), group: g, previousMemberIds: previous });
+    return g;
+  }, [groupId, myUserId]);
+
+  const sync = useCallback(async () => {
+    if (!myUserId) return;
+    const r = await syncGroupFromServer({ myUserId: String(myUserId), groupId, onSecurityWarning });
+    setWaitingForKeys(r.waitingForKey);
+    if (r.received.length) setMessages((prev) => r.received.reduce((acc, m) => upsert(acc, toUI(String(myUserId), m)), prev));
+  }, [groupId, myUserId, onSecurityWarning]);
+
+  useEffect(() => {
+    let cancelled = false;
+    let unsubscribe: (() => void) | null = null;
+    let unsubscribeControl: (() => void) | null = null;
+    (async () => {
+      if (!myUserId) return;
+      setLoading(true);
+      try {
+        const stored = await listStoredMessages({ myUserId: String(myUserId), peerUserId: groupPeerKey(groupId), limit: PAGE_SIZE });
+        if (!cancelled) setMessages(stored.map((m) => toUI(String(myUserId), m)));
+        const g = await refreshGroup();
+        if (g) await distributeSenderKey({ myUserId: String(myUserId), group: g });
+        await sync();
+      } catch (e) {
+        console.warn('[groups] open failed:', e);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+
+      try {
+        const socket = await ensureSocketConnected();
+        const onNew = async (evt: HistoryItem & { groupId?: string | null }) => {
+          if (!evt?.g1 || String(evt.groupId ?? '') !== groupId) return;
+          const r = await ingestGroupItems({ myUserId: String(myUserId), groupId, items: [evt], onSecurityWarning });
+          if (r.received.length) setMessages((prev) => r.received.reduce((acc, m) => upsert(acc, toUI(String(myUserId), m)), prev));
+          if (r.waitingForKey.length) setWaitingForKeys((prev) => Array.from(new Set([...prev, ...r.waitingForKey])));
+        };
+        const onChanged = async (evt: { groupId: string }) => {
+          if (evt?.groupId !== groupId) return;
+          try {
+            const g = await refreshGroup();
+            if (g) await distributeSenderKey({ myUserId: String(myUserId), group: g });
+          } catch (e) {
+            console.warn('[groups] refresh after change failed:', e);
+          }
+        };
+        socket.on('message:new', onNew);
+        socket.on('group:changed', onChanged);
+        unsubscribe = () => {
+          socket.off('message:new', onNew);
+          socket.off('group:changed', onChanged);
+        };
+        // A member's key arriving over a pairwise session may unlock messages we could not open.
+        unsubscribeControl = subscribeToControlContent(async (content, meta) => {
+          if (content.kind === 'text' || content.groupId !== groupId) return;
+          await handleControlContent({ myUserId: String(myUserId), fromUserId: meta.fromUserId, content, loadGroup: async () => groupRef.current });
+          if (content.kind === 'skdm') {
+            setWaitingForKeys((prev) => prev.filter((id) => id !== meta.fromUserId));
+            await sync();
+          }
+        });
+      } catch (e) {
+        console.warn('[groups] socket not ready:', e);
+      }
+    })();
+    return () => {
+      cancelled = true;
+      unsubscribe?.();
+      unsubscribeControl?.();
+    };
+  }, [groupId, myUserId, refreshGroup, sync, onSecurityWarning]);
+
+  const send = useCallback(
+    async (text: string) => {
+      const trimmed = text.trim();
+      if (!trimmed || !myUserId || !groupRef.current) return;
+      const clientMessageId = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+      const createdAt = Date.now();
+      const optimistic: GroupUIMessage = { id: clientMessageId, clientMessageId, serverMessageId: null, direction: 'out', senderUserId: String(myUserId), text: trimmed, createdAt, seq: null, status: 'sending', deliveredAt: null, readAt: null, replyTo: null, mine: true };
+      setMessages((prev) => upsert(prev, optimistic));
+      try {
+        const { stored, ack } = await sendGroupMessage({ myUserId: String(myUserId), group: groupRef.current, text: trimmed, clientMessageId, createdAt });
+        setMessages((prev) => upsert(prev, toUI(String(myUserId), stored)));
+        if (!ack.ok && ack.code === 'STALE_EPOCH') {
+          const g = await refreshGroup();
+          if (g) await distributeSenderKey({ myUserId: String(myUserId), group: g });
+        }
+      } catch (e) {
+        console.warn('[groups] send failed:', e);
+        setMessages((prev) => upsert(prev, { ...optimistic, status: 'failed' }));
+      }
+    },
+    [myUserId, refreshGroup],
+  );
+
+  const addMembers = useCallback(async (userIds: string[]) => {
+    await groupsApi.addMembers(groupId, userIds);
+    await refreshGroup();
+  }, [groupId, refreshGroup]);
+
+  const removeMember = useCallback(async (userId: string) => {
+    await groupsApi.removeMember(groupId, userId);
+    await refreshGroup();
+  }, [groupId, refreshGroup]);
+
+  return { group, messages, loading, waitingForKeys, securityWarning, send, sync, addMembers, removeMember, refreshGroup };
+}

@@ -1,7 +1,7 @@
 
 
 import { http } from './http';
-import type { MessageEnvelope } from '@velo/protocol';
+import type { GroupMessage, MessageEnvelope } from '@velo/protocol';
 import type { X3DHInitPacket } from '../crypto/x3dh';
 import type { ReplyReference } from '../chat/types';
 
@@ -28,6 +28,10 @@ export interface HistoryItem {
   status?: 'sent' | 'delivered' | 'read' | 'failed';
   deliveredAt?: number | null;
   readAt?: number | null;
+  /** T6.3: group copies carry `g1` and `groupId` instead of `v4`. */
+  groupId?: string | null;
+  g1?: GroupMessage | null;
+  epoch?: number | null;
 }
 
 export interface HistoryResponse {
@@ -56,7 +60,7 @@ export const messagesApi = {
     http.post<{ ok: boolean; updatedCount: number }>(`/messages/mark-read/${conversationId}`),
 
   /** T3.1: ciphertext the server still holds for me (oldest first) plus receipts for my own messages. `after` is a seq (T3.2). */
-  getUndelivered: (params: { peerUserId?: string; limit?: number; after?: number; receiptsSince?: number }) =>
+  getUndelivered: (params: { peerUserId?: string; groupId?: string; limit?: number; after?: number; receiptsSince?: number }) =>
     http.get<UndeliveredResponse>('/messages/undelivered', { params }),
 
   /** T3.1: tell the server these messages are decrypted and stored here; it deletes their ciphertext. */

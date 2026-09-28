@@ -9,6 +9,7 @@ import type { ReplyReference } from '../chat/types';
 import { loadSession } from '../storage/sessionStore';
 import { encryptAndPersist } from '../chat/ratchetAdapter';
 import { receiveIncoming } from '../chat/incoming';
+import { ensureV2Session } from '../crypto/sessionBootstrap';
 import { reportDecryptFailure } from '../api/telemetry.api';
 import { ProtocolError, protocolErrorCode, type ProtocolErrorCode, type RatchetSessionV2, encodeContent, decodeContent, isControlContent, textContent, type Content } from '@velo/protocol';
 import type { X3DHInitPacket } from '../crypto/x3dh';
@@ -69,6 +70,49 @@ export async function sendMessageV2(params: {
 }
 
 /**
+ * T6.2/T6.4: send control content (a sender-key distribution or request) to a
+ * peer over the pairwise session, creating the session first if needed.
+ */
+export async function sendContent(peerUserId: string, content: Content): Promise<{ serverMessageId: string }> {
+  const myUserId = requireMyUserId();
+  const bootstrap = await ensureV2Session({ myUserId, peerUserId });
+  const socket = await ensureSocketConnected();
+  const session = await loadSession({ myUserId, peerUserId });
+  if (!session || session.protoVersion !== 4) throw new ProtocolError('NO_SESSION', 'No v2 session for this peer');
+  const { encrypted } = await encryptAndPersist({ myUserId, peerUserId, session: session as RatchetSessionV2, plaintext: encodeContent(content) });
+  const dto: SendMessageDTO = {
+    toUserId: peerUserId,
+    clientMessageId: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    createdAt: Date.now(),
+    protoVersion: 4,
+    v4: encrypted,
+    initPacket: bootstrap.initPacket ?? null,
+    replyTo: null,
+  };
+  return new Promise((resolve, reject) => {
+    socket.emit('message:send', dto, (ack: any) => {
+      if (!ack?.ok) return reject(new ProtocolError('SEND_FAILED', ack?.error || 'Send failed'));
+      resolve({ serverMessageId: ack.serverMessageId });
+    });
+  });
+}
+
+/** T6.4: control content is fanned out to every subscriber (group chats, the chat list) besides the chat's own handler. */
+type ControlListener = (content: Content, meta: { fromUserId: string; serverMessageId: string }) => void | Promise<void>;
+const controlListeners = new Set<ControlListener>();
+export function subscribeToControlContent(listener: ControlListener): () => void {
+  controlListeners.add(listener);
+  return () => {
+    controlListeners.delete(listener);
+  };
+}
+export function publishControlContent(content: Content, meta: { fromUserId: string; serverMessageId: string }): void {
+  for (const l of controlListeners) {
+    Promise.resolve(l(content, meta)).catch((e) => console.warn('[messaging] control listener failed:', e));
+  }
+}
+
+/**
  * Subscribes to incoming messages.
  * - v2 only: decrypt via ratchet session
  *
@@ -100,6 +144,10 @@ export async function subscribeToMessages(onMessage: (m: {
       if (msg.fromUserId === myUserId) {
         return;
       }
+      // T6.3: group copies are handled by the group paths (useGroupChat, the chat list), never here.
+      if (msg.g1 || msg.groupId) {
+        return;
+      }
 
       if (options?.peerUserId && msg.fromUserId !== options.peerUserId) {
         return;
@@ -123,6 +171,7 @@ export async function subscribeToMessages(onMessage: (m: {
       const content = decodeContent(plaintext);
       if (isControlContent(content)) {
         options?.onControl?.(content, { fromUserId: msg.fromUserId, serverMessageId: msg.serverMessageId });
+        publishControlContent(content, { fromUserId: msg.fromUserId, serverMessageId: msg.serverMessageId });
         socket.emit('message:delivered', { serverMessageId: msg.serverMessageId }, () => {});
         return;
       }

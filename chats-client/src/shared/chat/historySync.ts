@@ -4,6 +4,7 @@ import { messagesApi, type HistoryItem, type ReceiptItem } from '../api/messages
 import { patchStoredMessage, storedMessageId, upsertStoredMessage, type StoredMessage } from '../storage/messageStore';
 import { receiveIncoming } from './incoming';
 import { reportDecryptFailure } from '../api/telemetry.api';
+import { publishControlContent } from '../socket/messaging';
 
 const SYNC_PAGE = 100;
 const MAX_PAGES = 20;
@@ -69,6 +70,7 @@ export async function ingestUndeliveredItems(params: {
 
   for (const it of items) {
     if (String(it.fromUserId) === String(myUserId) || it.protoVersion !== 4) continue;
+    if (it.g1 || it.groupId) continue; // T6.3: a group copy; the group paths ingest it
     const envelope = envelopeOf(it);
     if (!envelope) continue;
     try {
@@ -76,6 +78,7 @@ export async function ingestUndeliveredItems(params: {
       const content = decodeContent(r.plaintext); // T6.2
       if (isControlContent(content)) {
         callbacks?.onControl?.(content, { fromUserId: peerUserId, serverMessageId: it.serverMessageId });
+        publishControlContent(content, { fromUserId: peerUserId, serverMessageId: it.serverMessageId });
         acked.push(it.serverMessageId);
         continue;
       }

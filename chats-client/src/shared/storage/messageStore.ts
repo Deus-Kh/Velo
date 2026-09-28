@@ -22,6 +22,8 @@ export type StoredMessage = {
   serverMessageId: string | null;
   clientMessageId: string | null;
   direction: 'in' | 'out';
+  /** T6.4: the sender of a group message (null/absent for 1:1, where the peer is implied by the key). */
+  senderUserId?: string | null;
   text: string;
   /** Sender's clock: the record key and the paging cursor (display order within a device). */
   createdAt: number;
