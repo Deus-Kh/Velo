@@ -1,17 +1,13 @@
 
 
-import { normalizeB64 } from '@velo/protocol';
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 
 import { subscribeToMessages } from '../socket/messaging';
 import { sendAuto } from '../socket/sendAuto';
 import { getSocket } from '../socket/socket';
 
-import { messagesApi } from '../api/messages.api';
 import { useAuthStore } from '../../store/auth.store';
 
-import type { MessageEnvelope } from '@velo/protocol';
-import { deleteV2MessageKeysForPair } from '../storage/v2MessageKeyStore';
 import {
   listPendingMessages,
   removePendingMessage,
@@ -20,13 +16,12 @@ import {
   type PendingMessageRecord,
 } from '../storage/pendingMessageStore';
 
-import { deleteSession, loadSession } from '../storage/sessionStore';
-import { protocolErrorCode, type ProtocolErrorCode, type RatchetSessionV2 } from '@velo/protocol';
+import { deleteSession } from '../storage/sessionStore';
+import { protocolErrorCode, type ProtocolErrorCode } from '@velo/protocol';
 import { acceptNewIdentity as acceptNewIdentityForPair } from '../crypto/identityTrust';
-import { decryptAndPersist, decryptArchived } from './ratchetAdapter';
-import { bootstrapAndDecrypt } from './incoming';
+import { listStoredMessages, upsertStoredMessage, type StoredMessage } from '../storage/messageStore';
+import { migrateArchivedHistory, syncNewerFromServer } from './historySync';
 import { classifyPendingMessageError } from './protocolErrors';
-import type { X3DHInitPacket } from '../crypto/x3dh';
 import { makeConversationId } from '../utils/conversation';
 import type { ReplyReference } from './types';
 
@@ -49,24 +44,6 @@ export type SessionHealth =
   /** T2.13: the peer's identity no longer matches the pin. Sending is blocked until the user verifies or accepts. */
   | { status: 'identity_changed'; reason: string };
 
-type HistoryItem = {
-  serverMessageId?: string;
-  _id?: string;
-  id?: string;
-  conversationId?: string;
-  fromUserId: string;
-  toUserId: string;
-  protoVersion?: 3;
-  v3?: MessageEnvelope | null;
-  initPacket?: X3DHInitPacket | null;
-  replyTo?: ReplyReference | null;
-  clientMessageId?: string | null;
-  createdAt?: number;
-  createdAtClient?: number;
-  status?: 'sent' | 'delivered' | 'read' | 'failed';
-  deliveredAt?: number | null;
-  readAt?: number | null;
-};
 
 type StatusChangedEvent = {
   conversationId: string;
@@ -156,13 +133,6 @@ function prependMessages(prev: UIMessage[], batch: UIMessage[]): UIMessage[] {
   return result;
 }
 
-function warnControlledHistoryFailure(
-  reason: string,
-  meta: { serverMessageId?: string; clientMessageId?: string; peerUserId: string }
-) {
-  console.warn(`History controlled failure: ${reason}`, meta);
-}
-
 function isPolicyBrokenSessionReason(reason: string, code: ProtocolErrorCode | null = null): boolean {
   if (code === 'MISSING_BOOTSTRAP' || code === 'SESSION_RESET_REQUIRED') return true;
   return (
@@ -173,132 +143,35 @@ function isPolicyBrokenSessionReason(reason: string, code: ProtocolErrorCode | n
 
 // ---------------------------------------------------------------------------
 
-async function decryptHistoryBatch(
-  rawItems: HistoryItem[],
-  myUserId: string,
-  peerUserId: string,
-  v2SessionIn: RatchetSessionV2 | null,
-  onSessionUpdated: (s: RatchetSessionV2) => void,
-  onResetRequired: (reason: string) => void,
-  onIdentityChanged: (reason: string) => void,
-  options?: {
-    mode?: 'live' | 'stored_keys_only';
-  },
-): Promise<UIMessage[]> {
-  const mode = options?.mode ?? 'live';
-  let v2Session = v2SessionIn;
-  const mapped: UIMessage[] = [];
+/** Local store record ↔ UI message (T2.14). */
+function toUI(m: StoredMessage): UIMessage {
+  return {
+    id: m.id,
+    serverMessageId: m.serverMessageId ?? undefined,
+    clientMessageId: m.clientMessageId ?? undefined,
+    text: m.text,
+    mine: m.direction === 'out',
+    createdAt: m.createdAt,
+    replyTo: m.replyTo,
+    status: m.status,
+    deliveredAt: m.deliveredAt,
+    readAt: m.readAt,
+  };
+}
 
-  for (const it of rawItems) {
-    const mine = String(it.fromUserId) === String(myUserId);
-    const serverMessageId = it.serverMessageId || it._id || it.id;
-    const clientMessageId = it.clientMessageId ?? undefined;
-    const createdAt = Number(it.createdAt ?? it.createdAtClient ?? Date.now());
-    let text = '[Encrypted]';
-
-    try {
-      if (it.protoVersion !== 3) {
-        text = '[Unsupported message]';
-      } else {
-        const header = it.v3?.header;
-
-        if (
-          !header ||
-          typeof header.n !== 'number' ||
-          typeof header.pn !== 'number' ||
-          typeof header.dhPub !== 'string' ||
-          typeof it.v3?.ciphertext !== 'string' ||
-          typeof it.v3?.mac !== 'string'
-        ) {
-          text = '[Encrypted]';
-        } else {
-          const envelope: MessageEnvelope = {
-            header: { n: header.n, pn: header.pn, dhPub: normalizeB64(header.dhPub) },
-            ciphertext: normalizeB64(it.v3.ciphertext),
-            mac: normalizeB64(it.v3.mac),
-          };
-
-          let bootstrapped: string | null = null;
-          if (mode === 'live' && !mine && !v2Session && it.initPacket) {
-            try {
-              // T2.11: the session is persisted only if this first message decrypts.
-              const r = await bootstrapAndDecrypt({ myUserId, peerUserId, initPacket: it.initPacket, encrypted: envelope });
-              v2Session = r.session;
-              onSessionUpdated(r.session);
-              bootstrapped = r.plaintext;
-            } catch (e) {
-              if (protocolErrorCode(e) === 'IDENTITY_MISMATCH') {
-                onIdentityChanged('initiator identity does not match the pinned identity');
-              } else {
-                console.warn('Failed to bootstrap incoming v2 session from history:', e);
-              }
-            }
-          }
-
-          if (bootstrapped !== null) {
-            text = bootstrapped;
-          } else if (mode === 'live' && !mine && v2Session) {
-            try {
-              const r = await decryptAndPersist({ myUserId, peerUserId, session: v2Session, encrypted: envelope });
-              v2Session = r.updatedSession;
-              onSessionUpdated(r.updatedSession);
-              text = r.plaintext;
-            } catch {
-              try {
-                const archived = await decryptArchived({ myUserId, peerUserId, direction: 'in', encrypted: envelope });
-                text = archived ?? '[Encrypted]';
-              } catch {
-                text = '[Decrypt failed]';
-              }
-            }
-          } else if (mine || mode === 'stored_keys_only') {
-            try {
-              const archived = await decryptArchived({ myUserId, peerUserId, direction: mine ? 'out' : 'in', encrypted: envelope });
-              text = archived ?? '[Encrypted]';
-            } catch {
-              text = '[Decrypt failed]';
-            }
-          } else {
-            const reason = 'missing session and initPacket for inbound history item';
-            if (mode === 'live') {
-              warnControlledHistoryFailure(reason, {
-                serverMessageId: serverMessageId ? String(serverMessageId) : undefined,
-                clientMessageId: clientMessageId ? String(clientMessageId) : undefined,
-                peerUserId,
-              });
-              onResetRequired(reason);
-            }
-            text = '[Encrypted]';
-          }
-        }
-      }
-    } catch (e) {
-      console.warn('History decrypt failed:', { serverMessageId, e });
-    }
-
-    const id = stableKey({
-      serverMessageId: serverMessageId ? String(serverMessageId) : undefined,
-      clientMessageId: clientMessageId ? String(clientMessageId) : undefined,
-      createdAt,
-      fromUserId: it.fromUserId,
-      text,
-    });
-
-    mapped.push({
-      id,
-      serverMessageId: serverMessageId ? String(serverMessageId) : undefined,
-      clientMessageId: clientMessageId ? String(clientMessageId) : undefined,
-      text,
-      mine,
-      createdAt,
-      status: it.status || 'sent',
-      replyTo: it.replyTo ?? null,
-      deliveredAt: it.deliveredAt || null,
-      readAt: it.readAt || null,
-    });
-  }
-
-  return mapped;
+function toStored(m: UIMessage): StoredMessage {
+  return {
+    id: m.clientMessageId || m.serverMessageId || m.id,
+    serverMessageId: m.serverMessageId ?? null,
+    clientMessageId: m.clientMessageId ?? null,
+    direction: m.mine ? 'out' : 'in',
+    text: m.text,
+    createdAt: m.createdAt,
+    status: m.status ?? 'sent',
+    deliveredAt: m.deliveredAt ?? null,
+    readAt: m.readAt ?? null,
+    replyTo: m.replyTo ?? null,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -326,11 +199,6 @@ export function useChatE2EE(peerUserId: string) {
    */
   const oldestCreatedAtRef = useRef<number | null>(null);
 
-  /**
-   * Cached v2 session shared across initial load and loadMore calls.
-   * We keep it in a ref so we don't trigger re-renders when it advances.
-   */
-  const v2SessionRef = useRef<RatchetSessionV2 | null>(null);
 
   const canRun = useMemo(() => !!myUserId && !!peerUserId, [myUserId, peerUserId]);
 
@@ -423,6 +291,11 @@ export function useChatE2EE(peerUserId: string) {
         readAt: null,
       })
     );
+    await upsertStoredMessage({
+      myUserId: String(myUserId),
+      peerUserId,
+      message: { id: params.clientMessageId, clientMessageId: params.clientMessageId, serverMessageId: null, direction: 'out', text: trimmed, createdAt: params.createdAt, status: 'sending', deliveredAt: null, readAt: null, replyTo: params.replyTo ?? null },
+    });
 
     try {
       const r = await sendAuto({
@@ -448,6 +321,11 @@ export function useChatE2EE(peerUserId: string) {
           readAt: null,
         })
       );
+      await upsertStoredMessage({
+        myUserId: String(myUserId),
+        peerUserId,
+        message: { id: params.clientMessageId, clientMessageId: params.clientMessageId, serverMessageId: r.serverMessageId, direction: 'out', text: trimmed, createdAt: params.createdAt, status: 'sent', deliveredAt: null, readAt: null, replyTo: params.replyTo ?? null },
+      });
     } catch (e) {
       console.warn('Send failed:', e);
       if (protocolErrorCode(e) === 'IDENTITY_MISMATCH') {
@@ -479,6 +357,11 @@ export function useChatE2EE(peerUserId: string) {
           status: 'failed',
         })
       );
+      await upsertStoredMessage({
+        myUserId: String(myUserId),
+        peerUserId,
+        message: { id: params.clientMessageId, clientMessageId: params.clientMessageId, serverMessageId: null, direction: 'out', text: trimmed, createdAt: params.createdAt, status: 'failed', deliveredAt: null, readAt: null, replyTo: params.replyTo ?? null },
+      });
     }
   }, [myUserId, peerUserId]);
 
@@ -530,52 +413,38 @@ export function useChatE2EE(peerUserId: string) {
 
     setSessionHealth({ status: 'healthy' });
     oldestCreatedAtRef.current = null;
-    v2SessionRef.current = null;
     loadPendingForCurrentPeer().catch((e) => {
       console.warn('Failed to load pending messages:', e);
     });
 
     async function loadInitialHistory() {
       setHistoryLoading(true);
+      const me = String(myUserId);
       try {
-        const res = await messagesApi.getWithUser(peerUserId, { limit: PAGE_SIZE });
-        const rawItems: HistoryItem[] = Array.isArray(res.data?.items) ? res.data.items : [];
-
-        // Sort ascending so decryption ratchet advances correctly
-        rawItems.sort((a, b) => {
-          const ta = Number(a.createdAt ?? a.createdAtClient ?? 0);
-          const tb = Number(b.createdAt ?? b.createdAtClient ?? 0);
-          return ta - tb;
-        });
-
-        // Seed session from storage
+        // T2.14: history lives on the device. One-time migration of the pre-T2.14 archive, then
+        // the newest page from the store, then only what the server holds beyond it.
         try {
-          const s = await loadSession({ myUserId: String(myUserId), peerUserId });
-          if (s && (s as any).protoVersion === 3) {
-            v2SessionRef.current = s as RatchetSessionV2;
-          }
-        } catch {
-          // ignore
+          await migrateArchivedHistory({ myUserId: me, peerUserId });
+        } catch (e) {
+          console.warn('History migration failed:', e);
         }
 
-        const mapped = await decryptHistoryBatch(
-          rawItems,
-          String(myUserId),
-          peerUserId,
-          v2SessionRef.current,
-          (updated) => { v2SessionRef.current = updated; },
-          markResetRequired,
-          markIdentityChanged,
-        );
-
+        const page = await listStoredMessages({ myUserId: me, peerUserId, limit: PAGE_SIZE });
         if (!cancelled) {
-          // Track oldest timestamp for pagination cursor
-          if (mapped.length > 0) {
-            oldestCreatedAtRef.current = mapped[0].createdAt;
-          }
-          // We fetched exactly PAGE_SIZE — if so, there may be more
-          setHasMore(rawItems.length === PAGE_SIZE);
-          setMessages((prev) => prependMessages(prev, mapped));
+          if (page.length > 0) oldestCreatedAtRef.current = page[0]!.createdAt;
+          setHasMore(page.length === PAGE_SIZE);
+          setMessages((prev) => prependMessages(prev, page.map(toUI)));
+        }
+
+        const fresh = await syncNewerFromServer({
+          myUserId: me,
+          peerUserId,
+          onIdentityChanged: markIdentityChanged,
+          onResetRequired: markResetRequired,
+        });
+        if (!cancelled && fresh.length > 0) {
+          if (oldestCreatedAtRef.current === null) oldestCreatedAtRef.current = fresh[0]!.createdAt;
+          setMessages((prev) => prependMessages(prev, fresh.map(toUI)));
         }
       } catch (e) {
         console.warn('Failed to load initial history:', e);
@@ -596,20 +465,23 @@ export function useChatE2EE(peerUserId: string) {
               text: m.text,
             });
 
-            setMessages((prev) =>
-              upsertMessage(prev, {
-                id,
-                serverMessageId: m.serverMessageId || undefined,
-                clientMessageId: m.clientMessageId || undefined,
-                text: m.text,
-                mine: false,
-                createdAt: m.createdAt,
-                replyTo: m.replyTo ?? null,
-                status: m.status || 'sent',
-                deliveredAt: m.deliveredAt || null,
-                readAt: m.readAt || null,
-              })
-            );
+            const incoming: UIMessage = {
+              id,
+              serverMessageId: m.serverMessageId || undefined,
+              clientMessageId: m.clientMessageId || undefined,
+              text: m.text,
+              mine: false,
+              createdAt: m.createdAt,
+              replyTo: m.replyTo ?? null,
+              status: m.status || 'sent',
+              deliveredAt: m.deliveredAt || null,
+              readAt: m.readAt || null,
+            };
+            setMessages((prev) => upsertMessage(prev, incoming));
+            // T2.14: decrypted once, stored locally; the message key is gone.
+            upsertStoredMessage({ myUserId: String(myUserId), peerUserId, message: toStored(incoming) }).catch((e) => {
+              console.warn('Failed to store incoming message:', e);
+            });
           },
           {
             peerUserId,
@@ -672,6 +544,21 @@ export function useChatE2EE(peerUserId: string) {
                 )
               );
             }
+
+            // T2.14: keep the stored copies in step with delivery/read state.
+            const persistStatus = (m: UIMessage) => {
+              upsertStoredMessage({ myUserId: String(myUserId), peerUserId, message: toStored(m) }).catch((e) => {
+                console.warn('Failed to store message status:', e);
+              });
+            };
+            for (const msg of messagesRef.current) {
+              if (!msg.mine) continue;
+              if (evt.status === 'delivered' && evt.serverMessageId && msg.serverMessageId === evt.serverMessageId && msg.status !== 'read' && msg.status !== 'delivered') {
+                persistStatus({ ...msg, status: 'delivered', deliveredAt: evt.deliveredAt ?? Date.now() });
+              } else if (evt.status === 'read' && msg.status !== 'read') {
+                persistStatus({ ...msg, status: 'read', readAt: evt.readAt ?? Date.now() });
+              }
+            }
           };
 
           // T2.13: the server reports a peer's identity change; block until the user decides.
@@ -728,45 +615,20 @@ export function useChatE2EE(peerUserId: string) {
 
     setLoadingMore(true);
     try {
-      const res = await messagesApi.getWithUser(peerUserId, {
+      const page = await listStoredMessages({
+        myUserId: String(myUserId),
+        peerUserId,
         limit: PAGE_SIZE,
         before: oldestCreatedAtRef.current,
       });
-      const rawItems: HistoryItem[] = Array.isArray(res.data?.items) ? res.data.items : [];
-
-      rawItems.sort((a, b) => {
-        const ta = Number(a.createdAt ?? a.createdAtClient ?? 0);
-        const tb = Number(b.createdAt ?? b.createdAtClient ?? 0);
-        return ta - tb;
-      });
-
-      if (rawItems.length === 0) {
+      if (page.length === 0) {
         setHasMore(false);
         return;
       }
-
-      const mapped = await decryptHistoryBatch(
-        rawItems,
-        String(myUserId),
-        peerUserId,
-        null,
-        () => {},
-        markResetRequiredRef.current,
-        markIdentityChangedRef.current,
-        { mode: 'stored_keys_only' },
-      );
-
-      if (mapped.length === 0) {
-        setHasMore(false);
-        return;
-      }
-
-      // Update cursor to the oldest message in this new batch
-      oldestCreatedAtRef.current = mapped[0].createdAt;
-      setHasMore(rawItems.length === PAGE_SIZE);
-
+      oldestCreatedAtRef.current = page[0]!.createdAt;
+      setHasMore(page.length === PAGE_SIZE);
       // Prepend without touching newer messages → no scroll jump for them
-      setMessages((prev) => prependMessages(prev, mapped));
+      setMessages((prev) => prependMessages(prev, page.map(toUI)));
     } catch (e) {
       console.warn('Failed to load older messages:', e);
     } finally {
@@ -811,14 +673,12 @@ export function useChatE2EE(peerUserId: string) {
   async function resetSession() {
     if (!myUserId) return;
 
+    // T2.14: a reset touches the session and the outgoing queue, never the stored history.
     await deleteSession({ myUserId: String(myUserId), peerUserId });
-    await deleteV2MessageKeysForPair({ myUserId: String(myUserId), peerUserId });
     await removePendingMessagesForPair(String(myUserId), peerUserId);
 
-    v2SessionRef.current = null;
     oldestCreatedAtRef.current = null;
     setSessionHealth({ status: 'healthy' });
-    setMessages([]);
     setReloadToken((x) => x + 1);
   }
 
@@ -830,10 +690,8 @@ export function useChatE2EE(peerUserId: string) {
   async function acceptNewIdentity() {
     if (!myUserId) return;
     await acceptNewIdentityForPair({ myUserId: String(myUserId), peerUserId });
-    v2SessionRef.current = null;
     oldestCreatedAtRef.current = null;
     setSessionHealth({ status: 'healthy' });
-    setMessages([]);
     setReloadToken((x) => x + 1);
   }
 

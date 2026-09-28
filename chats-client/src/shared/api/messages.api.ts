@@ -33,7 +33,8 @@ export interface HistoryResponse {
 }
 
 export const messagesApi = {
-  getWithUser: (peerUserId: string, params?: { limit?: number; before?: number }) =>
+  /** `before`: older page (descending on the server). `after`: newer than the latest stored (ascending), T2.14 sync. */
+  getWithUser: (peerUserId: string, params?: { limit?: number; before?: number; after?: number }) =>
     http.get<HistoryResponse>(`/messages/with/${peerUserId}`, { params }),
   markAsRead: (conversationId: string) =>
     http.post<{ ok: boolean; updatedCount: number }>(`/messages/mark-read/${conversationId}`),

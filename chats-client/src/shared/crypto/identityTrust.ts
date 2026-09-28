@@ -7,7 +7,6 @@ import {
 } from '@velo/protocol';
 import { keysApi } from '../api/keys.api';
 import { deleteSession } from '../storage/sessionStore';
-import { deleteV2MessageKeysForPair } from '../storage/v2MessageKeyStore';
 import { getTrustedIdentity, setTrustedIdentity, type TrustedIdentity } from '../storage/trustedIdentities';
 
 /**
@@ -83,7 +82,7 @@ export async function authenticateInitiator(params: {
 /**
  * The user accepted the peer's new identity (reinstall, key rotation):
  * re-pin from the server (binding verified) and drop the session so the
- * next message re-bootstraps on the new keys.
+ * next message re-bootstraps on the new keys. History stays (T2.14).
  */
 export async function acceptNewIdentity(params: { myUserId: string; peerUserId: string }): Promise<TrustedIdentity> {
   const { myUserId, peerUserId } = params;
@@ -95,6 +94,5 @@ export async function acceptNewIdentity(params: { myUserId: string; peerUserId: 
     identityDhPublicKey: fetched.identityDhPublicKey,
   });
   await deleteSession({ myUserId, peerUserId });
-  await deleteV2MessageKeysForPair({ myUserId, peerUserId });
   return { identitySignPublicKey: fetched.identitySignPublicKey, identityDhPublicKey: fetched.identityDhPublicKey };
 }

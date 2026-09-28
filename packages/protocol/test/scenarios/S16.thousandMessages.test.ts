@@ -6,6 +6,8 @@
  * T2.14: delete keys after use).
  * Expected before fixes: skipped keys bounded — pass; archive bounded —
  * FAIL (finding added by T2.4; not in the original nine). After T2.14: pass.
+ * (Flipped green by T2.14: message keys are never archived; plaintext is
+ * stored locally instead.)
  */
 import { describe, expect, it } from 'vitest';
 import { MAX_SKIP_TOTAL } from '../../src/ratchet/limits';
@@ -27,10 +29,10 @@ describe('S16 1000-message conversation', () => {
     expect(Object.keys(A!.sessionState('B')!.skippedKeys ?? {}).length).toBeLessThanOrEqual(MAX_SKIP_TOTAL);
   });
 
-  it.fails('the per-pair message-key archive is bounded', () => {
-    expect(
-      B!.messageKeyCount('A'),
-      'one archived message key per message, forever: forward secrecy at rest is void until keys are deleted after use (P1-10, T2.14)',
-    ).toBeLessThanOrEqual(100); // must not scale with the message count; only bounded skipped keys may remain after T2.14
+  it('no message key is archived: forward secrecy at rest (T2.14)', () => {
+    expect(B!.messageKeyCount('A')).toBe(0);
+    expect(A!.messageKeyCount('B')).toBe(0);
+    expect(B!.storedMessages('A')).toHaveLength(1000);
+    expect(A!.storedMessages('B')).toHaveLength(1000);
   });
 });

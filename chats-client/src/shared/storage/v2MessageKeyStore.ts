@@ -75,6 +75,12 @@ export async function getV2MessageKey(params: {
   }
 }
 
+/** T2.14 migration: whether any pre-T2.14 archived keys remain for the pair. */
+export async function hasArchivedKeysForPair(params: { myUserId: string; peerUserId: string }): Promise<boolean> {
+  const prefix = `v2mk:${params.myUserId}:${params.peerUserId}:`;
+  return (await AsyncStorage.getAllKeys()).some((k) => k.startsWith(prefix));
+}
+
 export async function deleteV2MessageKeysForPair(params: {
   myUserId: string;
   peerUserId: string;

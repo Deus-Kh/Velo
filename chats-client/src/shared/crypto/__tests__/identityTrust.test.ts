@@ -138,7 +138,7 @@ describe('authenticateInitiator (responder side)', () => {
 });
 
 describe('acceptNewIdentity', () => {
-  it('re-pins from the server (binding verified) and drops the session and archived keys', async () => {
+  it('re-pins from the server (binding verified) and drops the session; stored history is untouched (T2.14)', async () => {
     const old = identity(0x90);
     const fresh = identity(0xa0);
     await setTrustedIdentity({ myUserId: ME, peerUserId: PEER, identitySignPublicKey: old.identitySignPublicKey, identityDhPublicKey: old.identityDhPublicKey });
@@ -158,6 +158,7 @@ describe('acceptNewIdentity', () => {
       identityDhPublicKey: fresh.identityDhPublicKey,
     });
     expect(await loadSession({ myUserId: ME, peerUserId: PEER })).toBeNull();
-    expect((await AsyncStorage.getAllKeys()).filter((k) => k.startsWith('v2mk:'))).toEqual([]);
+    // T2.14: accepting a new identity never deletes history or the legacy archive; the migration owns that.
+    expect((await AsyncStorage.getAllKeys()).filter((k) => k.startsWith('v2mk:'))).toHaveLength(1);
   });
 });

@@ -10,7 +10,8 @@ export const messagesRouter = Router();
  * Returns encrypted history between current user and peer (ciphertext only).
  * Query:
  *   - limit (default 50, max 200)
- *   - before (optional) : timestamp (createdAtClient) for pagination
+ *   - before (optional) : timestamp (createdAtClient) for pagination (older page, newest first)
+ *   - after  (optional) : timestamp (createdAtClient); returns messages newer than it, oldest first (T2.14 sync)
  */
 messagesRouter.get(
   "/with/:userId",
@@ -22,6 +23,7 @@ messagesRouter.get(
 
     const limit = Math.min(Number(req.query.limit || 50), 200);
     const before = req.query.before ? Number(req.query.before) : null;
+    const after = req.query.after !== undefined ? Number(req.query.after) : null;
 
     const baseFilter: any = {
       conversationId,
@@ -29,11 +31,13 @@ messagesRouter.get(
 
     if (before && Number.isFinite(before)) {
       baseFilter.createdAtClient = { $lt: before };
+    } else if (after !== null && Number.isFinite(after)) {
+      baseFilter.createdAtClient = { $gt: after };
     }
 
     const docs = await MessageModel.find(baseFilter)
       .select("_id conversationId fromUserId toUserId protoVersion v3 initPacket replyTo clientMessageId createdAtClient status deliveredAt readAt")
-      .sort({ createdAtClient: -1 })
+      .sort({ createdAtClient: after !== null && !before ? 1 : -1 })
       .limit(limit);
 
     // Вернём в порядке "старые -> новые"

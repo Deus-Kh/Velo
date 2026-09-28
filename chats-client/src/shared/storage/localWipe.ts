@@ -22,6 +22,8 @@ export type WipeScope = 'messages' | 'all';
 const ASYNC_PREFIXES_MESSAGES = (userId: string) => [
   `session:v2:${userId}:`,
   `v2mk:${userId}:`,
+  `msg:v1:${userId}:`, // T2.14 local message store
+  `bootstrap-seen:${userId}:`,
   `pending_messages_v1:${userId}`,
 ];
 

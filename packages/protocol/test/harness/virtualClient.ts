@@ -9,7 +9,7 @@ import { x3dhInitiate, x3dhRespond, type X3DHInitPacket } from '../../src/handsh
 import { rotateSignedPreKeySet, selectSignedPreKey, signSignedPreKey, type SignedPreKeyRecord, type SignedPreKeySet } from '../../src/handshake/signedPrekey';
 import { normalizeB64 } from '../../src/primitives/base64';
 import { ratchetDecrypt, ratchetEncrypt, type DerivedMessageKey, type MessageEnvelope } from '../../src/ratchet/message';
-import { decryptWithMessageKey, type AssociatedData } from '../../src/ratchet/envelope';
+import type { AssociatedData } from '../../src/ratchet/envelope';
 import { glareWinner, initInitiatorSession, initResponderSession, sessionHasReceived } from '../../src/ratchet/session';
 import type { RatchetSessionV2 } from '../../src/types/session';
 import { FakeServer, type NewMessageDTO, type ServerIdentity } from './fakeServer';
@@ -187,19 +187,29 @@ export class VirtualClient {
   }
 
   private persistStep(peerUserId: string, session: RatchetSessionV2, derivedKeys: DerivedMessageKey[]): void {
-    // ratchetAdapter.ts order: keys first, then the session.
-    for (const k of derivedKeys) {
-      this.store.set('v2mk:' + peerUserId + ':' + k.direction + ':' + k.dhPub + ':' + String(k.n), k.messageKeyB64);
-    }
+    // ratchetAdapter.ts since T2.14: the session only; message keys are never archived.
+    void derivedKeys;
     this.saveSession(peerUserId, session);
   }
 
-  private storedMessageKey(peerUserId: string, direction: 'in' | 'out', dhPub: string, n: number): string | null {
-    return this.store.get('v2mk:' + peerUserId + ':' + direction + ':' + dhPub + ':' + String(n));
+  /** storage/messageStore.ts: plaintext kept locally, sealed in the real client. */
+  private storeMessage(peerUserId: string, m: { direction: 'in' | 'out'; text: string; createdAt: number; serverMessageId: string }): void {
+    const key = 'msgs:' + peerUserId;
+    const list = this.store.getJson<Array<{ direction: 'in' | 'out'; text: string; createdAt: number; serverMessageId: string }>>(key) ?? [];
+    if (list.some((x) => x.serverMessageId === m.serverMessageId)) return;
+    list.push(m);
+    list.sort((a, b) => a.createdAt - b.createdAt || a.serverMessageId.localeCompare(b.serverMessageId));
+    this.store.setJson(key, list);
   }
 
+  /** Archived message keys for the pair: always 0 since T2.14 (kept so S16/S24 can assert it). */
   messageKeyCount(peerUserId: string): number {
     return this.store.size('v2mk:' + peerUserId + ':');
+  }
+
+  /** Locally stored messages for the pair, oldest first. */
+  storedMessages(peerUserId: string): Array<{ direction: 'in' | 'out'; text: string; createdAt: number; serverMessageId: string }> {
+    return this.store.getJson<Array<{ direction: 'in' | 'out'; text: string; createdAt: number; serverMessageId: string }>>('msgs:' + peerUserId) ?? [];
   }
 
   /** crypto/associatedData.ts: identities for the message MAC — ours from the store, the peer's from the pin. */
@@ -313,7 +323,7 @@ export class VirtualClient {
     this.persistStep(peerUserId, step.session, step.derivedKeys);
 
     this.msgCounter += 1;
-    return this.network.send(this.userId, {
+    const dto = this.network.send(this.userId, {
       toUserId: peerUserId,
       clientMessageId: this.userId + '-' + randomUUID(),
       createdAt: Date.now() + this.msgCounter,
@@ -321,6 +331,8 @@ export class VirtualClient {
       v3: step.envelope,
       initPacket,
     });
+    this.storeMessage(peerUserId, { direction: 'out', text, createdAt: dto.createdAt, serverMessageId: dto.serverMessageId });
+    return dto;
   }
 
   /** The realtime message:new handler. Throws ProtocolError like the client's decrypt path. */
@@ -363,51 +375,27 @@ export class VirtualClient {
       }
     }
     this.inbox.push({ fromUserId: peerUserId, text: plaintext, serverMessageId: dto.serverMessageId });
+    this.storeMessage(peerUserId, { direction: 'in', text: plaintext, createdAt: dto.createdAt, serverMessageId: dto.serverMessageId });
     return plaintext;
   }
 
-  /** useChatE2EE history load in 'live' mode, oldest first. */
+  /**
+   * useChatE2EE history (T2.14): the local store first, then only what the server holds
+   * beyond the latest stored message, decrypted through the normal receive path.
+   */
   loadHistory(peerUserId: string): Array<{ mine: boolean; text: string }> {
-    const out: Array<{ mine: boolean; text: string }> = [];
+    const stored = this.storedMessages(peerUserId);
+    const latest = stored.length ? stored[stored.length - 1]!.createdAt : 0;
     for (const it of this.server.history(FakeServer.conversationId(this.userId, peerUserId))) {
-      const mine = it.fromUserId === this.userId;
-      const dhPub = normalizeB64(it.v3.header.dhPub);
-      let text = '[Encrypted]';
-
-      if (!mine && !this.hasSession(peerUserId) && it.initPacket) {
-        try {
-          text = this.bootstrapAndDecrypt(peerUserId, it.initPacket, it.v3).plaintext;
-          out.push({ mine, text });
-          continue;
-        } catch {
-          /* mirrors the client: warn and fall through to the archived key */
-        }
+      if (it.createdAt <= latest || it.fromUserId === this.userId) continue;
+      if (stored.some((m) => m.serverMessageId === it.serverMessageId)) continue;
+      try {
+        this.receive(it);
+      } catch {
+        /* mirrors the client: warned and skipped */
       }
-
-      if (!mine && this.hasSession(peerUserId)) {
-        try {
-          const step = ratchetDecrypt(this.sessionState(peerUserId)!, it.v3, this.associatedData(peerUserId, 'in'));
-          this.persistStep(peerUserId, step.session, step.derivedKeys);
-          text = step.plaintext;
-        } catch {
-          const mk = this.storedMessageKey(peerUserId, 'in', dhPub, it.v3.header.n);
-          text = mk ? this.openArchived(mk, it.v3, peerUserId, 'in') : '[Encrypted]';
-        }
-      } else if (mine) {
-        const mk = this.storedMessageKey(peerUserId, 'out', dhPub, it.v3.header.n);
-        text = mk ? this.openArchived(mk, it.v3, peerUserId, 'out') : '[Encrypted]';
-      }
-      out.push({ mine, text });
     }
-    return out;
-  }
-
-  private openArchived(mkB64: string, envelope: MessageEnvelope, peerUserId: string, direction: 'in' | 'out'): string {
-    try {
-      return decryptWithMessageKey({ messageKeyB64: mkB64, envelope, ad: this.associatedData(peerUserId, direction) });
-    } catch {
-      return '[Decrypt failed]';
-    }
+    return this.storedMessages(peerUserId).map((m) => ({ mine: m.direction === 'out', text: m.text }));
   }
 
   // ───────── lifecycle ─────────

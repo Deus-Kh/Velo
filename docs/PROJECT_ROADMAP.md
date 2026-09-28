@@ -122,11 +122,11 @@ What a user can actually do today: 1:1 text with replies, receipts, typing, pres
 | Post-compromise security | ✅ | ✅ | ❌ | ❌ | ✅ T2.0 |
 | AEAD with header + identity AD | ✅ | ✅ | ✅ | ❌ | ✅ T2.5 |
 | Header encryption | ✅ | ✅ | — | ❌ | ⚠️ only if on schedule (T3.6) |
-| Forward secrecy at rest | ✅ | ✅ | ⚠️ | ❌ keys kept forever | ✅ T2.14 |
+| Forward secrecy at rest | ✅ | ✅ | ⚠️ | ✅ keys deleted with the step, plaintext sealed locally (T2.14) | done |
 | Safety numbers | ✅ | ✅ | ✅ | ✅ libsignal numeric fingerprint over both keys, enforced (T2.13) | done |
 | Signed prekey rotation | ✅ | ✅ | — | ✅ 7-day rotation, 30-day retention, tagged signature (T2.10) | done |
 | Prekey drain protection | ✅ | ✅ | — | ❌ | ✅ T1.4 |
-| Encrypted local store | ✅ | ✅ | ✅ | ❌ none | ✅ T2.14 |
+| Encrypted local store | ✅ | ✅ | ✅ | ✅ sealed AsyncStorage records (T2.14, D7 = A; SQLite when search needs it) | done |
 | Delete-on-delivery server | ✅ | ✅ | ❌ | ❌ | ✅ T3.1 |
 | Multi-device (Sesame) | ✅ | ✅ | ✅ | ❌ | ❌ deferred, §10 |
 | Group E2EE (Sender Keys) | ✅ | ✅ | ❌ | ❌ | ✅ Phase 6' (per-user) |
@@ -276,7 +276,7 @@ Fix: XChaCha20-Poly1305 with `AD = IK_A || IK_B || canonicalHeader` (decision D3
 No `setBackgroundMessageHandler`/`onMessage`/tap handler exists. Server `notification.title` is the sender's username and `data.conversationId` is the participant pair (`push/firebase.ts:69,85-90`). Any FCM error deletes the token (107–109).
 Fix: data-only pushes carrying only `type` + `serverMessageId`; client resolves the sender name locally and renders via notifee; tap deep-links; iOS Firebase configured; prune only on `registration-token-not-registered`. → T3.3
 
-**P1-10 · No local message store; keys kept forever; reinstall and "reset" destroy history** `[CORE]` *(new, replaces P1-7)*
+**P1-10 · No local message store; keys kept forever; reinstall and "reset" destroy history** `[CORE]` *(new, replaces P1-7)* — **client side fixed 2026-09-28 (T2.14, D7 = A); server delete-on-delivery and TTL remain in T3.1**
 `useChatE2EE.ts:562-608` refetches ciphertext from the server on every open, so every message key must be kept (`v2MessageKeyStore.ts`). Reinstall makes all history `[Encrypted]` forever; "Reset secure session" (`useChatE2EE.ts:820-832`) deletes the keys it would need.
 Fix (the Signal model): encrypted local message DB (SQLite + SQLCipher via `@op-engineering/op-sqlite`, key in Keychain); decrypt once, store plaintext locally; **delete message keys after use**, keep only bounded skipped keys in the session; fetch only undelivered messages from the server; server deletes ciphertext after delivery and TTL-expires undelivered messages. Prerequisite for search, disappearing messages, backup, multi-device. Decision D7 pulled forward. → T2.14, T3.1
 
@@ -421,6 +421,8 @@ Extraction happens in T2.1. Secrets (`*.pem`, `*.keystore`, service-account JSON
 **T2.1 — done 2026-09-28.** `packages/protocol` (`@velo/protocol`) holds `primitives/{base64,encoding,utf8,kdf}`, `ratchet/{chain,root,dh,session}`, `handshake/{bundle,types}`, `identity/fingerprint`, `types/session` — all `git mv`, zero behaviour change, chain/root/session KDF outputs frozen as vectors (R8). `createSessionFromX3DH` split: pure builder in the package, persistence wrapper in the client. Consumed as TypeScript source without npm workspaces: `tsconfig` `paths`, Metro `extraNodeModules` + a `resolveRequest` that pins the package's shared deps (`tweetnacl`, `tweetnacl-util`, `@noble/hashes`, `@babel/runtime`) to the app's copies (bundle source map shows one tweetnacl), Jest `moduleNameMapper`. Purity enforced twice: package `.eslintrc.js` `no-restricted-imports` and a vitest test that also forbids `await`. Still in the client after T2.1: `messageV2.ts`, `x3dh.ts`, `prekeyBundle.ts`, `sessionBootstrap.ts`, key stores.
 
 **T2.2 — done 2026-09-28.** `ratchet/message.ts` in the package: `ratchetEncrypt(session, plaintext)` and `ratchetDecrypt(session, envelope)` are synchronous, never mutate the input, and return the next session, the derived message keys and (on decrypt) the consumed skipped-key id. The only client touchpoint is `chat/ratchetAdapter.ts`, which runs the pure step and persists keys first, then the session, or nothing at all on throw (R7). `crypto/messageV2.ts` deleted. Behaviour pinned with frozen vectors; one deliberate change: message keys derived during a decrypt that then fails authentication are no longer archived (they were written before `secretbox.open` ran). The `ad` argument arrives with the AEAD in T2.5.
+
+**2b progress — T2.14 done 2026-09-28** (one commit, D7 = A): plaintext stored locally in sealed records, message keys never archived, history read from the device with the server asked only for newer messages, one-time migration of the old archive. **The known-red registry is empty: every scenario the harness owns is green.** Remaining in Phase 2: T2.12 (manual two-device checklist, owner).
 
 **2b progress — T2.11 done 2026-09-28** (two commits): bootstrap persists only after the first message decrypts, bootstrap replay refused, glare converges on the lower user id without losing messages, a peer's local reset is adopted automatically. Next in order: T2.14.
 
@@ -577,7 +579,7 @@ One branch per task, merged behind the CI gate from week 5. Update §2 matrices 
 | D4 | Repository history | **Not needed for `config.ts`** (never committed). **Needed for `gradle.properties`** (P0-10): fresh repo with a clean initial commit after Phase 1', old one archived privately |
 | D5 | Frontier picks | **libsignal verification (T2.15 + interop stretch) and PQ-readiness.** Sealed sender and KT documented only |
 | D6 | Multi-device vs groups | **Groups first, per-user Sender Keys**, distribution record carries `deviceId` |
-| D7 | Storage engine | **SQLite + SQLCipher (`@op-engineering/op-sqlite`)**, pulled into Phase 2/3' (T2.14) |
+| D7 | Storage engine | **A: sealed AsyncStorage records, no native database (owner, 2026-09-28)**; SQLite + SQLCipher deferred to Phase 7' when search and media need queries |
 | D8 | Group-call strategy | n/a in six months |
 | D9 | Protocol core | **Keep from-scratch TypeScript in `packages/protocol`, verified against libsignal**; external review or public bug bounty before public launch |
 | D10 | Identity key binding | **Binding signature** (Ed25519 over the X25519 identity key) now, no new dependency; single Curve25519 identity with XEdDSA later if the interop harness is pursued |

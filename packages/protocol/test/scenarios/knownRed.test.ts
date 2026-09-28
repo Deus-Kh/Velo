@@ -9,9 +9,7 @@ import { readdirSync, readFileSync } from 'fs';
 import { join } from 'path';
 import { describe, expect, it } from 'vitest';
 
-const KNOWN_RED: Record<string, string> = {
-  S16: 'message-key archive unbounded — T2.14 (finding added by T2.4)',
-};
+const KNOWN_RED: Record<string, string> = {};
 
 describe('known-red registry', () => {
   it('exactly the registered scenarios use it.fails', () => {

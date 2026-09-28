@@ -2,15 +2,16 @@ import type { MessageEnvelope, RatchetSessionV2 } from '@velo/protocol';
 import { decryptWithMessageKey, ratchetDecrypt, ratchetEncrypt } from '@velo/protocol';
 import { associatedDataFor } from '../crypto/associatedData';
 import { saveSession } from '../storage/sessionStore';
-import { getV2MessageKey, putV2MessageKey } from '../storage/v2MessageKeyStore';
+import { getV2MessageKey } from '../storage/v2MessageKeyStore';
 
 /**
  * The only place the client touches the ratchet (T2.2).
  *
  * The pure step runs first. If it throws, nothing is persisted (R7). If it
- * succeeds, the derived message keys are archived first and the advanced
- * session second, so a crash between the two can never leave a session
- * that has moved past a key the history view cannot recover.
+ * succeeds, the advanced session is saved. Since T2.14 message keys are
+ * NOT archived: the plaintext goes to the local message store instead and
+ * the key is gone with the step (forward secrecy at rest). Only the
+ * bounded skipped keys inside the session survive.
  *
  * Since T2.5 every envelope is authenticated over both identity keys and
  * the canonical header; the adapter supplies that associated data from
@@ -20,18 +21,9 @@ export async function persistStep(params: {
   myUserId: string;
   peerUserId: string;
   session: RatchetSessionV2;
+  /** Kept in the signature for callers that log or count; never stored since T2.14. */
   derivedKeys: ReadonlyArray<{ direction: 'in' | 'out'; dhPub: string; n: number; messageKeyB64: string }>;
 }): Promise<void> {
-  for (const k of params.derivedKeys) {
-    await putV2MessageKey({
-      myUserId: params.myUserId,
-      peerUserId: params.peerUserId,
-      direction: k.direction,
-      dhPub: k.dhPub,
-      n: k.n,
-      messageKeyB64: k.messageKeyB64,
-    });
-  }
   await saveSession({ myUserId: params.myUserId, peerUserId: params.peerUserId, session: params.session });
 }
 
@@ -70,8 +62,9 @@ export async function decryptAndPersist(params: {
 }
 
 /**
- * History path: open an archived envelope with its stored message key.
- * Returns null when no key is archived; throws on a failed authentication.
+ * LEGACY (pre-T2.14 archive): open an envelope with a message key archived
+ * before T2.14. Used only by the one-time migration that moves old server
+ * history into the local store; new messages never have an archived key.
  */
 export async function decryptArchived(params: {
   myUserId: string;

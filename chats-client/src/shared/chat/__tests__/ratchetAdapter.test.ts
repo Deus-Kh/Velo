@@ -1,11 +1,10 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Keychain from 'react-native-keychain';
 import nacl from 'tweetnacl';
-import { encodeBase64, decodeBase64 } from 'tweetnacl-util';
+import { encodeBase64 } from 'tweetnacl-util';
 import { initInitiatorSession, initResponderSession, isProtocolError, type RatchetSessionV2 } from '@velo/protocol';
-import { decryptAndPersist, decryptArchived, encryptAndPersist } from '../ratchetAdapter';
+import { decryptAndPersist, encryptAndPersist } from '../ratchetAdapter';
 import { loadSession, saveSession } from '../../storage/sessionStore';
-import { getV2MessageKey } from '../../storage/v2MessageKeyStore';
 import { setTrustedIdentity } from '../../storage/trustedIdentities';
 import { ensureIdentityKeyPairForUser } from '../../crypto/identityKeys';
 
@@ -63,21 +62,17 @@ beforeEach(async () => {
 });
 
 describe('ratchetAdapter', () => {
-  it('encrypt persists the outgoing key and the advanced session', async () => {
+  it('encrypt persists the advanced session and archives no message key (T2.14)', async () => {
     const { a } = sessions();
     const r = await encryptAndPersist({ myUserId: ME, peerUserId: PEER, session: a, plaintext: 'hi' });
 
     expect(r.updatedSession.Ns).toBe(1);
     const stored = await loadSession({ myUserId: ME, peerUserId: PEER });
     expect(stored).toEqual(r.updatedSession);
-
-    const mk = await getV2MessageKey({ myUserId: ME, peerUserId: PEER, direction: 'out', dhPub: a.DHsPublicKey, n: 0 });
-    expect(mk).not.toBeNull();
-    expect(decodeBase64(mk!).length).toBe(32);
-    expect(await decryptArchived({ myUserId: ME, peerUserId: PEER, direction: 'out', encrypted: r.encrypted })).toBe('hi');
+    expect(await messageKeyRows()).toEqual([]);
   });
 
-  it('decrypt persists every derived key (skipped ones included) and then the session', async () => {
+  it('decrypt persists the session; skipped keys live only inside it, nothing is archived', async () => {
     let { a, b } = sessions();
     const e0 = await encryptAndPersist({ myUserId: ME, peerUserId: PEER, session: a, plaintext: 'm0' });
     a = e0.updatedSession;
@@ -89,12 +84,10 @@ describe('ratchetAdapter', () => {
     expect(d.plaintext).toBe('m2');
     b = d.updatedSession;
     expect(await loadSession({ myUserId: PEER, peerUserId: ME })).toEqual(b);
-    for (const n of [0, 1, 2]) {
-      const mk = await getV2MessageKey({ myUserId: PEER, peerUserId: ME, direction: 'in', dhPub: a.DHsPublicKey, n });
-      expect(mk).not.toBeNull();
-    }
     expect(Object.keys(b.skippedKeys ?? {}).length).toBe(2);
-    expect(await decryptArchived({ myUserId: PEER, peerUserId: ME, direction: 'in', encrypted: e0.encrypted })).toBe('m0');
+    expect(await messageKeyRows()).toEqual([]);
+    // The skipped message still decrypts from the session's bounded skipped keys.
+    expect((await decryptAndPersist({ myUserId: PEER, peerUserId: ME, session: b, encrypted: e0.encrypted })).plaintext).toBe('m0');
   });
 
   it('a failed decrypt persists nothing: stored session and key rows are untouched (R7)', async () => {

@@ -625,11 +625,13 @@ Implement §8.1 step 2 exactly. `pn` is read in exactly one place.
 ---
 
 ## T2.14 — Local encrypted message store; delete keys after use
-**Tier** CORE · **Fixes** P1-10 (with T3.1) · **Est** 4d · **Decision** D7 · **May slide to Phase 3'**
+**Tier** CORE · **Fixes** P1-10 (with T3.1) · **Est** 4d · **Decision** D7 · **May slide to Phase 3'** · **Status:** done 2026-09-28 with **D7 = A** (owner): sealed AsyncStorage records, no native database
 
 `@op-engineering/op-sqlite` with SQLCipher enabled; DB key generated once, stored in Keychain (`db-mk:<userId>`, `WHEN_UNLOCKED_THIS_DEVICE_ONLY`); tables `messages(id, conversationId, seq, direction, body, createdAt, status, replyTo, expiresAt)`, `sessions(peerUserId, blob)`, `skipped_keys` (bounded). Receive path: decrypt → insert → **do not store the message key**. Remove `v2MessageKeyStore.ts` and `historyMasterKey.ts` from the live path (keep a one-time migration that decrypts existing server history with the archived keys into the DB, then deletes the archive). `useChatE2EE` reads history from the DB and asks the server only for `undelivered` (T3.1). "Reset secure session" no longer touches history.
 
 **Acceptance:** after a message is decrypted, no `v2mk:*` key exists for it; kill + relaunch shows history without any server call; `stored_keys_only` mode removed; S16 shows bounded storage.
+
+**Status 2026-09-28:** done. D7 was decided as **A** (the owner asked to avoid another library): `storage/messageStore.ts` keeps one sealed record per message (`msg:v1:<me>:<peer>:<createdAt>:<id>`, XSalsa20-Poly1305 under the per-user session master key from the Keychain), behind a small interface so a SQLite backend can replace it when search and media need queries (Phase 7'). Receive path: decrypt → store plaintext → **no message key archived** (`ratchetAdapter.persistStep` saves only the session; skipped keys live in the session, bounded by T2.6). Send path stores the outgoing message at each state (sending/sent/failed) and delivery/read updates are written through. `useChatE2EE` reads the newest page from the store, then asks the server only for messages newer than the latest stored one (`GET /messages/with/:id?after=` added, ascending; T3.1's undelivered endpoint replaces it), decrypting them through the T2.11 receive path; `loadMore` pages the store only; `decryptHistoryBatch` and `stored_keys_only` are gone. One-time migration `migrateArchivedHistory` decrypts old server history with the pre-T2.14 archive into the store and deletes the archive; `v2MessageKeyStore` remains for that only. "Reset secure session" and "Accept new identity" no longer touch history. Logout wipe covers the store. Harness: `VirtualClient` mirrors it (`storedMessages`, `loadHistory` = store + sync); **S16 green: zero archived keys after 1000 messages** — the last red scenario; the known-red registry is empty. Deviation: not SQLite (D7 = A, revisit at Phase 7'); reinstall still loses history (backup deferred, as planned).
 
 ---
 
@@ -794,7 +796,7 @@ Canonical list in T2.4. Each scenario file states the checklist row it automates
 |---|---|---|---|
 | `DEVIATION-1` | HKDF directional split instead of an initial DH ratchet | — | **Was the P1-0 bug. Removed by T2.0 on 2026-09-28.** |
 | `DEVIATION-2` | X3DH omits `DH(EK_A, IK_B)` | — | **Resolved by T2.9 on 2026-09-28 (D2 = fix); X3DH is byte-identical to libsignal.** |
-| `DEVIATION-3` | Message keys retained 30 days for offline history | superseded by the local store | **Removed by T2.14** (fallback only if T2.14 slips) |
+| `DEVIATION-3` | Message keys retained 30 days for offline history | superseded by the local store | **Removed by T2.14 on 2026-09-28: keys are deleted with the step; plaintext is stored locally.** |
 | `DEVIATION-4` | Skipped keys bounded by count *and* epoch (`MAX_SKIP_TOTAL = 1000`, `MAX_SKIP_EPOCHS = 5`, per-step gap 100) | DoS resistance with multi-epoch tolerance | **Active since 2026-09-28 (T2.6)** |
 | `DEVIATION-5` | Two identity keys (Ed25519 signing + X25519 DH) bound by a signature, versus Signal's single Curve25519 identity with XEdDSA; the safety number hashes `IK_sign || IK_dh` (64 bytes, no type byte) where libsignal hashes `0x05 || key` | avoids a new signature scheme; binding is verified on every bundle and `initPacket`; the fingerprint construction itself is libsignal's and is vector-tested with libsignal's key encoding | **Active since 2026-09-28 (T2.13, D10)** |
 | `DEVIATION-6` | Random 24-byte AEAD nonce instead of a KDF-derived nonce | — | **Removed by T2.5 (2026-09-28): the nonce is derived from the message key with `WhisperMessageKeys`, as in Signal.** |

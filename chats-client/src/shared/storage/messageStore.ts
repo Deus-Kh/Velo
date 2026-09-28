@@ -1,0 +1,107 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { getOrCreateSessionMasterKey } from '../crypto/sessionMasterKey';
+import { openJson, sealJson } from './sealed';
+import type { ReplyReference } from '../chat/types';
+
+/**
+ * Local encrypted message store (T2.14, decision D7 = A: sealed records in
+ * AsyncStorage, no native database). Each message is one record sealed
+ * under the per-user session master key (XSalsa20-Poly1305, key in the
+ * Keychain), so plaintext never touches disk unencrypted.
+ *
+ * Messages are decrypted once, stored here, and the message key is deleted
+ * (forward secrecy at rest). History is read from here; the server is only
+ * asked for messages newer than the latest stored one.
+ *
+ * Record keys sort by time: msg:v1:<me>:<peer>:<createdAt padded>:<id>.
+ * The id is the client message id when there is one (stable across the
+ * send/ack cycle), otherwise the server id.
+ */
+export type StoredMessage = {
+  id: string;
+  serverMessageId: string | null;
+  clientMessageId: string | null;
+  direction: 'in' | 'out';
+  text: string;
+  createdAt: number;
+  status: 'sending' | 'sent' | 'delivered' | 'read' | 'failed';
+  deliveredAt: number | null;
+  readAt: number | null;
+  replyTo: ReplyReference | null;
+};
+
+const PREFIX = 'msg:v1';
+
+function pairPrefix(myUserId: string, peerUserId: string) {
+  return `${PREFIX}:${myUserId}:${peerUserId}:`;
+}
+
+function recordKey(myUserId: string, peerUserId: string, message: Pick<StoredMessage, 'id' | 'createdAt'>) {
+  return `${pairPrefix(myUserId, peerUserId)}${String(Math.max(0, Math.floor(message.createdAt))).padStart(15, '0')}:${message.id}`;
+}
+
+function createdAtFromKey(key: string, prefix: string): number {
+  return Number(key.slice(prefix.length, prefix.length + 15));
+}
+
+export function storedMessageId(message: { clientMessageId?: string | null; serverMessageId?: string | null }): string {
+  return message.clientMessageId || message.serverMessageId || '';
+}
+
+export async function upsertStoredMessage(params: { myUserId: string; peerUserId: string; message: StoredMessage }): Promise<void> {
+  const { myUserId, peerUserId, message } = params;
+  if (!message.id) return;
+  const mk = await getOrCreateSessionMasterKey(myUserId);
+  await AsyncStorage.setItem(recordKey(myUserId, peerUserId, message), sealJson(mk, message));
+}
+
+/** Newest page first by key order, returned oldest → newest. `before` excludes messages at or after that time. */
+export async function listStoredMessages(params: {
+  myUserId: string;
+  peerUserId: string;
+  limit: number;
+  before?: number | null;
+}): Promise<StoredMessage[]> {
+  const { myUserId, peerUserId, limit } = params;
+  const prefix = pairPrefix(myUserId, peerUserId);
+  const keys = (await AsyncStorage.getAllKeys())
+    .filter((k) => k.startsWith(prefix))
+    .filter((k) => (params.before == null ? true : createdAtFromKey(k, prefix) < params.before))
+    .sort()
+    .reverse()
+    .slice(0, Math.max(0, limit));
+  if (keys.length === 0) return [];
+
+  const mk = await getOrCreateSessionMasterKey(myUserId);
+  const rows = await AsyncStorage.multiGet(keys);
+  const out: StoredMessage[] = [];
+  for (const [, raw] of rows) {
+    const m = openJson<StoredMessage>(mk, raw);
+    if (m && typeof m.text === 'string' && typeof m.createdAt === 'number') out.push(m);
+  }
+  return out.sort((a, b) => a.createdAt - b.createdAt);
+}
+
+/** Latest createdAt stored for the pair, or null. Read from the keys only (no decryption). */
+export async function latestStoredCreatedAt(params: { myUserId: string; peerUserId: string }): Promise<number | null> {
+  const prefix = pairPrefix(params.myUserId, params.peerUserId);
+  const keys = (await AsyncStorage.getAllKeys()).filter((k) => k.startsWith(prefix));
+  if (keys.length === 0) return null;
+  return keys.reduce((max, k) => Math.max(max, createdAtFromKey(k, prefix)), 0);
+}
+
+export async function countStoredMessages(params: { myUserId: string; peerUserId: string }): Promise<number> {
+  const prefix = pairPrefix(params.myUserId, params.peerUserId);
+  return (await AsyncStorage.getAllKeys()).filter((k) => k.startsWith(prefix)).length;
+}
+
+export async function deleteStoredMessagesForPair(params: { myUserId: string; peerUserId: string }): Promise<void> {
+  const prefix = pairPrefix(params.myUserId, params.peerUserId);
+  const keys = (await AsyncStorage.getAllKeys()).filter((k) => k.startsWith(prefix));
+  if (keys.length) await AsyncStorage.multiRemove(keys);
+}
+
+/** Prefix for a logout wipe of every conversation of a user. */
+export function storedMessagesPrefixForUser(myUserId: string): string {
+  return `${PREFIX}:${myUserId}:`;
+}

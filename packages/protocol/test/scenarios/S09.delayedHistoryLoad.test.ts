@@ -23,7 +23,7 @@ describe('S09 delayed history load', () => {
     expect(B!.hasSession('A')).toBe(true);
     expect(B!.sessionState('A')!.Nr).toBe(3);
 
-    // Sender side renders its own messages from archived keys.
+    // Sender side renders its own messages from its local store (T2.14).
     expect(A!.loadHistory('B').map((m) => m.text)).toEqual(['h1', 'h2', 'h3']);
 
     // The queued live copies would now be duplicates; the client dedupes by id.
