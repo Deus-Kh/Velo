@@ -7,6 +7,7 @@ import { saveSession } from '../storage/sessionStore';
 import { utf8Encode, utf8Decode } from './utf8';
 import { applyDhRatchet } from './dhRatchet';
 import { putV2MessageKey } from '../storage/v2MessageKeyStore';
+import { normalizeB64 } from './base64';
 
 export type V2Header = {
   n: number;
@@ -24,14 +25,6 @@ const MAX_SKIP = 50;
 
 function skippedKeyId(dhPub: string, n: number) {
   return `${dhPub}:${n}`;
-}
-
-function normalizeB64(b64: string): string {
-  let s = String(b64).replace(/ /g, '+').trim();
-  s = s.replace(/-/g, '+').replace(/_/g, '/');
-  const pad = s.length % 4;
-  if (pad !== 0) s += '='.repeat(4 - pad);
-  return s;
 }
 
 function decryptWithMessageKey(mkB64: string, encrypted: V2Encrypted): string {

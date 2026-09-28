@@ -307,6 +307,7 @@ Fix: after T2.0, an inbound `initPacket` whose identity matches the pin but whos
 ### 3.4 P3 — Hygiene
 
 Dead code (`dhRatchet.ts` header block, ~200 lines in `setupSocket.ts`, `ChatReset.tsx` with hardcoded ObjectIDs and `AsyncStorage.clear()`, `Navigation.tsx:14-32`, `MainTabsScreen.tsx` experiments, v1 crypto files, empty `crypto/index.ts`); `@ts-ignore` on both `jwt.sign` calls; `normalizeB64` ×4 applied to ciphertext; hand-rolled `utf8.ts` with a silent fallback; `babel.config.js` malformed and dotenv unregistered; `tsconfig.json:12` artifact; empty `NSLocationWhenInUseUsageDescription`; keyboard logging on every event; `enableProguardInReleaseBuilds=false`; unused deps (`crypto-js`, `date-fns`, `uuid`, `@react-native/new-app-screen`, legacy `react-native-vector-icons`); server logs ciphertext and `initPacket`s; no ciphertext size cap; consumed OPKs and old SPKs never deleted; mixed Russian/English comments; stray root `package.json`; `README.md` false claims; `chat-backend.pem` and `my-release-key.keystore` at repo root (gitignored, one `git add -f` from disaster). → T1.11, T4.11
+**Status 2026-09-28:** closed by T1.0 (tsconfig), T1.1 (`@ts-ignore`), T1.2 (babel/dotenv), T1.5 (ciphertext cap), T1.4 (OPK expiry), T1.12 (unused deps), T1.15 (secret scanning), and T1.11 (dead code, logs, stray workspace, secrets out of tree, README). Still open: `utf8.ts` and strict base64 (protocol path → Phase 2), `NSLocationWhenInUseUsageDescription` and Proguard (T1.16 / Phase 12'), SPK cleanup (T2.10), `architecture.md` (T4.11), remaining Russian comments (translate when touched).
 
 ---
 
@@ -403,7 +404,7 @@ Extraction happens in T2.1. Secrets (`*.pem`, `*.keystore`, service-account JSON
 | T1.8 Password policy + zod validation module | P0-8 | 1d |
 | T1.9 Error middleware, `NODE_ENV`, no stack traces, remove `@ts-ignore` | P2-12, P3 | 0.5d |
 | T1.10 Refresh tokens with rotation + reuse detection; client 401 handling | P2-1 | 1.5d |
-| T1.11 Repository hygiene, dead code, README truth | P3 | 1d |
+| T1.11 Repository hygiene, dead code, README truth — **done 2026-09-28**: dead blocks in `setupSocket.ts`/`dhRatchet.ts`, dead v1 crypto files, `ChatReset`, hardcoded-id wipe helper, commented experiments and keyboard logging removed; `normalizeB64` single-sourced (behaviour unchanged until the Phase 2 harness, per R1); per-message server logs that printed init packets removed; stray root workspace deleted; `.pem`, keystore and Firebase service account moved to a sibling folder outside the tree; README rewritten. Left for Phase 2: `utf8.ts` replacement (protocol path) and the stricter base64 | P3 | 1d |
 | T1.12 Dependency remediation (`npm audit fix`, drop unused deps) | P2-11 | 0.5d |
 | T1.13 Keystore rotation; credentials out of `gradle.properties`; history purge | P0-10 | 0.5d + human |
 | T1.14 Logout wipes everything per user | P0-12 | 0.5d |

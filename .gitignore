@@ -4,8 +4,6 @@ git-backup
 chat-backend.pem
 my-release-key.keystore
 
-/package-lock.json
-/package.json
 
 
 #client

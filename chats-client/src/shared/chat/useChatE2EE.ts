@@ -1,6 +1,6 @@
 
 
-// useChatE2EE.ts
+import { normalizeB64 } from '../crypto/base64';
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import nacl from 'tweetnacl';
 import { decodeBase64 } from 'tweetnacl-util';
@@ -94,14 +94,6 @@ function classifyPendingMessageError(error: unknown): PendingMessageErrorCode {
 const PAGE_SIZE = 30;
 
 const genId = () => `${Date.now()}-${Math.random().toString(16).slice(2)}`;
-
-function normalizeB64(b64: string): string {
-  let s = String(b64).replace(/ /g, '+').trim();
-  s = s.replace(/-/g, '+').replace(/_/g, '/');
-  const pad = s.length % 4;
-  if (pad !== 0) s += '='.repeat(4 - pad);
-  return s;
-}
 
 function stableKey(
   m: Partial<{

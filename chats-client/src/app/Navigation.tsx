@@ -8,30 +8,6 @@ import RegisterScreen from '../screens/RegisterScreen';
 import MainTabsScreen from '../screens/MainTabsScreen';
 import VerifyContactScreen from '../screens/VerifyContactScreen'
 
-import AsyncStorage from '@react-native-async-storage/async-storage';
-// import ChatReset from '../components/ChatReset';
-
-export async function clearV2StateForPair(myUserId: string, peerUserId: string) {
-  const keys = await AsyncStorage.getAllKeys();
-
-  const match = (k: string) =>
-    (k.includes(myUserId) && k.includes(peerUserId)) &&
-    (
-      k.startsWith('session:v2:') ||        // твой sessionStore key
-      k.startsWith('v2mk:') ||              // если так назван keystore
-      k.includes('v2mk') ||                 // на случай другого префикса
-      k.includes('session:v2')
-    );
-
-  const toRemove = keys.filter(match);
-
-  console.log('[wipe] removing', toRemove.length, 'keys');
-  if (toRemove.length) await AsyncStorage.multiRemove(toRemove);
-}
-
-// clearV2StateForPair('6974ed23318bba6f4417c78f', '6974ed0c318bba6f4417c784');
-
-
 export type RootStackParamList = {
   Login: undefined;
   Register: undefined;
@@ -59,7 +35,6 @@ export default function Navigation() {
 
   return (
     <NavigationContainer>
-      {/* <ChatReset/> */}
       <Stack.Navigator screenOptions={{ headerShown: false }}>
         {!isAuthenticated ? (
           <>

@@ -25,7 +25,6 @@ import {
 import { getAccessToken, onSessionLost, refreshSession, SessionLostError, setAccessToken } from '../shared/auth/session';
 import { isJwtExpiring } from '../shared/auth/jwt';
 
-import { sharedSecretCache } from '../shared/crypto/sharedSecretCache';
 
 import { keysApi } from '../shared/api/keys.api';
 import { ensureIdentityKeyPairForUser } from '../shared/crypto/identityKeys';
@@ -97,8 +96,6 @@ async function persistCredentials(userId: string, accessToken: string, refreshTo
  * Safe to call from login / register / hydrate.
  */
 async function bootstrapAfterAuth(userId: string, token: string) {
-  // Clear per-session crypto cache (important for multi-accounts)
-  sharedSecretCache.clear();
 
   // 1) Identity signing key (Ed25519)
   try {
@@ -238,7 +235,6 @@ export const useAuthStore = create<AuthState>((set) => ({
       console.warn('Push token unregister failed:', (e as Error)?.message ?? e);
     }
 
-    sharedSecretCache.clear();
     socketDrainCleanup?.();
     socketDrainCleanup = null;
     pushTokenRefreshCleanup?.();

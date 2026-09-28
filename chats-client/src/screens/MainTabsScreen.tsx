@@ -4,9 +4,6 @@ import { useSafeAreaInsets, useSafeAreaFrame } from 'react-native-safe-area-cont
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
-// import Feather from 'react-native-vector-icons/Feather';
-// import Ionicons from '@react-native-vector-icons/ionicons';
-// import MaterialIcons from 'react-native-vector-icons/MaterialIcons';
 import Animated, {
   interpolate,
   runOnJS,
@@ -38,39 +35,6 @@ type ActiveChat = {
   peerUserId: string;
   peerUsername?: string;
 };
-// function getIconComponent(lib: string) {
-//   switch (lib) {
-//     case 'Ionicons':
-//       return Ionicons;
-//     case 'MaterialIcons':
-//       return MaterialIcons;
-//     default:
-//       return Feather;
-//   }
-// }
-
-// const TABS: { key: TabKey; label: string; shortLabel: string }[] = [
-//   { key: 'chats', label: 'Chats', shortLabel: 'CH' },
-//   { key: 'new-chat', label: 'New Chat', shortLabel: 'NEW' },
-//   { key: 'settings', label: 'Settings', shortLabel: 'SET' },
-// ];
-// const TABS: { key: TabKey; label: string; shortLabel: string }[] = [
-//   { key: 'chats', label: 'Chats', shortLabel: 'CH' },
-//   { key: 'new-chat', label: 'New Chat', shortLabel: 'NEW' },
-//   { key: 'settings', label: 'Settings', shortLabel: 'SET' },
-// ];
-
-
-// const TABS: {
-//   key: TabKey;
-//   label: string;
-//   icon: string;
-//   lib: 'Feather' | 'Ionicons' | 'MaterialIcons';
-// }[] = [
-//   { key: 'chats', label: 'Chats', icon: 'chatbubble-outline', lib: 'Ionicons' },
-//   { key: 'new-chat', label: 'New Chat', icon: 'edit', lib: 'Feather' },
-//   { key: 'settings', label: 'Settings', icon: 'settings', lib: 'MaterialIcons' },
-// ];
 
 
 const TABS: {
@@ -87,45 +51,6 @@ const BACK_SWIPE_DISTANCE_TRIGGER = 110;
 const BACK_SWIPE_VELOCITY_TRIGGER = 900;
 const BACK_SWIPE_GESTURE_BOTTOM_INSET = 118;
 
-// function TabButton({
-//   active,
-//   label,
-//   icon,
-//   lib,
-//   onPress,
-// }: {
-//   active: boolean;
-//   label: string;
-//   // shortLabel: string;
-//   icon: string;
-//   lib: 'Feather' | 'Ionicons' | 'MaterialIcons';
-//   onPress: () => void;
-// }) {
-//   const interfaceDensity = useAppearanceStore((s) => s.interfaceDensity);
-//   const IconComponent = getIconComponent(lib);
-//   return (
-//     <Pressable
-//       onPress={onPress}
-//       className={`flex-1 items-center justify-center rounded-[16px] px-2 active:opacity-80 ${
-//         interfaceDensity === 'compact' ? 'py-2' : 'py-2.5'
-//       } ${
-//         active ? 'bg-surface-elevated' : ''
-//       }`}
-//     >
-//         {/* <Text className={`text-[11px] font-semibold uppercase tracking-[1.2px] ${active ? 'text-primary' : 'text-muted'}`}>
-//           {shortLabel}
-//         </Text> */}
-//         <IconComponent
-//         name={icon}
-//         size={active ? 20 : 18}
-//         color={active ? 'text-primary' : 'text-muted'}
-//       />
-//       <Text className={`mt-0.5 text-xs font-medium ${active ? 'text-text' : 'text-muted'}`}>
-//         {label}
-//       </Text>
-//     </Pressable>
-//   );
-// }
 
 function TabButton({
    active,

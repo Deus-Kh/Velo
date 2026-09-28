@@ -685,13 +685,6 @@ useEffect(() => {
     },
     [],
   );
-  useEffect(() => {
-  if (keyboardShown) {
-    console.log('[keyboard] keyboardHeight:', keyboardHeight);
-    console.log('[keyboard] insets.bottom:', insets.bottom);
-    console.log('[keyboard] diff:', keyboardHeight - insets.bottom);
-  }
-}, [keyboardShown, keyboardHeight, insets.bottom]);
   const handleCopySelectedMessage = useCallback(() => {
     if (!selectedMessageAction?.text) return;
 
@@ -1003,11 +996,6 @@ useEffect(() => {
 
       <View className={`px-3 ${composerPaddingTopClass}`}
         style={{ paddingBottom: keyboardShown ?  hasNavigationButtons ? keyboardHeight+insets.bottom+5: insets.bottom +5: insets.bottom + 8}}
-  //       style={{
-  //   paddingBottom: Platform.OS === 'android'
-  //     ? (keyboardShown ? keyboardHeight + 55 : insets.bottom )
-  //     : (keyboardShown ? 8 : insets.bottom + 8),
-  // }}
       >
         {replyTarget ? (
           <View
