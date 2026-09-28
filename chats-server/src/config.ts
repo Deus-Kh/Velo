@@ -55,6 +55,9 @@ export const config = {
 
   BCRYPT_ROUNDS: optionalNumber('BCRYPT_ROUNDS', 12),
 
+  /** T3.1: undelivered ciphertext and delivery receipts expire after this many days (TTL index on Message.expiresAt). */
+  MESSAGE_TTL_DAYS: optionalNumber('MESSAGE_TTL_DAYS', 30),
+
   /**
    * Check new passwords against the HaveIBeenPwned range API (k-anonymous:
    * only a 5-character hash prefix leaves the server). Fails open on network

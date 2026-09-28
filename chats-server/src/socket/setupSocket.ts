@@ -7,6 +7,8 @@ import { sendMessagePushToUser } from "../push/firebase";
 import { makeConversationId } from "../utils/conversation";
 import { services } from "../lib/services";
 import { haveConversation } from "../lib/socketAuthz";
+import { markDelivered, messageExpiry } from "../lib/delivery";
+import { setRealtimeServer } from "../lib/realtime";
 import { UserModel } from "../models/User";
 
 /** Maximum encrypted message body accepted over the socket (P0-5 storage-flood control). */
@@ -92,6 +94,8 @@ function emitPresence(io: Server, userId: string) {
  * conversationId is always makeConversationId(caller, peer).
  */
 export function setupSocket(io: Server) {
+  // HTTP routes and lib/delivery emit through lib/realtime; bind it here so every entry point (index.ts, tests) has it.
+  setRealtimeServer(io);
   io.use((socket, next) => {
     try {
       const token = socket.handshake.auth?.token;
@@ -264,6 +268,7 @@ export function setupSocket(io: Server) {
           initPacket: dto.initPacket ?? null,
           clientMessageId: dto.clientMessageId,
           createdAtClient: dto.createdAt,
+          expiresAt: messageExpiry(), // T3.1: undelivered ciphertext expires
         });
 
 
@@ -397,38 +402,14 @@ export function setupSocket(io: Server) {
     // and a message already read is never regressed to delivered.
     socket.on('message:delivered', async (dto: { serverMessageId?: string }, ack?: (r: any) => void) => {
       try {
-        const serverMessageId = String(dto?.serverMessageId ?? '');
-        if (!isValidObjectIdString(serverMessageId)) {
-          return ack?.({ ok: false, code: 'BAD_ID', error: 'Invalid serverMessageId' });
+        // T3.1: the ack deletes the ciphertext; lib/delivery.ts owns the rule.
+        const r = await markDelivered({ recipientId: userId, serverMessageId: String(dto?.serverMessageId ?? '') });
+        if (!r.ok) {
+          if (r.code === 'FORBIDDEN') console.warn('[socket] message:delivered refused (not the recipient)', { userId, serverMessageId: dto?.serverMessageId });
+          const error = r.code === 'BAD_ID' ? 'Invalid serverMessageId' : r.code === 'NOT_FOUND' ? 'Message not found' : 'Forbidden';
+          return ack?.({ ok: false, code: r.code, error });
         }
-
-        const doc = await MessageModel.findById(serverMessageId);
-        if (!doc) {
-          return ack?.({ ok: false, code: 'NOT_FOUND', error: 'Message not found' });
-        }
-        if (String(doc.toUserId) !== userId) {
-          console.warn('[socket] message:delivered refused (not the recipient)', { userId, serverMessageId });
-          return ack?.({ ok: false, code: 'FORBIDDEN', error: 'Forbidden' });
-        }
-        if (doc.status === 'read') {
-          return ack?.({ ok: true, status: 'read' });
-        }
-
-        const deliveredAt = Date.now();
-        await MessageModel.updateOne(
-          { _id: doc._id, status: { $ne: 'read' } },
-          { $set: { status: 'delivered', deliveredAt } },
-        );
-
-        io.to(String(doc.fromUserId)).emit('message:status-changed', {
-          conversationId: doc.conversationId,
-          status: 'delivered',
-          serverMessageId,
-          deliveredAt,
-          deliveredByUserId: userId,
-        });
-
-        return ack?.({ ok: true, status: 'delivered' });
+        return ack?.({ ok: true, status: r.status });
       } catch (e) {
         console.error('[socket] message:delivered failed:', (e as Error)?.message ?? e);
         return ack?.({ ok: false, code: 'INTERNAL', error: 'Internal error' });

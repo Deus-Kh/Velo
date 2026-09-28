@@ -42,7 +42,8 @@ const MessageSchema = new Schema(
 
     protoVersion: { type: Number, default: 3, index: true },
 
-    // v3 envelope
+    // v3 envelope. T3.1: unset once the recipient acks delivery; the document
+    // then remains as a metadata-only receipt until it expires.
     v3: { type: V3Schema, default: null },
     initPacket: { type: InitPacketSchema, default: null },
     replyTo: { type: ReplyToSchema, default: null },
@@ -59,11 +60,16 @@ const MessageSchema = new Schema(
     },
     deliveredAt: { type: Number, default: null },
     readAt: { type: Number, default: null },
+
+    // T3.1: MongoDB removes the document once this passes (30 days by default).
+    expiresAt: { type: Date, default: null },
   },
   { timestamps: true }
 );
 
 MessageSchema.index({ conversationId: 1, createdAtClient: -1 });
+MessageSchema.index({ toUserId: 1, createdAtClient: 1 }); // undelivered listing
+MessageSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
 MessageSchema.index({ fromUserId: 1, clientMessageId: 1 }, { unique: true });
 
 MessageSchema.pre('validate', function setConversationId() {
