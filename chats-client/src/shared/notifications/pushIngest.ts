@@ -124,6 +124,23 @@ export async function ingestLiveMessage(params: { myUserId: string; item: Histor
   return received[0] ?? null;
 }
 
+/** T6.4: a live `message:new` group copy for a group that is not open: decrypt, store, ack, notify. */
+export async function ingestLiveGroupMessage(params: { myUserId: string; item: HistoryItem }): Promise<StoredMessage | null> {
+  const groupId = String(params.item.groupId ?? '');
+  if (!groupId || String(params.item.fromUserId) === params.myUserId) return null;
+  const { received } = await ingestGroupItems({ myUserId: params.myUserId, groupId, items: [params.item] });
+  if (received.length) {
+    let title = 'Group message';
+    try {
+      title = (await groupsApi.get(groupId)).data.name;
+    } catch {
+      /* name unknown offline */
+    }
+    await notifyStoredGroup({ myUserId: params.myUserId, groupId, title, messages: received });
+  }
+  return received[0] ?? null;
+}
+
 /**
  * The push wake-up: fetch everything the server still holds for this
  * device (the push names one message, but anything else waiting is just as

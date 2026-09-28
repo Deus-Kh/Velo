@@ -17,6 +17,8 @@ import ChatListScreen from './ChatListScreen';
 import NewChatScreen from './NewChatScreen';
 import SettingsScreen from './SettingsScreen';
 import ChatScreen from './ChatScreen';
+import GroupChatScreen from './GroupChatScreen';
+import { groupPeerKey } from '../shared/api/groups.api';
 import { useAppearanceStore } from '../store/appearance.store';
 import { useAuthStore } from '../store/auth.store';
 import { useContactsStore } from '../store/contacts.store';
@@ -32,10 +34,9 @@ import { useColorScheme } from 'react-native';
 
 type TabKey = 'chats' | 'new-chat' | 'settings';
 
-type ActiveChat = {
-  peerUserId: string;
-  peerUsername?: string;
-};
+type ActiveChat =
+  | { kind: 'peer'; peerUserId: string; peerUsername?: string }
+  | { kind: 'group'; groupId: string; name?: string };
 
 
 const TABS: {
@@ -115,7 +116,7 @@ export default function MainTabsScreen() {
   const overlayTranslateX = useSharedValue(frame.width);
   const swipeStartedFromEdge = useSharedValue(false);
 
-  const openChat = useCallback((chat: ActiveChat) => {
+  const openChat = useCallback((chat: { peerUserId: string; peerUsername?: string }) => {
     if (userId) {
       recordRecentContact(userId, chat.peerUserId);
       const conversationId = [userId, chat.peerUserId].sort().join(':');
@@ -123,19 +124,33 @@ export default function MainTabsScreen() {
         console.warn('[notifications] failed to clear chat notifications:', error);
       });
     }
-    setActiveChat(chat);
+    setActiveChat({ kind: 'peer', ...chat });
     setActiveChatPeerUserId(chat.peerUserId);
   }, [recordRecentContact, setActiveChatPeerUserId, userId]);
+
+  // T6.4: a group occupies the same overlay; its "peer" slot is group:<id> (notifications, store).
+  const openGroup = useCallback((group: { groupId: string; name?: string }) => {
+    cancelConversationNotifications(groupPeerKey(group.groupId)).catch((error) => {
+      console.warn('[notifications] failed to clear group notifications:', error);
+    });
+    setActiveChat({ kind: 'group', ...group });
+    setActiveChatPeerUserId(groupPeerKey(group.groupId));
+  }, [setActiveChatPeerUserId]);
 
   // T3.3: push in the foreground, notification taps, and the notification that launched the app.
   usePushHandlers(Boolean(userId));
 
   useEffect(() => {
     if (!pendingOpenChatPeerUserId || !userId) return;
+    if (pendingOpenChatPeerUserId.startsWith('group:')) {
+      openGroup({ groupId: pendingOpenChatPeerUserId.slice('group:'.length) });
+      setPendingOpenChatPeerUserId(null);
+      return;
+    }
     const contact = (savedContactsByUser[userId] ?? []).find((c) => c.peerUserId === pendingOpenChatPeerUserId);
     openChat({ peerUserId: pendingOpenChatPeerUserId, peerUsername: contact?.peerUsername });
     setPendingOpenChatPeerUserId(null);
-  }, [openChat, pendingOpenChatPeerUserId, savedContactsByUser, setPendingOpenChatPeerUserId, userId]);
+  }, [openChat, openGroup, pendingOpenChatPeerUserId, savedContactsByUser, setPendingOpenChatPeerUserId, userId]);
 
   const finishCloseChat = useCallback(() => {
     setActiveChat(null);
@@ -143,14 +158,14 @@ export default function MainTabsScreen() {
   }, [setActiveChatPeerUserId]);
 
   const closeChat = useCallback(() => {
-    const peerUserId = activeChat?.peerUserId ?? null;
+    const peerUserId = activeChat?.kind === 'peer' ? activeChat.peerUserId : null;
     overlayTranslateX.value = withTiming(frame.width, { duration: 220 }, () => {
       if (peerUserId) {
         runOnJS(setRecentlyClosedChatPeerUserId)(peerUserId);
       }
       runOnJS(finishCloseChat)();
     });
-  }, [activeChat?.peerUserId, finishCloseChat, frame.width, overlayTranslateX]);
+  }, [activeChat, finishCloseChat, frame.width, overlayTranslateX]);
 
   useEffect(() => {
     if (!activeChat) {
@@ -281,6 +296,7 @@ export default function MainTabsScreen() {
           <View style={{ width: frame.width }}>
             <ChatListScreen
               onOpenChat={openChat}
+              onOpenGroup={openGroup}
               recentlyClosedChatPeerUserId={recentlyClosedChatPeerUserId}
               onHandledClosedChat={() => setRecentlyClosedChatPeerUserId(null)}
             />
@@ -288,6 +304,7 @@ export default function MainTabsScreen() {
           <View style={{ width: frame.width }}>
             <NewChatScreen
               onOpenChat={openChat}
+              onOpenGroup={openGroup}
               onVerifyContact={({ peerUserId, peerUsername, peerEmail }) =>
                 navigation.navigate('VerifyContact', {
                   peerUserId,
@@ -336,6 +353,9 @@ export default function MainTabsScreen() {
           />
 
           <Animated.View className="absolute inset-0" style={overlayAnimatedStyle}>
+            {activeChat.kind === 'group' ? (
+              <GroupChatScreen groupId={activeChat.groupId} initialName={activeChat.name} onClose={closeChat} />
+            ) : (
             <ChatScreen
               peerUserId={activeChat.peerUserId}
               peerUsername={activeChat.peerUsername}
@@ -348,6 +368,7 @@ export default function MainTabsScreen() {
                 })
               }
             />
+            )}
 
             <GestureDetector gesture={overlayGesture}>
               <View

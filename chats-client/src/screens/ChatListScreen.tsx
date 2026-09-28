@@ -24,10 +24,12 @@ import { ensureSocketConnected, getSocket } from '../shared/socket/socket';
 import { useAppearanceStore } from '../store/appearance.store';
 import { useChatListStore } from '../store/chat-list.store';
 import { useAppUiStore } from '../store/app-ui.store';
-import { ingestLiveMessage } from '../shared/notifications/pushIngest';
+import { ingestLiveGroupMessage, ingestLiveMessage } from '../shared/notifications/pushIngest';
+import { groupPeerKey, groupsApi, type GroupView } from '../shared/api/groups.api';
 import { formatHandle, shortSecureId } from '../shared/utils/identity';
 
 type ChatOpenHandler = (chat: { peerUserId: string; peerUsername?: string }) => void;
+type GroupOpenHandler = (group: { groupId: string; name?: string }) => void;
 
 type SelectedConversationAction = {
   conversationId: string;
@@ -43,7 +45,8 @@ type SearchResultListItem =
 
 type HomeListItem =
   | { type: 'section'; id: string; label: string }
-  | { type: 'conversation'; id: string; item: ConversationListItem };
+  | { type: 'conversation'; id: string; item: ConversationListItem }
+  | { type: 'group'; id: string; group: GroupView };
 
 function formatConversationTime(value: number) {
   const date = new Date(value);
@@ -218,10 +221,12 @@ function ArchivedRow({
 
 export default function ChatListScreen({
   onOpenChat,
+  onOpenGroup,
   recentlyClosedChatPeerUserId,
   onHandledClosedChat,
 }: {
   onOpenChat: ChatOpenHandler;
+  onOpenGroup: GroupOpenHandler;
   recentlyClosedChatPeerUserId: string | null;
   onHandledClosedChat: () => void;
 }) {
@@ -241,6 +246,7 @@ export default function ChatListScreen({
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [conversations, setConversations] = useState<ConversationListItem[]>([]);
+  const [groups, setGroups] = useState<GroupView[]>([]);
   const [searchItems, setSearchItems] = useState<UserListItem[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [selectedConversationAction, setSelectedConversationAction] =
@@ -290,6 +296,12 @@ export default function ChatListScreen({
   );
   const homeListItems = useMemo(() => {
     const items: HomeListItem[] = [];
+    if (groups.length > 0) {
+      items.push({ type: 'section', id: 'section-groups', label: 'Groups' });
+      [...groups]
+        .sort((a, b) => b.lastMessageAt - a.lastMessageAt)
+        .forEach((group) => items.push({ type: 'group', id: `group-${group.groupId}`, group }));
+    }
     const pinnedSet = new Set(pinnedConversationIds);
     const pinned = activeConversations.filter((item) => pinnedSet.has(item.conversationId));
     const regular = activeConversations.filter((item) => !pinnedSet.has(item.conversationId));
@@ -313,7 +325,7 @@ export default function ChatListScreen({
     }
 
     return items;
-  }, [activeConversations, pinnedConversationIds]);
+  }, [activeConversations, groups, pinnedConversationIds]);
   const matchingConversations = useMemo(() => {
     if (!showingSearch) return [];
 
@@ -411,18 +423,28 @@ export default function ChatListScreen({
     }
   }, [shouldAllowArchiveReveal]);
 
+  const refreshGroupsSilently = useCallback(async () => {
+    try {
+      const res = await groupsApi.list();
+      setGroups(res.data.items);
+    } catch (e: any) {
+      console.warn('[ChatListScreen] group list refresh failed:', e?.message || e);
+    }
+  }, []);
+
   const loadConversations = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
       const res = await conversationsApi.list();
       setConversations(res.data.items);
+      refreshGroupsSilently();
     } catch (e: any) {
       setError(e?.message || 'Failed to load conversations');
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [refreshGroupsSilently]);
 
   const refreshConversationsSilently = useCallback(async () => {
     try {
@@ -543,6 +565,32 @@ export default function ChatListScreen({
 
         const handler = (evt: any) => {
           if (!evt?.fromUserId) return;
+          // T6.4: a group copy; the open group screen ingests its own, the rest is stored and notified here.
+          if (evt.g1 && evt.groupId) {
+            const groupOpen = activeChatPeerUserId === groupPeerKey(String(evt.groupId));
+            if (!groupOpen && myUserId && evt.fromUserId !== myUserId) {
+              ingestLiveGroupMessage({
+                myUserId,
+                item: {
+                  serverMessageId: String(evt.serverMessageId),
+                  conversationId: evt.conversationId,
+                  fromUserId: String(evt.fromUserId),
+                  toUserId: String(evt.toUserId ?? myUserId),
+                  groupId: String(evt.groupId),
+                  g1: evt.g1,
+                  epoch: typeof evt.epoch === 'number' ? evt.epoch : null,
+                  clientMessageId: String(evt.clientMessageId ?? ''),
+                  createdAt: Number(evt.createdAt ?? Date.now()),
+                  seq: typeof evt.seq === 'number' ? evt.seq : null,
+                  status: evt.status,
+                },
+              }).catch((ingestError) => {
+                console.warn('[ChatListScreen] Failed to ingest live group message:', ingestError);
+              });
+            }
+            setGroups((prev) => prev.map((g) => (g.groupId === String(evt.groupId) ? { ...g, lastMessageAt: Number(evt.createdAt ?? Date.now()) } : g)));
+            return;
+          }
           if (evt.fromUserId === myUserId) {
             refreshConversationsSilently();
             return;
@@ -611,9 +659,11 @@ export default function ChatListScreen({
 
         socket.on('message:new', handler);
         socket.on('connect', refreshConversationsSilently);
+        socket.on('group:changed', refreshGroupsSilently);
         cleanup = () => {
           socket.off('message:new', handler);
           socket.off('connect', refreshConversationsSilently);
+          socket.off('group:changed', refreshGroupsSilently);
         };
       } catch (e) {
         console.warn('[ChatListScreen] Socket not ready for message listener:', (e as any)?.message);
@@ -639,6 +689,7 @@ export default function ChatListScreen({
     isAuthenticated,
     myUserId,
     refreshConversationsSilently,
+    refreshGroupsSilently,
   ]);
 
   useEffect(() => {
@@ -725,7 +776,7 @@ export default function ChatListScreen({
         </View>
       )}
 
-      {!loading && !error && !showingSearch && !showArchivedView && activeConversations.length === 0 && archivedConversations.length === 0 && (
+      {!loading && !error && !showingSearch && !showArchivedView && activeConversations.length === 0 && archivedConversations.length === 0 && groups.length === 0 && (
         <EmptyState
           title="No conversations yet"
           description="Search for a contact above to create your first secure conversation."
@@ -792,6 +843,38 @@ export default function ChatListScreen({
             renderItem={({ item }) =>
               item.type === 'section' ? (
                 <SectionEyebrow title={item.label} compact />
+              ) : item.type === 'group' ? (
+                <Pressable
+                  onPress={() => onOpenGroup({ groupId: item.group.groupId, name: item.group.name })}
+                  className={`mb-3 rounded-[22px] border border-border active:opacity-80 ${
+                    surfaceStyle === 'glass' ? 'bg-surface/82' : 'bg-surface-elevated'
+                  } ${interfaceDensity === 'compact' ? 'p-3.5' : 'p-4'}`}
+                >
+                  <View className="flex-row items-center">
+                    <View className={`mr-4 items-center justify-center rounded-full bg-primary/15 ${
+                      interfaceDensity === 'compact' ? 'h-12 w-12' : 'h-14 w-14'
+                    }`}>
+                      <Text className="text-lg font-semibold text-primary">
+                        {(item.group.name || '?').slice(0, 1).toUpperCase()}
+                      </Text>
+                    </View>
+                    <View className="flex-1">
+                      <View className="flex-row items-start justify-between gap-3">
+                        <Text className="flex-1 text-base font-semibold text-text" numberOfLines={1}>
+                          {item.group.name}
+                        </Text>
+                        {item.group.lastMessageAt > 0 ? (
+                          <Text className="text-xs font-medium text-muted">
+                            {formatConversationTime(item.group.lastMessageAt)}
+                          </Text>
+                        ) : null}
+                      </View>
+                      <Text className="mt-1 text-sm text-muted">
+                        {item.group.members.length} member{item.group.members.length === 1 ? '' : 's'} · Sender Keys
+                      </Text>
+                    </View>
+                  </View>
+                </Pressable>
               ) : (
                 <Pressable
                   onPress={() =>

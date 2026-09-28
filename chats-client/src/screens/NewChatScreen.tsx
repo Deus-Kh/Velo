@@ -16,6 +16,8 @@ import { useFocusEffect } from '@react-navigation/native';
 import Clipboard from '@react-native-clipboard/clipboard';
 
 import ScreenHeader from '../components/ScreenHeader';
+import CreateGroupPanel from '../components/CreateGroupPanel';
+import type { GroupView } from '../shared/api/groups.api';
 import SectionEyebrow from '../components/SectionEyebrow';
 import { userApi, type UserListItem } from '../shared/api/user.api';
 import { conversationsApi, type ConversationListItem } from '../shared/api/conversations.api';
@@ -30,6 +32,7 @@ const listContentContainerStyle = {
 };
 
 type ChatOpenHandler = (chat: { peerUserId: string; peerUsername?: string }) => void;
+type GroupOpenHandler = (group: { groupId: string; name?: string }) => void;
 type VerifyContactHandler = (params: {
   peerUserId: string;
   peerUsername?: string;
@@ -169,11 +172,14 @@ function QuickAction({
 
 export default function NewChatScreen({
   onOpenChat,
+  onOpenGroup,
   onVerifyContact,
 }: {
   onOpenChat: ChatOpenHandler;
+  onOpenGroup: GroupOpenHandler;
   onVerifyContact: VerifyContactHandler;
 }) {
+  const [showCreateGroup, setShowCreateGroup] = useState(false);
   const insets = useSafeAreaInsets();
   const myUserId = useAuthStore((s) => s.userId);
   const recentContactIdsByUser = useContactsStore((s) => s.recentContactIdsByUser);
@@ -531,6 +537,15 @@ export default function NewChatScreen({
             />
           </View>
         ) : null}
+        {myUserId ? (
+          <View className="mt-2.5">
+            <QuickAction
+              title="New group"
+              subtitle="Encrypted group with Sender Keys; every member gets your key over your private session."
+              onPress={() => setShowCreateGroup(true)}
+            />
+          </View>
+        ) : null}
       </View>
 
       {!canSearch && !contactsLoading && !contactsError && verifiedConversations.length === 0 ? (
@@ -821,6 +836,16 @@ export default function NewChatScreen({
           }}
         />
       )}
+
+      {showCreateGroup ? (
+        <CreateGroupPanel
+          onClose={() => setShowCreateGroup(false)}
+          onCreated={(group: GroupView) => {
+            setShowCreateGroup(false);
+            onOpenGroup({ groupId: group.groupId, name: group.name });
+          }}
+        />
+      ) : null}
     </View>
   );
 }
