@@ -22,7 +22,7 @@ describe('S18 message from an unknown epoch', () => {
 
     const before = B!.sessionState('A');
     const genuine = network.server.history('A:B').at(-1)!;
-    const alien = { ...genuine, v2: { ...genuine.v2, header: { dhPub: encodeBase64(nacl.box.keyPair().publicKey), n: 0, pn: 0 } } };
+    const alien = { ...genuine, v3: { ...genuine.v3, header: { dhPub: encodeBase64(nacl.box.keyPair().publicKey), n: 0, pn: 0 } } };
 
     const r = network.deliverNow('B', alien);
     expect(r.ok).toBe(false);

@@ -36,12 +36,18 @@ export {
   ratchetDecrypt,
   skippedKeyId,
   MAX_SKIP,
+  type MessageHeader,
+  type MessageEnvelope,
+  type AssociatedData,
   type V2Header,
   type V2Encrypted,
   type DerivedMessageKey,
   type RatchetEncryptResult,
   type RatchetDecryptResult,
 } from './ratchet/message';
+export { canonicalHeaderBytes, decodeCanonicalHeader, WIRE_VERSION } from './ratchet/header';
+export { expandMessageKey, type ExpandedMessageKeys } from './ratchet/messageKeys';
+export { sealMessage, openMessage, decryptWithMessageKey, associatedDataBytes, MAC_LENGTH } from './ratchet/envelope';
 
 export type { ProtoVersion, AnySession, RatchetSessionV2 } from './types/session';
 

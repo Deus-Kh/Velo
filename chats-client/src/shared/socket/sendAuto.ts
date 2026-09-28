@@ -21,7 +21,7 @@ export async function sendAuto(params: {
   plaintext: string;
   clientMessageId: string;
   replyTo?: ReplyReference | null;
-}): Promise<{ serverMessageId: string; protoVersion: 2 }> {
+}): Promise<{ serverMessageId: string; protoVersion: 3 }> {
   const myUserId = requireMyUserId();
 
   const sessionBootstrap = await ensureV2Session({
@@ -36,5 +36,5 @@ export async function sendAuto(params: {
     initPacket: sessionBootstrap.initPacket,
     replyTo: params.replyTo ?? null,
   });
-  return { ...r, protoVersion: 2 };
+  return { ...r, protoVersion: 3 };
 }

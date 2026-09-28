@@ -1,5 +1,5 @@
-/** v1 (static shared-secret) was removed; only the ratchet wire format remains. */
-export type ProtoVersion = 2;
+/** Wire version the session speaks (spec §8.2). v1 was removed; v2 sessions are discarded on load. */
+export type ProtoVersion = 3;
 
 export type AnySession = RatchetSessionV2;
 
@@ -16,7 +16,7 @@ export type AnySession = RatchetSessionV2;
  */
 export interface RatchetSessionV2 {
   v: 2;
-  protoVersion: 2;
+  protoVersion: 3;
   peerUserId: string;
 
   rootKey: string; // base64, 32 bytes

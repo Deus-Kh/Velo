@@ -1,6 +1,6 @@
 import type { PreKeyBundle } from '../../src/handshake/types';
 import type { X3DHInitPacket } from '../../src/handshake/x3dh';
-import type { V2Encrypted } from '../../src/ratchet/message';
+import type { MessageEnvelope } from '../../src/ratchet/message';
 
 /**
  * Model of chats-server's key routes and message:send path, faithful to
@@ -29,8 +29,8 @@ export type SendMessageDTO = {
   toUserId: string;
   clientMessageId: string;
   createdAt: number;
-  protoVersion: 2;
-  v2: V2Encrypted;
+  protoVersion: 3;
+  v3: MessageEnvelope;
   initPacket: X3DHInitPacket | null;
 };
 
@@ -39,8 +39,8 @@ export type NewMessageDTO = {
   conversationId: string;
   fromUserId: string;
   toUserId: string;
-  protoVersion: 2;
-  v2: V2Encrypted;
+  protoVersion: 3;
+  v3: MessageEnvelope;
   initPacket: X3DHInitPacket | null;
   clientMessageId: string;
   createdAt: number;
@@ -174,8 +174,8 @@ export class FakeServer {
       conversationId,
       fromUserId,
       toUserId: dto.toUserId,
-      protoVersion: 2,
-      v2: dto.v2,
+      protoVersion: 3,
+      v3: dto.v3,
       initPacket: dto.initPacket,
       clientMessageId: dto.clientMessageId,
       createdAt: dto.createdAt,

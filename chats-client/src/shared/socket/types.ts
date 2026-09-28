@@ -1,5 +1,5 @@
 
-import type { V2Encrypted } from '@velo/protocol';
+import type { MessageEnvelope } from '@velo/protocol';
 import type { X3DHInitPacket } from '../crypto/x3dh';
 import type { ReplyReference } from '../chat/types';
 
@@ -14,8 +14,8 @@ export type SendMessageDTO = {
   toUserId: string;
   clientMessageId: string;
   createdAt: number;
-  protoVersion?: 2;
-  v2?: V2Encrypted | null;
+  protoVersion?: 3;
+  v3?: MessageEnvelope | null;
   initPacket?: X3DHInitPacket | null;
   replyTo?: ReplyReference | null;
 };
@@ -27,8 +27,8 @@ export type NewMessageDTO = {
   toUserId: string;
   clientMessageId: string;
   createdAt: number;
-  protoVersion?: 2;
-  v2?: V2Encrypted | null;
+  protoVersion?: 3;
+  v3?: MessageEnvelope | null;
   initPacket?: X3DHInitPacket | null;
   replyTo?: ReplyReference | null;
   status?: 'sent' | 'delivered' | 'read' | 'failed';

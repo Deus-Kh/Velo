@@ -9,9 +9,9 @@ function sessionKey(myUserId: string, peerUserId: string) {
 }
 
 /**
- * Only the T2.0 format (`v: 2`, standard bootstrap) is loadable. A `v: 1`
- * session used the HKDF directional split and never ratcheted; it is
- * discarded so the pair re-bootstraps on the next message.
+ * Only the T2.0 format (`v: 2`, standard bootstrap) speaking wire version 3
+ * (T2.5) is loadable. Anything older is discarded so the pair re-bootstraps
+ * on the next message (spec §8.2: one bump, one migration).
  */
 function isSessionShape(value: unknown): value is AnySession {
   const s = value as Partial<RatchetSessionV2> | null;
@@ -20,7 +20,7 @@ function isSessionShape(value: unknown): value is AnySession {
     !!s &&
     typeof s === 'object' &&
     s.v === 2 &&
-    s.protoVersion === 2 &&
+    s.protoVersion === 3 &&
     typeof s.rootKey === 'string' &&
     keyOrNull(s.chainKeySend) &&
     keyOrNull(s.chainKeyRecv) &&

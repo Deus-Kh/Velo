@@ -38,7 +38,7 @@ export async function sendMessageV2(params: {
     peerUserId: params.toUserId,
   });
 
-  if (!session || session.protoVersion !== 2) {
+  if (!session || session.protoVersion !== 3) {
     throw new ProtocolError('NO_SESSION', 'No v2 session for this peer');
   }
 
@@ -53,8 +53,8 @@ export async function sendMessageV2(params: {
     toUserId: params.toUserId,
     clientMessageId: params.clientMessageId,
     createdAt: Date.now(),
-    protoVersion: 2,
-    v2: encrypted,
+    protoVersion: 3,
+    v3: encrypted,
     initPacket: params.initPacket ?? null,
     replyTo: params.replyTo ?? null,
   };
@@ -101,19 +101,18 @@ export async function subscribeToMessages(onMessage: (m: {
         return;
       }
 
-      if (msg.protoVersion !== 2) {
+      if (msg.protoVersion !== 3) {
         throw new Error(`Unsupported realtime protoVersion: ${String(msg.protoVersion)}`);
       }
 
-      // v2
-      if (!msg.v2) throw new Error('Missing v2 payload');
+      if (!msg.v3) throw new Error('Missing v3 payload');
 
       let session = await loadSession({
         myUserId,
         peerUserId: msg.fromUserId,
       });
 
-      if ((!session || session.protoVersion !== 2) && msg.initPacket) {
+      if ((!session || session.protoVersion !== 3) && msg.initPacket) {
         await ensureV2SessionFromIncoming({
           myUserId,
           peerUserId: msg.fromUserId,
@@ -126,7 +125,7 @@ export async function subscribeToMessages(onMessage: (m: {
         });
       }
 
-      if (!session || session.protoVersion !== 2) {
+      if (!session || session.protoVersion !== 3) {
         throw msg.initPacket
           ? new ProtocolError('SESSION_RESET_REQUIRED', 'Failed to establish v2 session from incoming initPacket')
           : new ProtocolError('MISSING_BOOTSTRAP', 'Missing v2 session and initPacket for incoming message');
@@ -136,7 +135,7 @@ export async function subscribeToMessages(onMessage: (m: {
         myUserId,
         peerUserId: msg.fromUserId,
         session: session as RatchetSessionV2,
-        encrypted: msg.v2,
+        encrypted: msg.v3,
       });
       
       onMessage({

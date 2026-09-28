@@ -48,7 +48,7 @@ describe('property: one ratchet step per direction change', () => {
           expect(senderAfter.DHsPublicKey, 'seed ' + String(seed) + ': a send must never ratchet').toBe(senderBefore.DHsPublicKey);
           expect(senderAfter.rootKey, 'seed ' + String(seed) + ': a send must never change the root key').toBe(senderBefore.rootKey);
 
-          const newEpoch = receiverBefore.DHrPublicKey !== dto.v2.header.dhPub;
+          const newEpoch = receiverBefore.DHrPublicKey !== dto.v3.header.dhPub;
           const [r] = network.release(receiver.userId);
           expect(r!.ok, 'seed ' + String(seed) + ' ' + String(r!.ok ? '' : r!.code)).toBe(true);
           const receiverAfter = receiver.sessionState(from)!;
@@ -58,7 +58,7 @@ describe('property: one ratchet step per direction change', () => {
             ratchetSteps += 1;
             expect(receiverAfter.DHsPublicKey, 'seed ' + String(seed) + ': new epoch must rotate DHs').not.toBe(receiverBefore.DHsPublicKey);
             expect(receiverAfter.rootKey, 'seed ' + String(seed) + ': new epoch must re-derive the root key').not.toBe(receiverBefore.rootKey);
-            expect(receiverAfter.DHrPublicKey).toBe(dto.v2.header.dhPub);
+            expect(receiverAfter.DHrPublicKey).toBe(dto.v3.header.dhPub);
             expect(receiverAfter.Nr).toBe(1);
             expect(receiverAfter.PN).toBe(receiverBefore.Ns);
           } else {

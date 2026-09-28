@@ -7,8 +7,8 @@ import { signIdentityBinding, verifyIdentityBinding } from '../../src/identity/b
 import { requireIdentityMatch } from '../../src/identity/trust';
 import { x3dhInitiate, x3dhRespond, type X3DHInitPacket } from '../../src/handshake/x3dh';
 import { normalizeB64 } from '../../src/primitives/base64';
-import { utf8Decode } from '../../src/primitives/utf8';
-import { ratchetDecrypt, ratchetEncrypt, type DerivedMessageKey, type V2Encrypted } from '../../src/ratchet/message';
+import { ratchetDecrypt, ratchetEncrypt, type DerivedMessageKey, type MessageEnvelope } from '../../src/ratchet/message';
+import { decryptWithMessageKey, type AssociatedData } from '../../src/ratchet/envelope';
 import { initInitiatorSession, initResponderSession } from '../../src/ratchet/session';
 import type { RatchetSessionV2 } from '../../src/types/session';
 import { FakeServer, type NewMessageDTO, type ServerIdentity } from './fakeServer';
@@ -194,6 +194,16 @@ export class VirtualClient {
     return this.store.size('v2mk:' + peerUserId + ':');
   }
 
+  /** crypto/associatedData.ts: identities for the message MAC — ours from the store, the peer's from the pin. */
+  private associatedData(peerUserId: string, direction: 'out' | 'in'): AssociatedData {
+    const mine = this.store.getJson<StoredPair>('identity-sign');
+    const pinned = this.trustedIdentity(peerUserId);
+    if (!mine || !pinned) throw new ProtocolError('NO_SESSION', 'No pinned identity for this peer', { peerUserId });
+    return direction === 'out'
+      ? { senderIdentityKey: mine.publicKey, receiverIdentityKey: pinned.identitySignPublicKey }
+      : { senderIdentityKey: pinned.identitySignPublicKey, receiverIdentityKey: mine.publicKey };
+  }
+
   /** ensureV2Session: create the session if missing; the initPacket rides on the first send. */
   startSession(peerUserId: string): X3DHInitPacket | null {
     if (this.hasSession(peerUserId)) return null;
@@ -255,7 +265,7 @@ export class VirtualClient {
     const session = this.sessionState(peerUserId);
     if (!session) throw new ProtocolError('NO_SESSION', 'No v2 session for this peer');
 
-    const step = ratchetEncrypt(session, text);
+    const step = ratchetEncrypt(session, text, this.associatedData(peerUserId, 'out'));
     this.persistStep(peerUserId, step.session, step.derivedKeys);
 
     this.msgCounter += 1;
@@ -263,8 +273,8 @@ export class VirtualClient {
       toUserId: peerUserId,
       clientMessageId: this.userId + '-' + randomUUID(),
       createdAt: Date.now() + this.msgCounter,
-      protoVersion: 2,
-      v2: step.envelope,
+      protoVersion: 3,
+      v3: step.envelope,
       initPacket,
     });
   }
@@ -284,7 +294,7 @@ export class VirtualClient {
         : new ProtocolError('MISSING_BOOTSTRAP', 'Missing v2 session and initPacket for incoming message');
     }
 
-    const step = ratchetDecrypt(session, dto.v2);
+    const step = ratchetDecrypt(session, dto.v3, this.associatedData(peerUserId, 'in'));
     this.persistStep(peerUserId, step.session, step.derivedKeys);
     this.inbox.push({ fromUserId: peerUserId, text: step.plaintext, serverMessageId: dto.serverMessageId });
     return step.plaintext;
@@ -295,7 +305,7 @@ export class VirtualClient {
     const out: Array<{ mine: boolean; text: string }> = [];
     for (const it of this.server.history(FakeServer.conversationId(this.userId, peerUserId))) {
       const mine = it.fromUserId === this.userId;
-      const dhPub = normalizeB64(it.v2.header.dhPub);
+      const dhPub = normalizeB64(it.v3.header.dhPub);
       let text = '[Encrypted]';
 
       if (!mine && !this.hasSession(peerUserId) && it.initPacket) {
@@ -308,20 +318,28 @@ export class VirtualClient {
 
       if (!mine && this.hasSession(peerUserId)) {
         try {
-          const step = ratchetDecrypt(this.sessionState(peerUserId)!, it.v2);
+          const step = ratchetDecrypt(this.sessionState(peerUserId)!, it.v3, this.associatedData(peerUserId, 'in'));
           this.persistStep(peerUserId, step.session, step.derivedKeys);
           text = step.plaintext;
         } catch {
-          const mk = this.storedMessageKey(peerUserId, 'in', dhPub, it.v2.header.n);
-          text = mk ? openWithStoredKey(mk, it.v2) : '[Encrypted]';
+          const mk = this.storedMessageKey(peerUserId, 'in', dhPub, it.v3.header.n);
+          text = mk ? this.openArchived(mk, it.v3, peerUserId, 'in') : '[Encrypted]';
         }
       } else if (mine) {
-        const mk = this.storedMessageKey(peerUserId, 'out', dhPub, it.v2.header.n);
-        text = mk ? openWithStoredKey(mk, it.v2) : '[Encrypted]';
+        const mk = this.storedMessageKey(peerUserId, 'out', dhPub, it.v3.header.n);
+        text = mk ? this.openArchived(mk, it.v3, peerUserId, 'out') : '[Encrypted]';
       }
       out.push({ mine, text });
     }
     return out;
+  }
+
+  private openArchived(mkB64: string, envelope: MessageEnvelope, peerUserId: string, direction: 'in' | 'out'): string {
+    try {
+      return decryptWithMessageKey({ messageKeyB64: mkB64, envelope, ad: this.associatedData(peerUserId, direction) });
+    } catch {
+      return '[Decrypt failed]';
+    }
   }
 
   // ───────── lifecycle ─────────
@@ -346,13 +364,4 @@ export class VirtualClient {
   static restore(userId: string, server: FakeServer, json: string): VirtualClient {
     return new VirtualClient(userId, server, MemoryStore.restore(json));
   }
-}
-
-function openWithStoredKey(mkB64: string, v2: V2Encrypted): string {
-  const plain = nacl.secretbox.open(
-    decodeBase64(normalizeB64(v2.ciphertext)),
-    decodeBase64(normalizeB64(v2.nonce)),
-    decodeBase64(normalizeB64(mkB64)),
-  );
-  return plain ? utf8Decode(plain) : '[Decrypt failed]';
 }

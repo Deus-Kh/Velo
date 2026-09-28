@@ -6,7 +6,7 @@
  * `it.fails` until the named task adopts Signal's constants:
  *  - X3DH            → T2.9 (DH order, 0xFF prefix, "WhisperText", fourth DH)
  *  - KDF_RK          → green since T2.0 adopted "WhisperRatchet"
- *  - message keys    → T2.5 (80-byte "WhisperMessageKeys" expansion, if adopted)
+ *  - message keys    → green since T2.5 (WhisperMessageKeys expansion; Velo takes 88 bytes, the first 80 are Signal's)
  *  - safety number   → green since T2.13 (libsignal numeric fingerprint)
  */
 import nacl from 'tweetnacl';
@@ -17,6 +17,7 @@ import { signIdentityBinding } from '../../src/identity/binding';
 import { hkdfSha256 } from '../../src/primitives/kdf';
 import { chainKdf } from '../../src/ratchet/chain';
 import { kdfRootKey } from '../../src/ratchet/root';
+import { expandMessageKey } from '../../src/ratchet/messageKeys';
 import { x3dhInitiate, x3dhRespond } from '../../src/handshake/x3dh';
 import type { PreKeyBundle } from '../../src/handshake/types';
 import vectors from './libsignal.json';
@@ -105,16 +106,13 @@ describe('libsignal vectors: constructions (red until the named task)', () => {
     }
   });
 
-  it.fails('message keys are the 80-byte WhisperMessageKeys expansion (T2.5, if adopted)', () => {
-    // Velo uses the 32-byte HMAC output directly as the secretbox key.
+  it('message keys are the WhisperMessageKeys expansion (T2.5): cipher key, MAC key and Signal\u2019s iv as the nonce prefix', () => {
     for (const step of vectors.ratchet.chain.steps) {
       const r = chainKdf(fromHex(step.chainKey));
-      const expanded = hkdfSha256({ ikm: r.messageKey, info: label('WhisperMessageKeys'), length: 80 });
-      expect(hex(expanded.subarray(0, 32))).toBe(step.cipherKey);
-      expect(hex(expanded.subarray(32, 64))).toBe(step.macKey);
-      expect(hex(expanded.subarray(64, 80))).toBe(step.iv);
-      // The failing part: nothing in Velo derives or uses these yet.
-      expect(r.messageKey.length, 'Velo derives a single 32-byte message key; Signal expands to cipher key, mac key and iv').toBe(80);
+      const keys = expandMessageKey(r.messageKey);
+      expect(hex(keys.cipherKey)).toBe(step.cipherKey);
+      expect(hex(keys.macKey)).toBe(step.macKey);
+      expect(hex(keys.nonce.subarray(0, 16))).toBe(step.iv);
     }
   });
 

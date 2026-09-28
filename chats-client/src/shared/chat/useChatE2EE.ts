@@ -2,8 +2,6 @@
 
 import { normalizeB64 } from '@velo/protocol';
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
-import nacl from 'tweetnacl';
-import { decodeBase64 } from 'tweetnacl-util';
 
 import { subscribeToMessages } from '../socket/messaging';
 import { sendAuto } from '../socket/sendAuto';
@@ -12,9 +10,8 @@ import { getSocket } from '../socket/socket';
 import { messagesApi } from '../api/messages.api';
 import { useAuthStore } from '../../store/auth.store';
 
-import type { V2Encrypted } from '@velo/protocol';
-import { utf8Decode } from '@velo/protocol';
-import { deleteV2MessageKeysForPair, getV2MessageKey } from '../storage/v2MessageKeyStore';
+import type { MessageEnvelope } from '@velo/protocol';
+import { deleteV2MessageKeysForPair } from '../storage/v2MessageKeyStore';
 import {
   listPendingMessages,
   removePendingMessage,
@@ -26,7 +23,7 @@ import {
 import { deleteSession, loadSession } from '../storage/sessionStore';
 import { protocolErrorCode, type ProtocolErrorCode, type RatchetSessionV2 } from '@velo/protocol';
 import { acceptNewIdentity as acceptNewIdentityForPair } from '../crypto/identityTrust';
-import { decryptAndPersist } from './ratchetAdapter';
+import { decryptAndPersist, decryptArchived } from './ratchetAdapter';
 import { classifyPendingMessageError } from './protocolErrors';
 import { ensureV2SessionFromIncoming } from '../crypto/sessionBootstrap';
 import type { X3DHInitPacket } from '../crypto/x3dh';
@@ -59,8 +56,8 @@ type HistoryItem = {
   conversationId?: string;
   fromUserId: string;
   toUserId: string;
-  protoVersion?: 2;
-  v2?: V2Encrypted | null;
+  protoVersion?: 3;
+  v3?: MessageEnvelope | null;
   initPacket?: X3DHInitPacket | null;
   replyTo?: ReplyReference | null;
   clientMessageId?: string | null;
@@ -200,24 +197,26 @@ async function decryptHistoryBatch(
     let text = '[Encrypted]';
 
     try {
-      if (it.protoVersion !== 2) {
+      if (it.protoVersion !== 3) {
         text = '[Unsupported message]';
       } else {
-        const header = it.v2?.header;
+        const header = it.v3?.header;
 
         if (
           !header ||
           typeof header.n !== 'number' ||
+          typeof header.pn !== 'number' ||
           typeof header.dhPub !== 'string' ||
-          typeof it.v2?.nonce !== 'string' ||
-          typeof it.v2?.ciphertext !== 'string'
+          typeof it.v3?.ciphertext !== 'string' ||
+          typeof it.v3?.mac !== 'string'
         ) {
           text = '[Encrypted]';
         } else {
-          const dhPub = normalizeB64(header.dhPub);
-          const n = header.n;
-          const nonceB64 = normalizeB64(it.v2.nonce);
-          const cipherB64 = normalizeB64(it.v2.ciphertext);
+          const envelope: MessageEnvelope = {
+            header: { n: header.n, pn: header.pn, dhPub: normalizeB64(header.dhPub) },
+            ciphertext: normalizeB64(it.v3.ciphertext),
+            mac: normalizeB64(it.v3.mac),
+          };
 
           if (mode === 'live' && !mine && !v2Session && it.initPacket) {
             try {
@@ -227,7 +226,7 @@ async function decryptHistoryBatch(
                 initPacket: it.initPacket,
               });
               const createdSession = await loadSession({ myUserId, peerUserId });
-              if (createdSession && createdSession.protoVersion === 2) {
+              if (createdSession && createdSession.protoVersion === 3) {
                 v2Session = createdSession as RatchetSessionV2;
               }
             } catch (e) {
@@ -241,50 +240,24 @@ async function decryptHistoryBatch(
 
           if (mode === 'live' && !mine && v2Session) {
             try {
-              const r = await decryptAndPersist({
-                myUserId,
-                peerUserId,
-                session: v2Session,
-                encrypted: { header: { ...header, dhPub }, nonce: nonceB64, ciphertext: cipherB64 },
-              });
+              const r = await decryptAndPersist({ myUserId, peerUserId, session: v2Session, encrypted: envelope });
               v2Session = r.updatedSession;
               onSessionUpdated(r.updatedSession);
               text = r.plaintext;
             } catch {
-              const mkB64 = await getV2MessageKey({
-                myUserId,
-                peerUserId,
-                direction: 'in',
-                dhPub,
-                n,
-              });
-              if (mkB64) {
-                const mk = decodeBase64(normalizeB64(mkB64));
-                const nonce = decodeBase64(nonceB64);
-                const cipher = decodeBase64(cipherB64);
-                const plain = nacl.secretbox.open(cipher, nonce, mk);
-                text = plain ? utf8Decode(plain) : '[Decrypt failed]';
-              } else {
-                text = '[Encrypted]';
+              try {
+                const archived = await decryptArchived({ myUserId, peerUserId, direction: 'in', encrypted: envelope });
+                text = archived ?? '[Encrypted]';
+              } catch {
+                text = '[Decrypt failed]';
               }
             }
           } else if (mine || mode === 'stored_keys_only') {
-            const direction = mine ? 'out' as const : 'in' as const;
-            const mkB64 = await getV2MessageKey({
-              myUserId,
-              peerUserId,
-              direction,
-              dhPub,
-              n,
-            });
-            if (mkB64) {
-              const mk = decodeBase64(normalizeB64(mkB64));
-              const nonce = decodeBase64(nonceB64);
-              const cipher = decodeBase64(cipherB64);
-              const plain = nacl.secretbox.open(cipher, nonce, mk);
-              text = plain ? utf8Decode(plain) : '[Decrypt failed]';
-            } else {
-              text = '[Encrypted]';
+            try {
+              const archived = await decryptArchived({ myUserId, peerUserId, direction: mine ? 'out' : 'in', encrypted: envelope });
+              text = archived ?? '[Encrypted]';
+            } catch {
+              text = '[Decrypt failed]';
             }
           } else {
             const reason = 'missing session and initPacket for inbound history item';
@@ -579,7 +552,7 @@ export function useChatE2EE(peerUserId: string) {
         // Seed session from storage
         try {
           const s = await loadSession({ myUserId: String(myUserId), peerUserId });
-          if (s && (s as any).protoVersion === 2) {
+          if (s && (s as any).protoVersion === 3) {
             v2SessionRef.current = s as RatchetSessionV2;
           }
         } catch {

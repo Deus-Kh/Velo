@@ -35,7 +35,7 @@ const PEER = '65f000000000000000000002';
 
 const session: RatchetSessionV2 = {
   v: 2,
-  protoVersion: 2,
+  protoVersion: 3,
   peerUserId: PEER,
   rootKey: 'ROOTKEY-b64',
   chainKeySend: 'CKS-b64',

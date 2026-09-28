@@ -1,11 +1,11 @@
 
 
 import { http } from './http';
-import type { V2Encrypted } from '@velo/protocol';
+import type { MessageEnvelope } from '@velo/protocol';
 import type { X3DHInitPacket } from '../crypto/x3dh';
 import type { ReplyReference } from '../chat/types';
 
-export type HistoryProtoVersion = 2;
+export type HistoryProtoVersion = 3;
 
 export interface HistoryItem {
   serverMessageId: string;
@@ -15,8 +15,8 @@ export interface HistoryItem {
 
   protoVersion?: HistoryProtoVersion;
 
-  // v2
-  v2?: V2Encrypted | null;
+  // v3 envelope (T2.5)
+  v3?: MessageEnvelope | null;
   initPacket?: X3DHInitPacket | null;
   replyTo?: ReplyReference | null;
 

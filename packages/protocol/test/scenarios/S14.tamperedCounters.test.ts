@@ -2,11 +2,13 @@
  * S14 — Tampered header.n / header.pn.
  * Checklist: none (adversarial).
  * Defect covered: the header is not authenticated (P1-2, T2.5).
- *  - n+1: the receiver derives an extra key and fails with DECRYPT_FAILED
- *    instead of HEADER_TAMPERED.
- *  - pn+7: the message is ACCEPTED with a modified header, because pn is
- *    never read (P1-4) and not authenticated.
- * Expected before fixes: FAIL (both). After T2.5: pass.
+ *  - n+1: a different key is derived, nothing opens → DECRYPT_FAILED;
+ *    the message is refused (before T2.5 it was refused for the same
+ *    reason, by accident of the wrong key).
+ *  - pn+7: before T2.5 the message was ACCEPTED with a modified header
+ *    (pn unauthenticated); now the MAC fails while the payload is intact
+ *    → HEADER_TAMPERED, the security-warning class.
+ * Expected before fixes: FAIL. After T2.5: pass. (Flipped green by T2.5.)
  */
 import { describe, expect, it } from 'vitest';
 import { makeWorld, type NewMessageDTO } from '../harness';
@@ -23,15 +25,33 @@ function deliverTampered(mutate: (dto: NewMessageDTO) => NewMessageDTO) {
 }
 
 describe('S14 tampered n / pn', () => {
-  it.fails('n incremented on the wire is reported as HEADER_TAMPERED', () => {
-    const { result } = deliverTampered((dto) => ({ ...dto, v2: { ...dto.v2, header: { ...dto.v2.header, n: dto.v2.header.n + 1 } } }));
+  it('n incremented on the wire is refused (DECRYPT_FAILED: a different key is derived)', () => {
+    const { result, B } = deliverTampered((dto) => ({ ...dto, v3: { ...dto.v3, header: { ...dto.v3.header, n: dto.v3.header.n + 1 } } }));
     expect(result.ok).toBe(false);
-    expect(result.ok ? null : result.code, 'counter modification must surface as HEADER_TAMPERED (T2.5)').toBe('HEADER_TAMPERED');
+    expect(result.ok ? null : result.code).toBe('DECRYPT_FAILED');
+    expect(B.inbox.map((m) => m.text)).toEqual(['a1']);
   });
 
-  it.fails('pn modified on the wire is rejected, not silently accepted', () => {
-    const { result } = deliverTampered((dto) => ({ ...dto, v2: { ...dto.v2, header: { ...dto.v2.header, pn: dto.v2.header.pn + 7 } } }));
-    expect(result.ok, 'a message with a modified pn was accepted: pn is neither authenticated nor used (P1-2, P1-4)').toBe(false);
+  it('pn modified on the wire is HEADER_TAMPERED, never accepted', () => {
+    const { result, B } = deliverTampered((dto) => ({ ...dto, v3: { ...dto.v3, header: { ...dto.v3.header, pn: dto.v3.header.pn + 7 } } }));
+    expect(result.ok, 'a message with a modified pn must not be accepted (P1-2)').toBe(false);
     expect(result.ok ? null : result.code).toBe('HEADER_TAMPERED');
+    expect(B.inbox.map((m) => m.text)).toEqual(['a1']);
+  });
+
+  it('a message checked under a different identity pair is HEADER_TAMPERED (identities are in the MAC)', () => {
+    const { network, clients } = makeWorld(['A', 'B', 'C']);
+    clients.A!.send('B', 'a1');
+    // B's pin for A is swapped for C's identity (a tampered trust store):
+    // the same session and key, but the MAC was computed over A's identity.
+    clients.B!.pinIdentity('A', clients.C!.identityKeys());
+    const before = clients.B!.sessionState('A');
+    network.hold('B');
+    clients.A!.send('B', 'a2');
+    const [r] = network.release('B');
+    expect(r!.ok).toBe(false);
+    expect(r!.ok ? null : r!.code).toBe('HEADER_TAMPERED');
+    expect(clients.B!.sessionState('A')).toEqual(before);
+    expect(clients.B!.inbox.map((m) => m.text)).toEqual(['a1']);
   });
 });

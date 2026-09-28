@@ -7,6 +7,7 @@ import { PROTOCOL_ERROR_CODES, ProtocolError, isProtocolError, protocolErrorCode
 import { verifySignedPreKeyBundle } from '../src/handshake/bundle';
 import { dhRatchet } from '../src/ratchet/dh';
 import { ratchetDecrypt, ratchetEncrypt } from '../src/ratchet/message';
+import type { AssociatedData } from '../src/ratchet/envelope';
 import { initInitiatorSession, initResponderSession } from '../src/ratchet/session';
 import type { RatchetSessionV2 } from '../src/types/session';
 
@@ -30,6 +31,11 @@ function walk(dir: string): string[] {
 const sharedSecret = encodeBase64(new Uint8Array(32).fill(0xaa));
 const spkPair = nacl.box.keyPair.fromSecretKey(new Uint8Array(32).fill(0x44));
 const signedPreKey = { publicKey: encodeBase64(spkPair.publicKey), privateKey: encodeBase64(spkPair.secretKey) };
+
+const AD: AssociatedData = {
+  senderIdentityKey: encodeBase64(nacl.sign.keyPair.fromSeed(new Uint8Array(32).fill(1)).publicKey),
+  receiverIdentityKey: encodeBase64(nacl.sign.keyPair.fromSeed(new Uint8Array(32).fill(2)).publicKey),
+};
 
 function pair(): { a: RatchetSessionV2; b: RatchetSessionV2 } {
   return {
@@ -85,15 +91,18 @@ describe('ProtocolError', () => {
 describe('throw sites map to the taxonomy', () => {
   it('ratchet/message.ts', () => {
     let { a, b } = pair();
-    const e0 = ratchetEncrypt(a, 'm0');
+    const e0 = ratchetEncrypt(a, 'm0', AD);
     a = e0.session;
-    b = ratchetDecrypt(b, e0.envelope).session;
+    b = ratchetDecrypt(b, e0.envelope, AD).session;
 
-    expect(codeOf(() => ratchetDecrypt(b, e0.envelope))).toBe('REPLAY_DETECTED');
-    expect(codeOf(() => ratchetDecrypt(b, { ...ratchetEncrypt(a, 'x').envelope, nonce: encodeBase64(new Uint8Array(24)) }))).toBe('DECRYPT_FAILED');
-    expect(codeOf(() => ratchetEncrypt({ ...a, DHsPublicKey: null as unknown as string }, 'x'))).toBe('STORAGE_CORRUPTION');
-    expect(codeOf(() => ratchetEncrypt(pair().b, 'x')), 'responder before first receive').toBe('SESSION_RESET_REQUIRED');
-    expect(codeOf(() => ratchetEncrypt(a, 'x', { nonce: new Uint8Array(3) }))).toBe('INVALID_KEY_LENGTH');
+    expect(codeOf(() => ratchetDecrypt(b, e0.envelope, AD))).toBe('REPLAY_DETECTED');
+    const e1 = ratchetEncrypt(a, 'x', AD).envelope;
+    const flipped = new Uint8Array(decodeBase64(e1.ciphertext).map((x) => x ^ 1));
+    expect(codeOf(() => ratchetDecrypt(b, { ...e1, ciphertext: encodeBase64(flipped) }, AD))).toBe('DECRYPT_FAILED');
+    expect(codeOf(() => ratchetDecrypt(b, { ...e1, header: { ...e1.header, pn: 5 } }, AD))).toBe('HEADER_TAMPERED');
+    expect(codeOf(() => ratchetEncrypt({ ...a, DHsPublicKey: null as unknown as string }, 'x', AD))).toBe('STORAGE_CORRUPTION');
+    expect(codeOf(() => ratchetEncrypt(pair().b, 'x', AD)), 'responder before first receive').toBe('SESSION_RESET_REQUIRED');
+    expect(codeOf(() => ratchetEncrypt(a, 'x', { ...AD, senderIdentityKey: encodeBase64(new Uint8Array(3)) }))).toBe('INVALID_KEY_LENGTH');
   });
 
   it('ratchet/dh.ts and ratchet/session.ts', () => {
@@ -126,10 +135,10 @@ describe('throw sites map to the taxonomy', () => {
 
   it('context never contains the values of keys involved', () => {
     const { a, b } = pair();
-    const e = ratchetEncrypt(a, 'x');
+    const e = ratchetEncrypt(a, 'x', AD);
     let caught: unknown;
     try {
-      ratchetDecrypt(b, { ...e.envelope, nonce: encodeBase64(new Uint8Array(24)) });
+      ratchetDecrypt(b, { ...e.envelope, mac: encodeBase64(new Uint8Array(16)) }, AD);
     } catch (err) {
       caught = err;
     }

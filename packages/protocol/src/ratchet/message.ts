@@ -1,25 +1,18 @@
-import nacl from 'tweetnacl';
 import { decodeBase64, encodeBase64 } from 'tweetnacl-util';
 import { normalizeB64 } from '../primitives/base64';
-import { utf8Decode, utf8Encode } from '../primitives/utf8';
 import { chainKdf } from './chain';
 import { dhRatchet } from './dh';
 import type { RatchetSessionV2 } from '../types/session';
 import { ProtocolError } from '../errors';
+import { openMessage, sealMessage, type AssociatedData, type MessageEnvelope } from './envelope';
+import type { MessageHeader } from './header';
 
-/** Wire header of a v2 message. */
-export type V2Header = {
-  n: number;
-  pn: number;
-  dhPub: string;
-};
-
-/** Wire envelope of a v2 message (secretbox until T2.5 moves to an AEAD). */
-export type V2Encrypted = {
-  header: V2Header;
-  nonce: string;
-  ciphertext: string;
-};
+export type { MessageHeader } from './header';
+export type { MessageEnvelope, AssociatedData } from './envelope';
+/** @deprecated v2 names kept for one release; the envelope is version 3. */
+export type V2Header = MessageHeader;
+/** @deprecated see MessageEnvelope. */
+export type V2Encrypted = MessageEnvelope;
 
 /**
  * A message key the step derived. The client decides what to do with it
@@ -34,7 +27,7 @@ export type DerivedMessageKey = {
 
 export type RatchetEncryptResult = {
   session: RatchetSessionV2;
-  envelope: V2Encrypted;
+  envelope: MessageEnvelope;
   derivedKeys: DerivedMessageKey[];
 };
 
@@ -53,31 +46,12 @@ export function skippedKeyId(dhPub: string, n: number): string {
   return dhPub + ':' + String(n);
 }
 
-function openWithMessageKey(mkB64: string, envelope: V2Encrypted): string {
-  const mk = decodeBase64(normalizeB64(mkB64));
-  const nonce = decodeBase64(normalizeB64(envelope.nonce));
-  const cipher = decodeBase64(normalizeB64(envelope.ciphertext));
-
-  const plain = nacl.secretbox.open(cipher, nonce, mk);
-  if (!plain) {
-    throw new ProtocolError('DECRYPT_FAILED', 'secretbox.open failed', { n: envelope.header.n, pn: envelope.header.pn });
-  }
-
-  return utf8Decode(plain);
-}
-
 /**
  * Pure sending step. Synchronous, no I/O, never mutates `session`.
+ * `ad` binds the envelope to the sender/receiver identity pair (T2.5).
  * Persistence is the caller's job and must happen only after this returns.
- *
- * `nonce` is injectable for frozen-vector tests only; production callers
- * leave it undefined and get 24 random bytes.
  */
-export function ratchetEncrypt(
-  session: RatchetSessionV2,
-  plaintext: string,
-  options?: { nonce?: Uint8Array },
-): RatchetEncryptResult {
+export function ratchetEncrypt(session: RatchetSessionV2, plaintext: string, ad: AssociatedData): RatchetEncryptResult {
   if (!session.DHsPublicKey) {
     throw new ProtocolError('STORAGE_CORRUPTION', 'Session missing DHsPublicKey', { what: 'DHsPublicKey' });
   }
@@ -89,14 +63,8 @@ export function ratchetEncrypt(
   const ck = decodeBase64(session.chainKeySend);
   const { messageKey, nextChainKey } = chainKdf(ck);
 
-  const nonce = options?.nonce ?? nacl.randomBytes(24);
-  if (nonce.length !== nacl.secretbox.nonceLength) {
-    throw new ProtocolError('INVALID_KEY_LENGTH', 'nonce must be ' + String(nacl.secretbox.nonceLength) + ' bytes', {
-      what: 'nonce',
-      length: nonce.length,
-    });
-  }
-  const cipherBytes = nacl.secretbox(utf8Encode(plaintext), nonce, messageKey);
+  const header: MessageHeader = { n: session.Ns, pn: session.PN, dhPub: session.DHsPublicKey };
+  const envelope = sealMessage({ messageKey, header, plaintext, ad });
 
   const next: RatchetSessionV2 = {
     ...session,
@@ -106,14 +74,8 @@ export function ratchetEncrypt(
 
   return {
     session: next,
-    envelope: {
-      header: { n: session.Ns, pn: session.PN, dhPub: session.DHsPublicKey },
-      nonce: encodeBase64(nonce),
-      ciphertext: encodeBase64(cipherBytes),
-    },
-    derivedKeys: [
-      { direction: 'out', dhPub: session.DHsPublicKey, n: session.Ns, messageKeyB64: encodeBase64(messageKey) },
-    ],
+    envelope,
+    derivedKeys: [{ direction: 'out', dhPub: session.DHsPublicKey, n: session.Ns, messageKeyB64: encodeBase64(messageKey) }],
   };
 }
 
@@ -127,9 +89,10 @@ export function ratchetEncrypt(
  *     then perform a full DH ratchet step — never merely adopt (R13);
  *  3. derive forward on the current receiving chain to header.n, keeping
  *     the skipped keys (T2.7);
- *  4-6. derive the target key, authenticate, commit.
+ *  4-6. derive the target key, authenticate (MAC over identities and the
+ *     canonical header, T2.5), decrypt, commit.
  */
-export function ratchetDecrypt(session: RatchetSessionV2, envelope: V2Encrypted): RatchetDecryptResult {
+export function ratchetDecrypt(session: RatchetSessionV2, envelope: MessageEnvelope, ad: AssociatedData): RatchetDecryptResult {
   const incomingDhPub = normalizeB64(envelope.header.dhPub);
   const targetN = envelope.header.n;
 
@@ -138,7 +101,7 @@ export function ratchetDecrypt(session: RatchetSessionV2, envelope: V2Encrypted)
   const skippedId = skippedKeyId(incomingDhPub, targetN);
   const skippedKey = retained[skippedId];
   if (skippedKey) {
-    const plaintext = openWithMessageKey(skippedKey, envelope);
+    const plaintext = openMessage({ messageKey: decodeBase64(normalizeB64(skippedKey)), envelope, ad });
     delete retained[skippedId];
     return {
       session: { ...session, skippedKeys: retained },
@@ -200,8 +163,8 @@ export function ratchetDecrypt(session: RatchetSessionV2, envelope: V2Encrypted)
 
   if (!messageKey) throw new ProtocolError('DECRYPT_FAILED', 'Failed to derive message key', { n: targetN, nr: work.Nr });
 
-  // 5. Authenticate — nothing above this line may be persisted.
-  const plaintext = openWithMessageKey(encodeBase64(messageKey), envelope);
+  // 5. Authenticate and decrypt — nothing above this line may be persisted.
+  const plaintext = openMessage({ messageKey, envelope, ad });
 
   // 6. Commit.
   return {
