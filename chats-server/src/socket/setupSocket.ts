@@ -255,11 +255,34 @@ export function setupSocket(io: Server) {
           return ack?.({
             ok: true,
             serverMessageId: String(existingMessage._id),
+            seq: (existingMessage as any).seq ?? null,
           });
         }
 
+        // T3.2: the conversation hands out the sequence number atomically, before the
+        // message exists, so ordering never depends on the sender's clock (P2-6, P2-9).
+        // lastMessageAt is server time for the same reason.
+        const conversationId = makeConversationId(userId, dto.toUserId);
+        const updatedConv = await ConversationModel.findOneAndUpdate(
+          { conversationId },
+          {
+            $set: {
+              members: [userId, dto.toUserId].sort(),
+              lastMessageAt: Date.now(),
+              lastProtoVersion: protoVersion,
+              lastMessagePreview: '(Encrypted message)',
+            },
+            $inc: {
+              lastSeq: 1,
+              [`unreadCounts.${dto.toUserId}`]: 1,
+            },
+          },
+          { upsert: true, new: true, setDefaultsOnInsert: true }
+        );
+        const seq = Number(updatedConv?.lastSeq ?? 0);
+
         const doc = await MessageModel.create({
-          conversationId: makeConversationId(userId, dto.toUserId),
+          conversationId,
           fromUserId: userId,
           toUserId: dto.toUserId,
           protoVersion,
@@ -268,25 +291,9 @@ export function setupSocket(io: Server) {
           initPacket: dto.initPacket ?? null,
           clientMessageId: dto.clientMessageId,
           createdAtClient: dto.createdAt,
+          seq,
           expiresAt: messageExpiry(), // T3.1: undelivered ciphertext expires
         });
-
-
-        const updatedConv = await ConversationModel.findOneAndUpdate(
-          { conversationId: (doc as any).conversationId },
-          {
-            $set: {
-              members: [userId, dto.toUserId].sort(),
-              lastMessageAt: dto.createdAt,
-              lastProtoVersion: protoVersion,
-              lastMessagePreview: '(Encrypted message)',
-            },
-            $inc: {
-              [`unreadCounts.${dto.toUserId}`]: 1,
-            },
-          },
-          { upsert: true, new: true, setDefaultsOnInsert: true }
-        );
 
         const room = io.sockets.adapter.rooms.get(String(dto.toUserId));
         
@@ -331,6 +338,7 @@ export function setupSocket(io: Server) {
           initPacket: initPacketToSend,
           clientMessageId: dto.clientMessageId,
           createdAt: dto.createdAt,
+          seq,
           status: doc.status ?? 'sent',
           deliveredAt: (doc as any).deliveredAt ?? null,
           readAt: (doc as any).readAt ?? null,
@@ -350,6 +358,7 @@ export function setupSocket(io: Server) {
           initPacket: initPacketToSend,
           clientMessageId: dto.clientMessageId,
           createdAt: dto.createdAt,
+          seq,
           status: doc.status ?? 'sent',
           deliveredAt: (doc as any).deliveredAt ?? null,
           readAt: (doc as any).readAt ?? null,
@@ -365,7 +374,7 @@ export function setupSocket(io: Server) {
           });
         }
 
-        return ack?.({ ok: true, serverMessageId: String(doc._id) });
+        return ack?.({ ok: true, serverMessageId: String(doc._id), seq });
       } catch (e: any) {
         if (e?.code === 11000) {
           try {
@@ -384,6 +393,7 @@ export function setupSocket(io: Server) {
               return ack?.({
                 ok: true,
                 serverMessageId: String(existingMessage._id),
+                seq: (existingMessage as any).seq ?? null,
               });
             }
           } catch (lookupError) {

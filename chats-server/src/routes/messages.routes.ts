@@ -40,7 +40,7 @@ messagesRouter.get(
     }
 
     const docs = await MessageModel.find(baseFilter)
-      .select("_id conversationId fromUserId toUserId protoVersion v3 initPacket replyTo clientMessageId createdAtClient status deliveredAt readAt")
+      .select("_id conversationId fromUserId toUserId protoVersion v3 initPacket replyTo clientMessageId createdAtClient seq status deliveredAt readAt")
       .sort({ createdAtClient: after !== null && !before ? 1 : -1 })
       .limit(limit);
 
@@ -57,6 +57,7 @@ messagesRouter.get(
         replyTo: (d as any).replyTo ?? null,
         clientMessageId: d.clientMessageId,
         createdAt: d.createdAtClient,
+        seq: (d as any).seq ?? null,
         status: (d as any).status ?? 'sent',
         deliveredAt: (d as any).deliveredAt ?? null,
         readAt: (d as any).readAt ?? null,
@@ -73,7 +74,7 @@ messagesRouter.get(
  * me whose recipient device has not acked delivery yet. Oldest first.
  * Query:
  *   - peerUserId (optional) : restrict to one conversation
- *   - after      (optional) : createdAtClient cursor (T3.2 switches it to seq)
+ *   - after      (optional) : seq cursor (T3.2): only messages with seq > after
  *   - limit      (default 100, max 200)
  *   - receiptsSince (optional, ms; with peerUserId) : also return delivery/read
  *     receipts for my own messages in that conversation updated after this time,
@@ -92,11 +93,11 @@ messagesRouter.get(
 
     const filter: any = { toUserId: me, v3: { $ne: null } };
     if (peer) filter.conversationId = makeConversationId(me, peer);
-    if (after !== null && Number.isFinite(after)) filter.createdAtClient = { $gt: after };
+    if (after !== null && Number.isFinite(after)) filter.seq = { $gt: after };
 
     const docs = await MessageModel.find(filter)
-      .select("_id conversationId fromUserId toUserId protoVersion v3 initPacket replyTo clientMessageId createdAtClient status deliveredAt readAt")
-      .sort({ createdAtClient: 1, _id: 1 })
+      .select("_id conversationId fromUserId toUserId protoVersion v3 initPacket replyTo clientMessageId createdAtClient seq status deliveredAt readAt")
+      .sort({ seq: 1, _id: 1 })
       .limit(limit);
 
     const items = docs.map((d) => ({
@@ -110,12 +111,13 @@ messagesRouter.get(
       replyTo: (d as any).replyTo ?? null,
       clientMessageId: d.clientMessageId,
       createdAt: d.createdAtClient,
+      seq: (d as any).seq ?? null,
       status: (d as any).status ?? 'sent',
       deliveredAt: (d as any).deliveredAt ?? null,
       readAt: (d as any).readAt ?? null,
     }));
 
-    let receipts: Array<{ serverMessageId: string; clientMessageId: string; createdAt: number; status: string; deliveredAt: number | null; readAt: number | null }> = [];
+    let receipts: Array<{ serverMessageId: string; clientMessageId: string; createdAt: number; seq: number | null; status: string; deliveredAt: number | null; readAt: number | null }> = [];
     if (peer && receiptsSince !== null && Number.isFinite(receiptsSince)) {
       const stubs = await MessageModel.find({
         conversationId: makeConversationId(me, peer),
@@ -123,13 +125,14 @@ messagesRouter.get(
         status: { $in: ['delivered', 'read'] },
         updatedAt: { $gt: new Date(receiptsSince) },
       })
-        .select("_id clientMessageId createdAtClient status deliveredAt readAt")
-        .sort({ createdAtClient: 1 })
+        .select("_id clientMessageId createdAtClient seq status deliveredAt readAt")
+        .sort({ seq: 1 })
         .limit(500);
       receipts = stubs.map((d) => ({
         serverMessageId: String(d._id),
         clientMessageId: d.clientMessageId,
         createdAt: d.createdAtClient,
+        seq: (d as any).seq ?? null,
         status: (d as any).status,
         deliveredAt: (d as any).deliveredAt ?? null,
         readAt: (d as any).readAt ?? null,

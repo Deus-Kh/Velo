@@ -49,7 +49,10 @@ const MessageSchema = new Schema(
     replyTo: { type: ReplyToSchema, default: null },
 
     clientMessageId: { type: String, required: true },
+    /** The sender's clock: display only (T3.2). Ordering and cursors use `seq`. */
     createdAtClient: { type: Number, required: true, index: true },
+    /** T3.2: server-assigned, per conversation, strictly increasing. Null only on pre-T3.2 documents. */
+    seq: { type: Number, default: null },
     
     // Delivery metadata
     status: {
@@ -68,7 +71,8 @@ const MessageSchema = new Schema(
 );
 
 MessageSchema.index({ conversationId: 1, createdAtClient: -1 });
-MessageSchema.index({ toUserId: 1, createdAtClient: 1 }); // undelivered listing
+MessageSchema.index({ toUserId: 1, seq: 1 }); // undelivered listing
+MessageSchema.index({ conversationId: 1, seq: 1 }, { unique: true, partialFilterExpression: { seq: { $type: 'number' } } });
 MessageSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
 MessageSchema.index({ fromUserId: 1, clientMessageId: 1 }, { unique: true });
 

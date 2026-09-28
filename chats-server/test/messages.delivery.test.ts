@@ -39,6 +39,7 @@ async function storeMessage(from: string, to: string, n: number, createdAt: numb
     initPacket: n === 0 ? { peerUserId: to, ephPublicKey: 'E'.padEnd(44, 'E'), signedPreKeyId: 1, oneTimePreKeyId: 7, initiatorIdentityDhPublicKey: 'I'.padEnd(44, 'I') } : null,
     clientMessageId: `${from}-${n}`,
     createdAtClient: createdAt,
+    seq: n + 1, // T3.2
     expiresAt: messageExpiry(createdAt),
   });
   return String(doc._id);
@@ -69,7 +70,7 @@ describe('T3.1 delete-on-delivery', () => {
     const forA = await get(`/messages/undelivered?peerUserId=${b.userId}`, tokenFor(a.userId));
     expect(forA.body.items).toEqual([]);
 
-    const paged = await get(`/messages/undelivered?peerUserId=${a.userId}&after=${t0}`, tokenFor(b.userId));
+    const paged = await get(`/messages/undelivered?peerUserId=${a.userId}&after=1`, tokenFor(b.userId)); // T3.2: the cursor is seq
     expect(paged.body.items.map((i: any) => i.serverMessageId)).toEqual([m1]);
   });
 
