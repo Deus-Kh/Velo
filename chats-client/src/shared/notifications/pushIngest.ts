@@ -4,7 +4,7 @@ import { conversationsApi, type ConversationListItem } from '../api/conversation
 import { loadStoredSession } from '../auth/tokenStore';
 import { ingestUndeliveredItems } from '../chat/historySync';
 import { ingestGroupItems } from '../chat/groupMessaging';
-import { groupsApi } from '../api/groups.api';
+import { groupsApi, type GroupView } from '../api/groups.api';
 import { makeConversationId } from '../utils/conversation';
 import type { StoredMessage } from '../storage/messageStore';
 import { useAppUiStore } from '../../store/app-ui.store';
@@ -124,20 +124,22 @@ export async function ingestLiveMessage(params: { myUserId: string; item: Histor
   return received[0] ?? null;
 }
 
+/** The group as the server sees it now, or null when unreachable or we are no longer a member. */
+async function loadGroupOrNull(groupId: string): Promise<GroupView | null> {
+  try {
+    return (await groupsApi.get(groupId)).data;
+  } catch {
+    return null;
+  }
+}
+
 /** T6.4: a live `message:new` group copy for a group that is not open: decrypt, store, ack, notify. */
 export async function ingestLiveGroupMessage(params: { myUserId: string; item: HistoryItem }): Promise<StoredMessage | null> {
   const groupId = String(params.item.groupId ?? '');
   if (!groupId || String(params.item.fromUserId) === params.myUserId) return null;
-  const { received } = await ingestGroupItems({ myUserId: params.myUserId, groupId, items: [params.item] });
-  if (received.length) {
-    let title = 'Group message';
-    try {
-      title = (await groupsApi.get(groupId)).data.name;
-    } catch {
-      /* name unknown offline */
-    }
-    await notifyStoredGroup({ myUserId: params.myUserId, groupId, title, messages: received });
-  }
+  const group = await loadGroupOrNull(groupId);
+  const { received } = await ingestGroupItems({ myUserId: params.myUserId, groupId, items: [params.item], memberIds: group ? group.members.map((m) => m.userId) : null });
+  if (received.length) await notifyStoredGroup({ myUserId: params.myUserId, groupId, title: group?.name ?? 'Group message', messages: received });
   return received[0] ?? null;
 }
 
@@ -169,17 +171,10 @@ export async function fetchAndIngestUndelivered(myUserId: string): Promise<Store
   const all: StoredMessage[] = [];
   // T6.4: group copies, one notification per message with the group's name.
   for (const [groupId, groupItems] of byGroup) {
-    const { received } = await ingestGroupItems({ myUserId, groupId, items: groupItems });
+    const group = await loadGroupOrNull(groupId);
+    const { received } = await ingestGroupItems({ myUserId, groupId, items: groupItems, memberIds: group ? group.members.map((m) => m.userId) : null });
     all.push(...received);
-    if (received.length) {
-      let title = 'Group message';
-      try {
-        title = (await groupsApi.get(groupId)).data.name;
-      } catch {
-        /* name unknown offline */
-      }
-      await notifyStoredGroup({ myUserId, groupId, title, messages: received });
-    }
+    if (received.length) await notifyStoredGroup({ myUserId, groupId, title: group?.name ?? 'Group message', messages: received });
   }
   for (const [peerUserId, peerItems] of byPeer) {
     const { received } = await ingestUndeliveredItems({ myUserId, peerUserId, items: peerItems });

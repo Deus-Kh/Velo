@@ -4,6 +4,7 @@ import { groupPeerKey, groupsApi, type GroupView } from '../api/groups.api';
 import type { HistoryItem } from '../api/messages.api';
 import { ensureSocketConnected } from '../socket/socket';
 import { listStoredMessages, type StoredMessage } from '../storage/messageStore';
+import { deleteGroupKeys } from '../storage/senderKeyStore';
 import { distributeSenderKey, ensureOwnSenderKey, forgetDepartedMembers, handleControlContent } from './groupKeys';
 import { ingestGroupItems, sendGroupMessage, syncGroupFromServer } from './groupMessaging';
 import { subscribeToControlContent } from '../socket/messaging';
@@ -35,6 +36,8 @@ export function useGroupChat(groupId: string) {
   const [loading, setLoading] = useState(true);
   const [waitingForKeys, setWaitingForKeys] = useState<string[]>([]);
   const [securityWarning, setSecurityWarning] = useState<{ code: string; fromUserId: string } | null>(null);
+  /** T6.5: we are no longer a member (removed, or the group is gone); keys wiped, nothing more to do here. */
+  const [removed, setRemoved] = useState(false);
   const groupRef = useRef<GroupView | null>(null);
   const memberIdsRef = useRef<string[]>([]);
 
@@ -42,8 +45,21 @@ export function useGroupChat(groupId: string) {
 
   const refreshGroup = useCallback(async () => {
     if (!myUserId) return null;
-    const res = await groupsApi.get(groupId);
-    const g = res.data;
+    let g: GroupView;
+    try {
+      g = (await groupsApi.get(groupId)).data;
+    } catch (e: any) {
+      const status = e?.response?.status;
+      if (status === 403 || status === 404) {
+        // T6.5: removed (or the group was deleted): our key and every member's key are dead here.
+        await deleteGroupKeys(String(myUserId), groupId);
+        groupRef.current = null;
+        setGroup(null);
+        setRemoved(true);
+        return null;
+      }
+      throw e;
+    }
     const previous = memberIdsRef.current;
     groupRef.current = g;
     memberIdsRef.current = g.members.map((m) => m.userId);
@@ -56,7 +72,7 @@ export function useGroupChat(groupId: string) {
 
   const sync = useCallback(async () => {
     if (!myUserId) return;
-    const r = await syncGroupFromServer({ myUserId: String(myUserId), groupId, onSecurityWarning });
+    const r = await syncGroupFromServer({ myUserId: String(myUserId), groupId, memberIds: memberIdsRef.current.length ? memberIdsRef.current : null, onSecurityWarning });
     setWaitingForKeys(r.waitingForKey);
     if (r.received.length) setMessages((prev) => r.received.reduce((acc, m) => upsert(acc, toUI(String(myUserId), m)), prev));
   }, [groupId, myUserId, onSecurityWarning]);
@@ -72,8 +88,10 @@ export function useGroupChat(groupId: string) {
         const stored = await listStoredMessages({ myUserId: String(myUserId), peerUserId: groupPeerKey(groupId), limit: PAGE_SIZE });
         if (!cancelled) setMessages(stored.map((m) => toUI(String(myUserId), m)));
         const g = await refreshGroup();
-        if (g) await distributeSenderKey({ myUserId: String(myUserId), group: g });
-        await sync();
+        if (g) {
+          await distributeSenderKey({ myUserId: String(myUserId), group: g });
+          await sync();
+        }
       } catch (e) {
         console.warn('[groups] open failed:', e);
       } finally {
@@ -84,7 +102,7 @@ export function useGroupChat(groupId: string) {
         const socket = await ensureSocketConnected();
         const onNew = async (evt: HistoryItem & { groupId?: string | null }) => {
           if (!evt?.g1 || String(evt.groupId ?? '') !== groupId) return;
-          const r = await ingestGroupItems({ myUserId: String(myUserId), groupId, items: [evt], onSecurityWarning });
+          const r = await ingestGroupItems({ myUserId: String(myUserId), groupId, items: [evt], memberIds: memberIdsRef.current.length ? memberIdsRef.current : null, onSecurityWarning });
           if (r.received.length) setMessages((prev) => r.received.reduce((acc, m) => upsert(acc, toUI(String(myUserId), m)), prev));
           if (r.waitingForKey.length) setWaitingForKeys((prev) => Array.from(new Set([...prev, ...r.waitingForKey])));
         };
@@ -156,5 +174,5 @@ export function useGroupChat(groupId: string) {
     await refreshGroup();
   }, [groupId, refreshGroup]);
 
-  return { group, messages, loading, waitingForKeys, securityWarning, send, sync, addMembers, removeMember, refreshGroup };
+  return { group, messages, loading, removed, waitingForKeys, securityWarning, send, sync, addMembers, removeMember, refreshGroup };
 }

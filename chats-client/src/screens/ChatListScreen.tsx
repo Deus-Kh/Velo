@@ -26,6 +26,8 @@ import { useChatListStore } from '../store/chat-list.store';
 import { useAppUiStore } from '../store/app-ui.store';
 import { ingestLiveGroupMessage, ingestLiveMessage } from '../shared/notifications/pushIngest';
 import { groupPeerKey, groupsApi, type GroupView } from '../shared/api/groups.api';
+import { ensureOwnSenderKey } from '../shared/chat/groupKeys';
+import { deleteGroupKeys } from '../shared/storage/senderKeyStore';
 import { formatHandle, shortSecureId } from '../shared/utils/identity';
 
 type ChatOpenHandler = (chat: { peerUserId: string; peerUsername?: string }) => void;
@@ -657,13 +659,22 @@ export default function ChatListScreen({
           refreshConversationsSilently();
         };
 
+        // T6.5: a membership change rotates our sender key at once (the new key is distributed on the
+        // next open or send); being removed wipes everything this device holds for the group.
+        const onGroupChanged = (evt: any) => {
+          const groupId = String(evt?.groupId ?? '');
+          if (!groupId || !myUserId) return;
+          const gone = (evt?.change?.type === 'removed' || evt?.change?.type === 'left') && Array.isArray(evt?.change?.userIds) && evt.change.userIds.includes(myUserId);
+          const work = gone ? deleteGroupKeys(myUserId, groupId) : typeof evt?.epoch === 'number' ? ensureOwnSenderKey({ myUserId, groupId, epoch: evt.epoch }).then(() => undefined) : Promise.resolve();
+          work.catch((e) => console.warn('[ChatListScreen] group key update failed:', e)).finally(refreshGroupsSilently);
+        };
         socket.on('message:new', handler);
         socket.on('connect', refreshConversationsSilently);
-        socket.on('group:changed', refreshGroupsSilently);
+        socket.on('group:changed', onGroupChanged);
         cleanup = () => {
           socket.off('message:new', handler);
           socket.off('connect', refreshConversationsSilently);
-          socket.off('group:changed', refreshGroupsSilently);
+          socket.off('group:changed', onGroupChanged);
         };
       } catch (e) {
         console.warn('[ChatListScreen] Socket not ready for message listener:', (e as any)?.message);

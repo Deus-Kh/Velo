@@ -47,7 +47,7 @@ export default function GroupChatScreen({ groupId, initialName, onClose }: { gro
   const interfaceDensity = useAppearanceStore((s) => s.interfaceDensity);
   const surfaceStyle = useAppearanceStore((s) => s.surfaceStyle);
   const { keyboardShown, keyboardHeight } = useKeyboard();
-  const { group, messages, loading, waitingForKeys, securityWarning, send, addMembers, removeMember } = useGroupChat(groupId);
+  const { group, messages, loading, removed, waitingForKeys, securityWarning, send, addMembers, removeMember } = useGroupChat(groupId);
 
   const [text, setText] = useState('');
   const [sheet, setSheet] = useState<MemberSheet>(null);
@@ -123,9 +123,11 @@ export default function GroupChatScreen({ groupId, initialName, onClose }: { gro
     });
   }, [groupId, myUserId, onClose, runAction]);
 
-  const subtitle = group
-    ? `${group.members.length} member${group.members.length === 1 ? '' : 's'} · epoch ${group.epoch}`
-    : 'Loading…';
+  const subtitle = removed
+    ? 'You are no longer a member'
+    : group
+      ? `${group.members.length} member${group.members.length === 1 ? '' : 's'} · epoch ${group.epoch}`
+      : 'Loading…';
 
   const composerSurfaceClass = surfaceStyle === 'glass' ? 'bg-surface/82' : 'bg-surface-elevated';
   const buttonSizeClass = interfaceDensity === 'compact' ? 'h-10 w-10' : 'h-11 w-11';
@@ -186,7 +188,14 @@ export default function GroupChatScreen({ groupId, initialName, onClose }: { gro
       </View>
 
       <View className="flex-1 px-3 pt-3">
-        {loading && messages.length === 0 ? (
+        {removed ? (
+          <View className="flex-1 items-center justify-center px-8">
+            <Text className="text-center text-xl font-semibold text-text">You left or were removed</Text>
+            <Text className="mt-2 text-center text-sm leading-6 text-muted">
+              The group's keys were deleted on this device. Messages sent after this point cannot be read here.
+            </Text>
+          </View>
+        ) : loading && messages.length === 0 ? (
           <View className="flex-1 items-center justify-center">
             <ActivityIndicator size="small" color="#2DD4BF" />
           </View>
@@ -334,7 +343,7 @@ export default function GroupChatScreen({ groupId, initialName, onClose }: { gro
               className="max-h-32 min-h-[40px] text-[15px] leading-6 text-text"
               returnKeyType="send"
               onSubmitEditing={onSend}
-              editable={Boolean(group)}
+              editable={Boolean(group) && !removed}
               multiline
               maxLength={4000}
               textAlignVertical="top"

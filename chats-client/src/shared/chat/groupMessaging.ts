@@ -58,19 +58,32 @@ function groupMessageOf(it: HistoryItem): GroupMessage | null {
   return { v: 1, keyId: g.keyId, iteration: g.iteration, ciphertext: g.ciphertext, signature: g.signature };
 }
 
-export type GroupIngestResult = { received: StoredMessage[]; waitingForKey: string[]; failed: Array<{ serverMessageId: string; code: string | null }> };
+export type GroupIngestResult = { received: StoredMessage[]; waitingForKey: string[]; failed: Array<{ serverMessageId: string; code: string | null }>; dropped: string[] };
 
 /**
  * Decrypt, store and ack group items (from the undelivered listing or a live
  * `message:new`). Items whose sender key is missing or stale are left on the
  * server and a key request is sent to that member.
+ *
+ * T6.5: with `memberIds` known, a copy from someone who is no longer a member
+ * is dropped (acked, never stored) and no key is requested from them: a
+ * removed member's key is dead, and asking would hand our own key back over
+ * the pairwise session in reply.
  */
-export async function ingestGroupItems(params: { myUserId: string; groupId: string; items: HistoryItem[]; onSecurityWarning?: (code: string, fromUserId: string) => void }): Promise<GroupIngestResult> {
+export async function ingestGroupItems(params: {
+  myUserId: string;
+  groupId: string;
+  items: HistoryItem[];
+  memberIds?: string[] | null;
+  onSecurityWarning?: (code: string, fromUserId: string) => void;
+}): Promise<GroupIngestResult> {
   const { myUserId, groupId, items } = params;
+  const members = params.memberIds ? new Set(params.memberIds) : null;
   const peerKey = groupPeerKey(groupId);
   const received: StoredMessage[] = [];
   const waitingForKey: string[] = [];
   const failed: GroupIngestResult['failed'] = [];
+  const dropped: string[] = [];
   const acked: string[] = [];
 
   for (const it of items) {
@@ -79,6 +92,11 @@ export async function ingestGroupItems(params: { myUserId: string; groupId: stri
     if (fromUserId === myUserId) continue;
     const message = groupMessageOf(it);
     if (!message) continue;
+    if (members && !members.has(fromUserId)) {
+      dropped.push(it.serverMessageId);
+      acked.push(it.serverMessageId);
+      continue;
+    }
     const state = await loadPeerSenderKey(myUserId, groupId, fromUserId);
     if (!state) {
       if (!waitingForKey.includes(fromUserId)) waitingForKey.push(fromUserId);
@@ -127,12 +145,12 @@ export async function ingestGroupItems(params: { myUserId: string; groupId: stri
       console.warn('[groups] delivered ack failed (will retry next sync):', e);
     }
   }
-  return { received, waitingForKey, failed };
+  return { received, waitingForKey, failed, dropped };
 }
 
 /** Pull everything the server still holds for this group and ingest it. */
-export async function syncGroupFromServer(params: { myUserId: string; groupId: string; onSecurityWarning?: (code: string, fromUserId: string) => void }): Promise<GroupIngestResult> {
+export async function syncGroupFromServer(params: { myUserId: string; groupId: string; memberIds?: string[] | null; onSecurityWarning?: (code: string, fromUserId: string) => void }): Promise<GroupIngestResult> {
   const res = await messagesApi.getUndelivered({ groupId: params.groupId, limit: 100 });
   const items: HistoryItem[] = Array.isArray(res.data?.items) ? res.data.items : [];
-  return ingestGroupItems({ myUserId: params.myUserId, groupId: params.groupId, items, onSecurityWarning: params.onSecurityWarning });
+  return ingestGroupItems({ myUserId: params.myUserId, groupId: params.groupId, items, memberIds: params.memberIds, onSecurityWarning: params.onSecurityWarning });
 }
