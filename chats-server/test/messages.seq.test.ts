@@ -82,7 +82,7 @@ describe('T3.2 sequence numbers', () => {
     const { MessageModel } = await import('../src/models/Message');
     await MessageModel.syncIndexes();
     const indexes = await MessageModel.collection.indexes();
-    const idx = indexes.find((i: any) => i.key?.conversationId === 1 && i.key?.seq === 1);
+    const idx = indexes.find((i: any) => i.key?.conversationId === 1 && i.key?.seq === 1 && i.key?.toUserId === 1); // T6.3: per recipient
     expect(idx).toBeDefined();
     expect((idx as any).unique).toBe(true);
     expect((idx as any).partialFilterExpression).toEqual({ seq: { $type: 'number' } });

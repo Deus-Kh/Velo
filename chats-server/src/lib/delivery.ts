@@ -32,7 +32,7 @@ export async function markDelivered(params: { recipientId: string; serverMessage
   const { recipientId, serverMessageId } = params;
   if (!Types.ObjectId.isValid(serverMessageId)) return { ok: false, code: 'BAD_ID' };
 
-  const doc = await MessageModel.findById(serverMessageId).select('toUserId fromUserId conversationId status v4 createdAt');
+  const doc = await MessageModel.findById(serverMessageId).select('toUserId fromUserId conversationId status v4 g1 groupId createdAt');
   if (!doc) return { ok: false, code: 'NOT_FOUND' };
   if (String(doc.toUserId) !== String(recipientId)) return { ok: false, code: 'FORBIDDEN' };
   if (doc.status === 'read') return { ok: true, status: 'read' };
@@ -42,17 +42,18 @@ export async function markDelivered(params: { recipientId: string; serverMessage
     { _id: doc._id, status: { $ne: 'read' } },
     {
       $set: { status: 'delivered', deliveredAt, expiresAt: messageExpiry(deliveredAt) },
-      $unset: { v4: 1, initPacket: 1 },
+      $unset: { v4: 1, initPacket: 1, g1: 1 },
     },
   );
 
   // Emit once: a repeated ack (already delivered, ciphertext already gone) changes nothing.
-  if (r.modifiedCount > 0 && doc.v4) {
+  if (r.modifiedCount > 0 && (doc.v4 || (doc as unknown as { g1?: unknown }).g1)) {
     metrics.messagesDelivered.inc();
     const receivedAt = (doc as unknown as { createdAt?: Date }).createdAt?.getTime();
     if (receivedAt) metrics.deliveryLatency.observe(Math.max(0, (deliveredAt - receivedAt) / 1000));
     emitToUser(String(doc.fromUserId), 'message:status-changed', {
       conversationId: doc.conversationId,
+      groupId: (doc as unknown as { groupId?: unknown }).groupId ? String((doc as unknown as { groupId?: unknown }).groupId) : null,
       status: 'delivered',
       serverMessageId,
       deliveredAt,

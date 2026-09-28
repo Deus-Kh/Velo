@@ -15,6 +15,18 @@ const V4Schema = new Schema(
   { _id: false }
 );
 
+/** Group message format v1 (T6.1/T6.3): sender-key ciphertext + per-sender signature. Opaque to the server. */
+const G1Schema = new Schema(
+  {
+    v: { type: Number, required: true },
+    keyId: { type: Number, required: true },
+    iteration: { type: Number, required: true },
+    ciphertext: { type: String, required: true },
+    signature: { type: String, required: true },
+  },
+  { _id: false }
+);
+
 const InitPacketSchema = new Schema(
   {
     peerUserId: { type: String, required: true },
@@ -49,6 +61,12 @@ const MessageSchema = new Schema(
     // then remains as a metadata-only receipt until it expires.
     v4: { type: V4Schema, default: null },
     initPacket: { type: InitPacketSchema, default: null },
+
+    // T6.3: a group message is stored once per recipient; these two identify the group copy.
+    groupId: { type: Types.ObjectId, ref: 'Group', default: null, index: true },
+    g1: { type: G1Schema, default: null },
+    /** Group membership epoch the message was sent in (T6.5 rotation). */
+    epoch: { type: Number, default: null },
     replyTo: { type: ReplyToSchema, default: null },
 
     clientMessageId: { type: String, required: true },
@@ -75,9 +93,11 @@ const MessageSchema = new Schema(
 
 MessageSchema.index({ conversationId: 1, createdAtClient: -1 });
 MessageSchema.index({ toUserId: 1, seq: 1 }); // undelivered listing
-MessageSchema.index({ conversationId: 1, seq: 1 }, { unique: true, partialFilterExpression: { seq: { $type: 'number' } } });
+// T3.2 uniqueness of (conversation, seq); T6.3 adds the recipient because a group message is one document per recipient.
+MessageSchema.index({ conversationId: 1, seq: 1, toUserId: 1 }, { unique: true, partialFilterExpression: { seq: { $type: 'number' } } });
 MessageSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
-MessageSchema.index({ fromUserId: 1, clientMessageId: 1 }, { unique: true });
+// T6.3: one document per recipient, so the dedupe key includes the recipient.
+MessageSchema.index({ fromUserId: 1, clientMessageId: 1, toUserId: 1 }, { unique: true });
 
 MessageSchema.pre('validate', function setConversationId() {
   if (!this.conversationId && this.fromUserId && this.toUserId) {

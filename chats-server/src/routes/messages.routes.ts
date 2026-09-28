@@ -13,6 +13,7 @@ export const messagesRouter = Router();
  * me whose recipient device has not acked delivery yet. Oldest first.
  * Query:
  *   - peerUserId (optional) : restrict to one conversation
+ *   - groupId    (optional) : restrict to one group (T6.3; group copies carry `g1` instead of `v4`)
  *   - after      (optional) : seq cursor (T3.2): only messages with seq > after
  *   - limit      (default 100, max 200)
  *   - receiptsSince (optional, ms; with peerUserId) : also return delivery/read
@@ -25,17 +26,19 @@ messagesRouter.get(
   async (req: AuthedRequest, res) => {
     const me = String(req.userId);
     const peer = typeof req.query.peerUserId === 'string' ? req.query.peerUserId : null;
+    const groupId = typeof req.query.groupId === 'string' && /^[0-9a-fA-F]{24}$/.test(req.query.groupId) ? req.query.groupId : null;
     const limit = Math.min(Math.max(Number(req.query.limit || 100), 1), 200);
     const after = req.query.after !== undefined ? Number(req.query.after) : null;
     const receiptsSince = req.query.receiptsSince !== undefined ? Number(req.query.receiptsSince) : null;
     const serverTime = Date.now();
 
-    const filter: any = { toUserId: me, v4: { $ne: null } };
+    const filter: any = { toUserId: me, $or: [{ v4: { $ne: null } }, { g1: { $ne: null } }] };
     if (peer) filter.conversationId = makeConversationId(me, peer);
+    if (groupId) filter.conversationId = 'group:' + groupId;
     if (after !== null && Number.isFinite(after)) filter.seq = { $gt: after };
 
     const docs = await MessageModel.find(filter)
-      .select("_id conversationId fromUserId toUserId protoVersion v4 initPacket replyTo clientMessageId createdAtClient seq status deliveredAt readAt")
+      .select("_id conversationId fromUserId toUserId protoVersion v4 g1 groupId epoch initPacket replyTo clientMessageId createdAtClient seq status deliveredAt readAt")
       .sort({ seq: 1, _id: 1 })
       .limit(limit);
 
@@ -46,6 +49,9 @@ messagesRouter.get(
       toUserId: String(d.toUserId),
       protoVersion: (d.protoVersion ?? 4) as 4,
       v4: d.v4 ?? null,
+      g1: (d as any).g1 ?? null,
+      groupId: (d as any).groupId ? String((d as any).groupId) : null,
+      epoch: (d as any).epoch ?? null,
       initPacket: (d as any).initPacket ?? null,
       replyTo: (d as any).replyTo ?? null,
       clientMessageId: d.clientMessageId,

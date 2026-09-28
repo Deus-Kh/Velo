@@ -8,6 +8,8 @@ import { makeConversationId } from "../utils/conversation";
 import { services } from "../lib/services";
 import { PRESENCE_HEARTBEAT_MS } from "../lib/presence";
 import { metrics } from "../lib/metrics";
+import { GroupModel } from "../models/Group";
+import { groupConversationId, isGroupMember } from "../lib/groups";
 import { haveConversation } from "../lib/socketAuthz";
 import { markDelivered, messageExpiry } from "../lib/delivery";
 import { setRealtimeServer } from "../lib/realtime";
@@ -30,6 +32,15 @@ type V4Payload = {
   encHeader: string;
   ciphertext: string;
   mac: string;
+};
+
+/** T6.3 group message: the sender-key ciphertext with its signature, opaque to the server. */
+type GroupSendDTO = {
+  groupId: string;
+  clientMessageId: string;
+  createdAt: number;
+  epoch?: number;
+  g1: { v: 1; keyId: number; iteration: number; ciphertext: string; signature: string };
 };
 
 type SendMessageDTO = {
@@ -419,6 +430,98 @@ export function setupSocket(io: Server) {
         }
 
         log.error({ err: (e as Error)?.message ?? e }, "[socket] message:send failed");
+        return ack?.({ ok: false, code: "INTERNAL", error: "Internal error" });
+      }
+    });
+
+    /**
+     * group:send (T6.3): one ciphertext per group message, stored once per recipient so
+     * delete-on-delivery, receipts, seq and TTL work exactly as for 1:1. The server checks
+     * membership and shape only; the payload (sender-key ciphertext + per-sender signature)
+     * is opaque to it.
+     */
+    socket.on("group:send", async (dto: GroupSendDTO, ack?: (r: any) => void) => {
+      try {
+        const sendBudget = await services.messageSendLimiter.hit(userId);
+        if (!sendBudget.allowed) {
+          metrics.messagesRejected.inc({ reason: 'rate_limited' });
+          return ack?.({ ok: false, code: "RATE_LIMITED", error: "Too many messages. Please slow down.", retryAfterSeconds: sendBudget.retryAfterSeconds });
+        }
+        if (!isValidObjectIdString(dto?.groupId)) return ack?.({ ok: false, code: "BAD_ID", error: "Invalid groupId" });
+        if (!isNonEmptyString(dto.clientMessageId, 3)) return ack?.({ ok: false, error: "Invalid clientMessageId" });
+        if (typeof dto.createdAt !== "number") return ack?.({ ok: false, error: "Invalid createdAt" });
+        const g1 = dto.g1;
+        if (
+          !g1 || g1.v !== 1 ||
+          !Number.isInteger(g1.keyId) || g1.keyId < 0 || g1.keyId > 0xffffffff ||
+          !Number.isInteger(g1.iteration) || g1.iteration < 0 || g1.iteration >= 2 ** 24 ||
+          !isNonEmptyString(g1.ciphertext, 8) || !isNonEmptyString(g1.signature, 8) ||
+          Buffer.from(g1.signature, "base64").length !== 64
+        ) {
+          metrics.messagesRejected.inc({ reason: 'invalid_payload' });
+          return ack?.({ ok: false, error: "Invalid g1 payload" });
+        }
+        if (g1.ciphertext.length > MAX_CIPHERTEXT_B64_LENGTH) {
+          metrics.messagesRejected.inc({ reason: 'too_large' });
+          return ack?.({ ok: false, code: "PAYLOAD_TOO_LARGE", error: `Message too large (max ${MAX_CIPHERTEXT_BYTES / 1024} KiB)` });
+        }
+
+        const group = await GroupModel.findById(dto.groupId);
+        if (!group || !isGroupMember(group, userId)) {
+          log.warn({ from: userId, groupId: dto.groupId }, "[socket] group:send refused (not a member)");
+          return ack?.({ ok: false, code: "FORBIDDEN", error: "Not a member of this group" });
+        }
+        if (typeof dto.epoch === 'number' && dto.epoch !== group.epoch) {
+          // The sender's membership view is stale: its sender key predates a change. Refuse; the client re-syncs (T6.5).
+          return ack?.({ ok: false, code: "STALE_EPOCH", error: "Group membership changed", epoch: group.epoch });
+        }
+
+        const recipients = group.members.map((m) => String(m.userId)).filter((id) => id !== userId);
+        const existing = await MessageModel.findOne({ fromUserId: userId, clientMessageId: dto.clientMessageId }).select('_id seq');
+        if (existing) return ack?.({ ok: true, serverMessageId: String(existing._id), seq: (existing as any).seq ?? null, epoch: group.epoch });
+
+        const updated = await GroupModel.findOneAndUpdate({ _id: group._id }, { $inc: { lastSeq: 1 }, $set: { lastMessageAt: Date.now() } }, { new: true });
+        const seq = Number(updated?.lastSeq ?? 0);
+        const conversationId = groupConversationId(String(group._id));
+        const base = {
+          conversationId,
+          fromUserId: userId,
+          protoVersion: 4,
+          g1,
+          groupId: group._id,
+          epoch: group.epoch,
+          clientMessageId: dto.clientMessageId,
+          createdAtClient: dto.createdAt,
+          seq,
+          expiresAt: messageExpiry(),
+        };
+        const docs = recipients.length ? await MessageModel.insertMany(recipients.map((toUserId) => ({ ...base, toUserId }))) : [];
+
+        const payload = (doc: (typeof docs)[number]) => ({
+          serverMessageId: String(doc._id),
+          conversationId,
+          groupId: String(group._id),
+          epoch: group.epoch,
+          fromUserId: String(userId),
+          toUserId: String(doc.toUserId),
+          protoVersion: 4,
+          g1,
+          clientMessageId: dto.clientMessageId,
+          createdAt: dto.createdAt,
+          seq,
+          status: 'sent',
+        });
+        for (const doc of docs) {
+          io.to(String(doc.toUserId)).emit("message:new", payload(doc));
+          if (!(await services.presence.isOnline(String(doc.toUserId)))) {
+            await sendMessagePushToUser({ toUserId: String(doc.toUserId), serverMessageId: String(doc._id) });
+          }
+        }
+        metrics.messagesSent.inc({ bootstrap: 'false' });
+        // The sender's own row is the first recipient's id (there is no self copy); clients key group messages by clientMessageId.
+        return ack?.({ ok: true, serverMessageId: docs[0] ? String(docs[0]._id) : null, seq, epoch: group.epoch, recipients: recipients.length });
+      } catch (e) {
+        log.error({ err: (e as Error)?.message ?? e }, "[socket] group:send failed");
         return ack?.({ ok: false, code: "INTERNAL", error: "Internal error" });
       }
     });
