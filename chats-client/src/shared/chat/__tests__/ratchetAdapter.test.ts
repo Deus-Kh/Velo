@@ -1,7 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Keychain from 'react-native-keychain';
 import nacl from 'tweetnacl';
-import { encodeBase64 } from 'tweetnacl-util';
+import { decodeBase64, encodeBase64 } from 'tweetnacl-util';
 import { initInitiatorSession, initResponderSession, isProtocolError, type RatchetSessionV2 } from '@velo/protocol';
 import { decryptAndPersist, encryptAndPersist } from '../ratchetAdapter';
 import { loadSession, saveSession } from '../../storage/sessionStore';
@@ -99,14 +99,17 @@ describe('ratchetAdapter', () => {
     const rowsBefore = await messageKeyRows();
     const storedBefore = await loadSession({ myUserId: PEER, peerUserId: ME });
 
-    const tampered = { ...e.encrypted, header: { ...e.encrypted.header, pn: 9 } };
+    // T3.6: the header is encrypted; an on-path attacker can only flip a byte of it.
+    const enc = decodeBase64(e.encrypted.encHeader);
+    enc[enc.length - 1] = enc[enc.length - 1]! ^ 1;
+    const tampered = { ...e.encrypted, encHeader: encodeBase64(enc) };
     let code: string | null = null;
     try {
       await decryptAndPersist({ myUserId: PEER, peerUserId: ME, session: b, encrypted: tampered });
     } catch (err) {
       code = isProtocolError(err) ? err.code : 'other';
     }
-    expect(code).toBe('HEADER_TAMPERED');
+    expect(code).toBe('DECRYPT_FAILED'); // opens under no known header key
 
     expect(await loadSession({ myUserId: PEER, peerUserId: ME })).toEqual(storedBefore);
     expect(await messageKeyRows()).toEqual(rowsBefore);

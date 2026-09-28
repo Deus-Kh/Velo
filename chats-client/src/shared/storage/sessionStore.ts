@@ -25,7 +25,7 @@ function isSessionShape(value: unknown): value is AnySession {
     !!s &&
     typeof s === 'object' &&
     s.v === 3 &&
-    s.protoVersion === 3 &&
+    s.protoVersion === 4 &&
     typeof s.nextHeaderKeySend === 'string' &&
     typeof s.nextHeaderKeyRecv === 'string' &&
     typeof s.rootKey === 'string' &&

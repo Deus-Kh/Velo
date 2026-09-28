@@ -1,10 +1,8 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { normalizeB64, protocolErrorCode, type MessageEnvelope } from '@velo/protocol';
 import { messagesApi, type HistoryItem, type ReceiptItem } from '../api/messages.api';
-import { deleteV2MessageKeysForPair, hasArchivedKeysForPair } from '../storage/v2MessageKeyStore';
 import { patchStoredMessage, storedMessageId, upsertStoredMessage, type StoredMessage } from '../storage/messageStore';
 import { receiveIncoming } from './incoming';
-import { decryptArchived } from './ratchetAdapter';
 
 const SYNC_PAGE = 100;
 const MAX_PAGES = 20;
@@ -14,11 +12,10 @@ export function receiptsCursorKey(myUserId: string, peerUserId: string): string 
   return `msgsync:v1:${myUserId}:${peerUserId}`;
 }
 
-export function envelopeOf(it: Pick<HistoryItem, 'v3'>): MessageEnvelope | null {
-  const h = it.v3?.header;
-  if (!h || typeof h.n !== 'number' || typeof h.pn !== 'number' || typeof h.dhPub !== 'string') return null;
-  if (typeof it.v3?.ciphertext !== 'string' || typeof it.v3?.mac !== 'string') return null;
-  return { header: { n: h.n, pn: h.pn, dhPub: normalizeB64(h.dhPub) }, ciphertext: normalizeB64(it.v3.ciphertext), mac: normalizeB64(it.v3.mac) };
+export function envelopeOf(it: Pick<HistoryItem, 'v4'>): MessageEnvelope | null {
+  const e = it.v4;
+  if (!e || typeof e.encHeader !== 'string' || typeof e.ciphertext !== 'string' || typeof e.mac !== 'string') return null;
+  return { encHeader: normalizeB64(e.encHeader), ciphertext: normalizeB64(e.ciphertext), mac: normalizeB64(e.mac) };
 }
 
 function toStored(it: HistoryItem, direction: 'in' | 'out', text: string): StoredMessage | null {
@@ -66,7 +63,7 @@ export async function ingestUndeliveredItems(params: {
   const acked: string[] = [];
 
   for (const it of items) {
-    if (String(it.fromUserId) === String(myUserId) || it.protoVersion !== 3) continue;
+    if (String(it.fromUserId) === String(myUserId) || it.protoVersion !== 4) continue;
     const envelope = envelopeOf(it);
     if (!envelope) continue;
     try {
@@ -181,45 +178,4 @@ export async function syncNewerFromServer(params: {
     }
   }
   return { received, updated };
-}
-
-/**
- * One-time migration from the pre-T2.14 archive: decrypt every server
- * message this device holds an archived key for, store the plaintext, then
- * delete the archive for the pair. Idempotent: does nothing once the
- * archive is gone. Uses the legacy history route, which T3.1 keeps for this.
- */
-export async function migrateArchivedHistory(params: { myUserId: string; peerUserId: string }): Promise<number> {
-  const { myUserId, peerUserId } = params;
-  if (!(await hasArchivedKeysForPair({ myUserId, peerUserId }))) return 0;
-
-  let migrated = 0;
-  let before: number | null = null;
-  for (let page = 0; page < MAX_PAGES; page += 1) {
-    const res = await messagesApi.getWithUser(peerUserId, { limit: 200, before: before ?? undefined });
-    const items: HistoryItem[] = Array.isArray(res.data?.items) ? res.data.items : [];
-    if (items.length === 0) break;
-    for (const it of items) {
-      const createdAt = Number(it.createdAt ?? 0);
-      if (before === null || createdAt < before) before = createdAt;
-      if (it.protoVersion !== 3) continue;
-      const envelope = envelopeOf(it);
-      if (!envelope) continue;
-      const mine = String(it.fromUserId) === String(myUserId);
-      try {
-        const text = await decryptArchived({ myUserId, peerUserId, direction: mine ? 'out' : 'in', encrypted: envelope });
-        if (text === null) continue;
-        const stored = toStored(it, mine ? 'out' : 'in', text);
-        if (stored) {
-          await upsertStoredMessage({ myUserId, peerUserId, message: stored });
-          migrated += 1;
-        }
-      } catch {
-        /* an archived key that no longer opens: skip */
-      }
-    }
-    if (items.length < 200) break;
-  }
-  await deleteV2MessageKeysForPair({ myUserId, peerUserId });
-  return migrated;
 }

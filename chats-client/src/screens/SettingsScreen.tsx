@@ -3,6 +3,7 @@ import { validatePassword } from '../shared/validation/password';
 import { Alert, ScrollView, View, Text, Pressable, TextInput, Switch } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Keychain from 'react-native-keychain';
+import { sessionMasterKeyService } from '../shared/crypto/sessionMasterKey';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 
@@ -41,10 +42,11 @@ type SecurityDiagnostics = {
   identityKeyReady: boolean;
   identityDhReady: boolean;
   signedPreKeyReady: boolean;
-  historyMasterKeyReady: boolean;
+  /** The per-user session master key that seals sessions, secrets and the local message store (T1.3, T2.14). */
+  sessionMasterKeyReady: boolean;
   sessionCount: number;
   trustedContactsCount: number;
-  cachedMessageKeysCount: number;
+  storedMessagesCount: number;
   oneTimePreKeysCount: number;
 };
 
@@ -319,22 +321,22 @@ export default function SettingsScreen() {
         identityKeyCreds,
         identityDhCreds,
         signedPreKeyCreds,
-        historyMasterKeyCreds,
+        sessionMasterKeyCreds,
       ] = await Promise.all([
         Keychain.getGenericPassword({ service: `identity-sign:${userId}` }),
         Keychain.getGenericPassword({ service: `identity-dh:${userId}` }),
         Keychain.getGenericPassword({ service: `signed-prekey:${userId}` }),
-        Keychain.getGenericPassword({ service: `history-mk:${userId}` }),
+        Keychain.getGenericPassword({ service: sessionMasterKeyService(userId) }),
       ]);
 
       setDiagnostics({
         identityKeyReady: Boolean(identityKeyCreds),
         identityDhReady: Boolean(identityDhCreds),
         signedPreKeyReady: Boolean(signedPreKeyCreds),
-        historyMasterKeyReady: Boolean(historyMasterKeyCreds),
+        sessionMasterKeyReady: Boolean(sessionMasterKeyCreds),
         sessionCount: allKeys.filter((key) => key.startsWith(`session:v2:${userId}:`)).length,
         trustedContactsCount: allKeys.filter((key) => key.startsWith(`trusted-identity:${userId}:`)).length,
-        cachedMessageKeysCount: allKeys.filter((key) => key.startsWith(`v2mk:${userId}:`)).length,
+        storedMessagesCount: allKeys.filter((key) => key.startsWith(`msg:v1:${userId}:`)).length,
         oneTimePreKeysCount: allKeys.filter((key) => key.startsWith(`otpk:${userId}:`)).length,
       });
     } catch (error) {
@@ -461,7 +463,7 @@ export default function SettingsScreen() {
 
   const encryptionValue = diagnosticsLoading
     ? 'Checking'
-    : diagnostics?.historyMasterKeyReady
+    : diagnostics?.sessionMasterKeyReady
       ? 'Enabled'
       : 'Preparing';
 
@@ -849,9 +851,9 @@ export default function SettingsScreen() {
               value={diagnosticsLoading ? 'Checking' : `${diagnostics?.sessionCount ?? 0}`}
             />
             <SettingsRow
-              title="Cached message keys"
-              subtitle="Stored encrypted message keys used to safely decrypt older history."
-              value={diagnosticsLoading ? 'Checking' : `${diagnostics?.cachedMessageKeysCount ?? 0}`}
+              title="Stored messages"
+              subtitle="Messages kept on this device, each sealed under the session master key (T2.14). No message key is ever kept."
+              value={diagnosticsLoading ? 'Checking' : `${diagnostics?.storedMessagesCount ?? 0}`}
             />
             <SettingsRow
               title="Prekeys"

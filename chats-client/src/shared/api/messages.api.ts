@@ -5,7 +5,7 @@ import type { MessageEnvelope } from '@velo/protocol';
 import type { X3DHInitPacket } from '../crypto/x3dh';
 import type { ReplyReference } from '../chat/types';
 
-export type HistoryProtoVersion = 3;
+export type HistoryProtoVersion = 4;
 
 export interface HistoryItem {
   serverMessageId: string;
@@ -15,8 +15,8 @@ export interface HistoryItem {
 
   protoVersion?: HistoryProtoVersion;
 
-  // v3 envelope (T2.5)
-  v3?: MessageEnvelope | null;
+  // v4 envelope (T3.6): encrypted header, opaque to the server
+  v4?: MessageEnvelope | null;
   initPacket?: X3DHInitPacket | null;
   replyTo?: ReplyReference | null;
 
@@ -52,9 +52,6 @@ export interface UndeliveredResponse {
 }
 
 export const messagesApi = {
-  /** `before`: older page (descending on the server). `after`: newer than the latest stored (ascending), T2.14 sync. */
-  getWithUser: (peerUserId: string, params?: { limit?: number; before?: number; after?: number }) =>
-    http.get<HistoryResponse>(`/messages/with/${peerUserId}`, { params }),
   markAsRead: (conversationId: string) =>
     http.post<{ ok: boolean; updatedCount: number }>(`/messages/mark-read/${conversationId}`),
 

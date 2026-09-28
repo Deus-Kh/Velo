@@ -1,8 +1,7 @@
 import type { MessageEnvelope, RatchetSessionV2 } from '@velo/protocol';
-import { decryptWithMessageKey, ratchetDecrypt, ratchetEncrypt } from '@velo/protocol';
+import { ratchetDecrypt, ratchetEncrypt } from '@velo/protocol';
 import { associatedDataFor } from '../crypto/associatedData';
 import { saveSession } from '../storage/sessionStore';
-import { getV2MessageKey } from '../storage/v2MessageKeyStore';
 
 /**
  * The only place the client touches the ratchet (T2.2).
@@ -48,27 +47,4 @@ export async function decryptAndPersist(params: {
   const step = ratchetDecrypt(params.session, params.encrypted, ad);
   await persistStep({ myUserId: params.myUserId, peerUserId: params.peerUserId, session: step.session });
   return { plaintext: step.plaintext, updatedSession: step.session };
-}
-
-/**
- * LEGACY (pre-T2.14 archive): open an envelope with a message key archived
- * before T2.14. Used only by the one-time migration that moves old server
- * history into the local store; new messages never have an archived key.
- */
-export async function decryptArchived(params: {
-  myUserId: string;
-  peerUserId: string;
-  direction: 'in' | 'out';
-  encrypted: MessageEnvelope;
-}): Promise<string | null> {
-  const mkB64 = await getV2MessageKey({
-    myUserId: params.myUserId,
-    peerUserId: params.peerUserId,
-    direction: params.direction,
-    dhPub: params.encrypted.header.dhPub,
-    n: params.encrypted.header.n,
-  });
-  if (!mkB64) return null;
-  const ad = await associatedDataFor({ myUserId: params.myUserId, peerUserId: params.peerUserId, direction: params.direction });
-  return decryptWithMessageKey({ messageKeyB64: mkB64, envelope: params.encrypted, ad });
 }

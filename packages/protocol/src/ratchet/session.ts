@@ -74,7 +74,7 @@ export function initInitiatorSession(params: {
 
   return {
     v: 3,
-    protoVersion: 3,
+    protoVersion: 4,
     peerUserId: params.peerUserId,
     rootKey,
     chainKeySend,
@@ -121,7 +121,7 @@ export function initResponderSession(params: {
 
   return {
     v: 3,
-    protoVersion: 3,
+    protoVersion: 4,
     peerUserId: params.peerUserId,
     rootKey: normalizeB64(params.sharedSecret),
     chainKeySend: null,

@@ -16,8 +16,8 @@ export type SendMessageDTO = {
   createdAt: number;
   /** T3.2: server-assigned per-conversation order. Ordering uses it; createdAt is display only. */
   seq?: number | null;
-  protoVersion?: 3;
-  v3?: MessageEnvelope | null;
+  protoVersion?: 4;
+  v4?: MessageEnvelope | null; // T3.6: encrypted header, opaque to the server
   initPacket?: X3DHInitPacket | null;
   replyTo?: ReplyReference | null;
 };
@@ -31,8 +31,8 @@ export type NewMessageDTO = {
   createdAt: number;
   /** T3.2: server-assigned per-conversation order. Ordering uses it; createdAt is display only. */
   seq?: number | null;
-  protoVersion?: 3;
-  v3?: MessageEnvelope | null;
+  protoVersion?: 4;
+  v4?: MessageEnvelope | null; // T3.6: encrypted header, opaque to the server
   initPacket?: X3DHInitPacket | null;
   replyTo?: ReplyReference | null;
   status?: 'sent' | 'delivered' | 'read' | 'failed';

@@ -38,7 +38,7 @@ export async function sendMessageV2(params: {
     peerUserId: params.toUserId,
   });
 
-  if (!session || session.protoVersion !== 3) {
+  if (!session || session.protoVersion !== 4) {
     throw new ProtocolError('NO_SESSION', 'No v2 session for this peer');
   }
 
@@ -53,8 +53,8 @@ export async function sendMessageV2(params: {
     toUserId: params.toUserId,
     clientMessageId: params.clientMessageId,
     createdAt: Date.now(),
-    protoVersion: 3,
-    v3: encrypted,
+    protoVersion: 4,
+    v4: encrypted,
     initPacket: params.initPacket ?? null,
     replyTo: params.replyTo ?? null,
   };
@@ -102,18 +102,18 @@ export async function subscribeToMessages(onMessage: (m: {
         return;
       }
 
-      if (msg.protoVersion !== 3) {
+      if (msg.protoVersion !== 4) {
         throw new Error(`Unsupported realtime protoVersion: ${String(msg.protoVersion)}`);
       }
 
-      if (!msg.v3) throw new Error('Missing v3 payload');
+      if (!msg.v4) throw new Error('Missing v4 payload');
 
       // T2.11: bootstrap (if needed) and decrypt; nothing is persisted unless the message decrypts.
       const { plaintext } = await receiveIncoming({
         myUserId,
         peerUserId: msg.fromUserId,
         initPacket: msg.initPacket ?? null,
-        encrypted: msg.v3,
+        encrypted: msg.v4,
       });
       
       onMessage({

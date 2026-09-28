@@ -62,7 +62,7 @@ describe('kdfRootKey', () => {
 describe('session initialisation (spec §8.1, T2.0)', () => {
   it('initiator: RK from KDF_RK(SK, DH(DHs, SPK_B)), sending chain only, DHr = SPK_B', () => {
     const a = initInitiatorSession({ headerKeyA: HK_A, nextHeaderKeyB: NHK_B, peerUserId: 'b', sharedSecret, theirSignedPreKeyPublicKey: spkB.publicKey, dhs: dhsA0 });
-    expect(a).toMatchObject({ v: 3, protoVersion: 3, peerUserId: 'b', Ns: 0, Nr: 0, PN: 0, skippedKeys: {}, chainKeyRecv: null });
+    expect(a).toMatchObject({ v: 3, protoVersion: 4, peerUserId: 'b', Ns: 0, Nr: 0, PN: 0, skippedKeys: {}, chainKeyRecv: null });
     // T3.6 header keys: HKs = shared_hka, NHKr = shared_nhkb, NHKs from KDF_RK_HE, HKr none yet.
     expect(a.headerKeySend).toBe(HK_A);
     expect(a.nextHeaderKeyRecv).toBe(NHK_B);
@@ -83,7 +83,7 @@ describe('session initialisation (spec §8.1, T2.0)', () => {
 
   it('responder: RK = SK, DHs = copied SPK pair, no chains, DHr null', () => {
     const b = initResponderSession({ headerKeyA: HK_A, nextHeaderKeyB: NHK_B, peerUserId: 'a', sharedSecret, signedPreKey: spkB });
-    expect(b).toMatchObject({ v: 3, protoVersion: 3, peerUserId: 'a', Ns: 0, Nr: 0, PN: 0, skippedKeys: {} });
+    expect(b).toMatchObject({ v: 3, protoVersion: 4, peerUserId: 'a', Ns: 0, Nr: 0, PN: 0, skippedKeys: {} });
     // T3.6: the responder mirrors the seeds: NHKs = shared_nhkb, NHKr = shared_hka, no header chain yet.
     expect(b.nextHeaderKeySend).toBe(NHK_B);
     expect(b.nextHeaderKeyRecv).toBe(HK_A);

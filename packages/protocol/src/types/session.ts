@@ -1,5 +1,5 @@
-/** Wire version the session speaks (spec §8.2). v1 was removed; v2 sessions are discarded on load. */
-export type ProtoVersion = 3;
+/** Wire version the session speaks (spec §8.2): 4 since T3.6 (header encryption). Older sessions are discarded on load. */
+export type ProtoVersion = 4;
 
 export type AnySession = RatchetSessionV2;
 
@@ -17,7 +17,7 @@ export type AnySession = RatchetSessionV2;
  */
 export interface RatchetSessionV2 {
   v: 3;
-  protoVersion: 3;
+  protoVersion: 4;
   peerUserId: string;
 
   rootKey: string; // base64, 32 bytes

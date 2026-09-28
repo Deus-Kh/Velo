@@ -582,7 +582,7 @@ export default function ChatListScreen({
           // here (the open chat handles its own), then notified: sender name from local
           // data, text only if the user enabled previews (pushPolicy decides).
           const isCurrentChatOpen = activeChatPeerUserId === evt.fromUserId;
-          if (!isCurrentChatOpen && myUserId && evt.protoVersion === 3 && evt.v3) {
+          if (!isCurrentChatOpen && myUserId && evt.protoVersion === 4 && evt.v4) {
             ingestLiveMessage({
               myUserId,
               item: {
@@ -590,8 +590,8 @@ export default function ChatListScreen({
                 conversationId: evt.conversationId,
                 fromUserId: String(evt.fromUserId),
                 toUserId: String(evt.toUserId ?? myUserId),
-                protoVersion: 3,
-                v3: evt.v3,
+                protoVersion: 4,
+                v4: evt.v4,
                 initPacket: evt.initPacket ?? null,
                 replyTo: evt.replyTo ?? null,
                 clientMessageId: String(evt.clientMessageId ?? ''),

@@ -121,7 +121,7 @@ What a user can actually do today: 1:1 text with replies, receipts, typing, pres
 | Double Ratchet (DH step) | ✅ | ✅ | ❌ | ❌ never fires | ✅ T2.0 |
 | Post-compromise security | ✅ | ✅ | ❌ | ❌ | ✅ T2.0 |
 | AEAD with header + identity AD | ✅ | ✅ | ✅ | ❌ | ✅ T2.5 |
-| Header encryption | ✅ | ✅ | — | ❌ | ⚠️ only if on schedule (T3.6) |
+| Header encryption | ✅ | ✅ | — | ✅ wire v4: header sealed under HKs/NHKs, trial decryption (T3.6) | done |
 | Forward secrecy at rest | ✅ | ✅ | ⚠️ | ✅ keys deleted with the step, plaintext sealed locally (T2.14) | done |
 | Safety numbers | ✅ | ✅ | ✅ | ✅ libsignal numeric fingerprint over both keys, enforced (T2.13) | done |
 | Signed prekey rotation | ✅ | ✅ | — | ✅ 7-day rotation, 30-day retention, tagged signature (T2.10) | done |
@@ -270,7 +270,7 @@ Fix: XChaCha20-Poly1305 with `AD = IK_A || IK_B || canonicalHeader` (decision D3
 
 **P1-7 · Message keys retained forever** — **superseded by P1-10.** The 30-day window from v1 remains only as the fallback if T2.14 slips.
 
-**P1-8 · No header encryption** `[PARITY]` — server reads `n`, `pn`, `dhPub`. Only if on schedule. → T3.6
+**P1-8 · No header encryption** `[PARITY]` — server reads `n`, `pn`, `dhPub`. Only if on schedule. → T3.6 — **fixed 2026-09-28 (wire v4; the server sees three opaque strings)**
 
 **P1-9 · Push has no client handler; iOS unconfigured; payload leaks sender and pair; token pruning bug; preview toggle is a no-op** `[PARITY]` *(new)*
 No `setBackgroundMessageHandler`/`onMessage`/tap handler exists. Server `notification.title` is the sender's username and `data.conversationId` is the participant pair (`push/firebase.ts:69,85-90`). Any FCM error deletes the token (107–109).
@@ -432,6 +432,8 @@ Extraction happens in T2.1. Secrets (`*.pem`, `*.keystore`, service-account JSON
 
 **3' progress — T3.5 done 2026-09-28** (one commit): the X3DH IKM builder takes an optional trailing KEM shared secret (PQXDH's exact shape), the bundle and init-packet schemas carry the PQ slots as `null`/absent, no wire bump. PQXDH proper stays a post-defense item (month 7). Next in order: T3.6 (header encryption) **only if weeks 9–11 are on schedule**; otherwise Phase 4'.
 
+**3' progress — T3.6 done 2026-09-28** (four commits, wire v4): header keys from the root KDF and X3DH, headers sealed on the wire, trial decryption on receipt, the server blind to counters and ratchet keys; the pre-T2.14 archive migration and the legacy history route retired with the bump. **Phase 3' is complete.** Next: Phase 4' (ops essentials), starting with T4.1.
+
 **2b progress — T2.14 done 2026-09-28** (one commit, D7 = A): plaintext stored locally in sealed records, message keys never archived, history read from the device with the server asked only for newer messages, one-time migration of the old archive. **The known-red registry is empty: every scenario the harness owns is green.** Remaining in Phase 2: T2.12 (manual two-device checklist, owner).
 
 **2b progress — T2.11 done 2026-09-28** (two commits): bootstrap persists only after the first message decrypts, bootstrap replay refused, glare converges on the lower user id without losing messages, a peer's local reset is adopted automatically. Next in order: T2.14.
@@ -467,7 +469,7 @@ Extraction happens in T2.1. Secrets (`*.pem`, `*.keystore`, service-account JSON
 | T3.3 Push done right | Data-only payload; background handler; notifee render; tap deep-link; iOS APNs; token-prune fix; honest preview toggle. **Done for Android 2026-09-28; iOS parked** | 3d |
 | T3.4 Key zeroization + replay window + no-mutation-before-auth audit | `fill(0)`; typed `REPLAY_DETECTED` vs `UNKNOWN_OLD_MESSAGE`. **Done 2026-09-28** (DEVIATION-8: best-effort in JavaScript) | 2d |
 | T3.5 PQ-readiness | Handshake IKM accepts a KEM secret without another wire bump. **Done 2026-09-28** | 1d |
-| T3.6 Header encryption (P1-8) | **Only if weeks 9–11 are on schedule**; otherwise documented | 5d |
+| T3.6 Header encryption (P1-8) | **Only if weeks 9–11 are on schedule**; otherwise documented. **Done 2026-09-28** (schedule condition met: T3.1–T3.5 landed on day one of the phase) | 5d |
 | T2.14 if slid | Local encrypted DB | 4d |
 
 ### PHASE 4' — Ops essentials · weeks 12–13 · `[CORE]`

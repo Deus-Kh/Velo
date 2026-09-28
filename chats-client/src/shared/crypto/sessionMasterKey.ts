@@ -2,7 +2,8 @@ import nacl from 'tweetnacl';
 import * as Keychain from 'react-native-keychain';
 import { encodeBase64, decodeBase64 } from 'tweetnacl-util';
 
-function service(userId: string) {
+/** Keychain service of the per-user session master key (exported for the settings diagnostics). */
+export function sessionMasterKeyService(userId: string) {
   return `session-mk:${userId}`;
 }
 
@@ -20,7 +21,7 @@ function service(userId: string) {
  * ignores the option; Keystore-backed storage applies there.
  */
 export async function getOrCreateSessionMasterKey(userId: string): Promise<Uint8Array> {
-  const creds = await Keychain.getGenericPassword({ service: service(userId) });
+  const creds = await Keychain.getGenericPassword({ service: sessionMasterKeyService(userId) });
   if (creds !== false && creds?.password) {
     const mk = decodeBase64(creds.password);
     if (mk.length === 32) return mk;
@@ -28,7 +29,7 @@ export async function getOrCreateSessionMasterKey(userId: string): Promise<Uint8
 
   const mk = nacl.randomBytes(32);
   await Keychain.setGenericPassword('session-mk', encodeBase64(mk), {
-    service: service(userId),
+    service: sessionMasterKeyService(userId),
     accessible: Keychain.ACCESSIBLE.WHEN_UNLOCKED_THIS_DEVICE_ONLY,
   });
   return mk;

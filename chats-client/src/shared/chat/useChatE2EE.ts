@@ -20,7 +20,7 @@ import { deleteSession } from '../storage/sessionStore';
 import { protocolErrorCode, type ProtocolErrorCode } from '@velo/protocol';
 import { acceptNewIdentity as acceptNewIdentityForPair } from '../crypto/identityTrust';
 import { listStoredMessages, upsertStoredMessage, type StoredMessage } from '../storage/messageStore';
-import { migrateArchivedHistory, syncNewerFromServer } from './historySync';
+import { syncNewerFromServer } from './historySync';
 import { classifyPendingMessageError } from './protocolErrors';
 import { makeConversationId } from '../utils/conversation';
 import type { ReplyReference } from './types';
@@ -437,14 +437,8 @@ export function useChatE2EE(peerUserId: string) {
       setHistoryLoading(true);
       const me = String(myUserId);
       try {
-        // T2.14: history lives on the device. One-time migration of the pre-T2.14 archive, then
-        // the newest page from the store, then only what the server holds beyond it.
-        try {
-          await migrateArchivedHistory({ myUserId: me, peerUserId });
-        } catch (e) {
-          console.warn('History migration failed:', e);
-        }
-
+        // T2.14: history lives on the device: the newest page from the store, then only what
+        // the server still holds beyond it (the pre-T2.14 archive migration ended with wire v4).
         const page = await listStoredMessages({ myUserId: me, peerUserId, limit: PAGE_SIZE });
         if (!cancelled) {
           if (page.length > 0) oldestCreatedAtRef.current = page[0]!.createdAt;

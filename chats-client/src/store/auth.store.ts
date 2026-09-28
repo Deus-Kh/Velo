@@ -30,7 +30,6 @@ import { keysApi } from '../shared/api/keys.api';
 import { ensureIdentityKeyPairForUser, getIdentitySecretKeyBytesForUser } from '../shared/crypto/identityKeys';
 import { signIdentityBinding } from '@velo/protocol';
 import { ensurePreKeysForUser, topUpOneTimePreKeysIfNeeded } from '../shared/crypto/prekeys';
-import { getOrCreateHistoryMasterKey } from '../shared/crypto/historyMasterKey';
 import {
   getNotificationPreferencesForUser,
   useNotificationPreferencesStore,
@@ -107,13 +106,6 @@ async function bootstrapAfterAuth(userId: string, token: string) {
     await keysApi.uploadIdentity({ identitySignPublicKey, identityDhPublicKey, identityBindingSignature });
   } catch (e) {
     console.warn('Identity setup failed:', e);
-  }
-
-  // 1.5) History master key for at-rest protection
-  try {
-    await getOrCreateHistoryMasterKey(userId);
-  } catch (e) {
-    console.warn('History master key setup failed:', e);
   }
 
   // 2) PreKeys (SignedPreKey + One-time PreKeys)

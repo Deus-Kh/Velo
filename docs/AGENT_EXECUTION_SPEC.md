@@ -664,6 +664,8 @@ Implement §8.1 step 2 exactly. `pn` is read in exactly one place.
 
 **T3.4 status 2026-09-28: done** (three commits). (1) **Replay window:** a session remembers the last `REPLAY_WINDOW = 256` consumed message ids (`recentlyReceived`, `dhPub:n`, oldest first). A second copy of one of them is `REPLAY_DETECTED` whatever its epoch; an old counter outside the window, or a skipped key that was evicted, is `UNKNOWN_OLD_MESSAGE` (before, an evicted skipped key on the current chain read as a replay and a replay from an evicted epoch read as unknown). Both are refused before any derivation. (2) **Zeroization:** `primitives/zeroize.ts` `wipe()`; every intermediate the protocol derives is zeroed as soon as the step no longer needs it, on success and on failure (`try/finally`): chain and message keys in both ratchet steps, the HKDF blocks in `kdfRootKey` and `expandMessageKey` (copied out, then zeroed), DH outputs, root-key bytes and private-key bytes in `dhRatchet` and in session initialisation, the DH outputs, the IKM and the HKDF block in X3DH, the initiator's ephemeral secret, and in the envelope the expanded cipher key, MAC key, nonce and the decrypted plaintext bytes; `sealMessage`/`openMessage` consume the message key they are given. **No key material leaves a step:** `derivedKeys` is gone from both step results (nothing needed it since T2.14). DEVIATION-8 records the JavaScript limits. (3) **Mutation audit:** `test/audit.noMutationBeforeAuth.test.ts` deep-freezes the session and envelope and runs every refusal class (bad MAC, re-attributed identities, replay, counter out of range, gap too large, unknown ratchet key, old counter with no key) plus the success paths of encrypt, decrypt and `dhRatchet`: a write into an input would surface as a `TypeError` instead of the `ProtocolError`, and the inputs equal their snapshots afterwards. **S28** does the same end to end: for each refusal class on the wire, the recipient's serialized store is byte-identical before and after and the server still holds the message (no delivered ack). Client persist sites audited (all after the pure step returns): `ratchetAdapter.persistStep` → `saveSession`; `incoming.ts` → `saveSecondarySession`, then `deleteOneTimePreKeySecret` and `markBootstrapSeen` only after the session is persisted; `historySync.ingestUndeliveredItems` → `upsertStoredMessage` then the delivered ack; the initiator's own session is saved on send (`sessionStore.ts`, no inbound authentication involved).
 
+**T3.6 status 2026-09-28: done** (four commits, wire v4). Protocol: `KDF_RK_HE` (96 bytes: RK ‖ CK ‖ NHK; first 64 unchanged), X3DH expands 128 bytes (`SK ‖ ck ‖ HK_A ‖ NHK_B`; first 64 unchanged, libsignal vectors green), session format v3 with `HKs/HKr/NHKs/NHKr` and `epochHeaderKeys` (previous epochs' HKr kept with their skipped keys, pruned together), `initInitiatorSession`/`initResponderSession` are RatchetInitAliceHE/BobHE, `dhRatchet` is DHRatchetHE. Wire v4: `{encHeader, ciphertext, mac}`, `sealHeader`/`openHeader` (random 24-byte nonce, fixed 85-byte size), MAC over `IK_A ‖ IK_B ‖ encHeader ‖ ciphertext`; receiving trial-decrypts the header under HKr, NHKr, then retained previous-epoch keys; a header that opens under none is `DECRYPT_FAILED` (a modified header and a message of an unknown session are indistinguishable, and an epoch evicted with its header key is unrecognisable; within retained epochs `REPLAY_DETECTED` / `UNKNOWN_OLD_MESSAGE` stay precise). The encrypt step returns the plaintext header for the sender's bookkeeping. Server: protoVersion 4 only, `v4` payload, encrypted header validated by size, counters no longer visible; the legacy history route is gone. Client: v4 everywhere, `v3` sessions discarded on load, the pre-T2.14 archive migration, `v2MessageKeyStore` and the history master key removed (the settings diagnostics now report the session master key and the stored-message count). Harness: `sentHeader`, `flipEncHeader` / `resealHeader` / `alienHeader`; S13, S14, S18, S26, S28 re-cut; frozen vectors re-pinned with an injected header nonce. What the server learns per message now: sender, recipient, time, size, and the optional `initPacket` on a session-creating message; sealed sender remains the next step (§10).
+
 **T3.5 status 2026-09-28: done** (one commit). The X3DH IKM builder takes an optional trailing KEM shared secret: `IKM := 0xFF×32 ‖ DH1 ‖ DH2 ‖ DH3 [‖ DH4] [‖ SS]`, which is exactly PQXDH's `F ‖ DH1..DH4 ‖ SS`; `x3dhInitiate` / `x3dhRespond` accept `kemSharedSecret` (32 bytes, `KEM_SHARED_SECRET_LENGTH`, wiped after use), both sides must supply the same one, and without it the derivation is byte-identical to before (the libsignal vectors still pass). Schema slots: `PreKeyBundle.pqPreKey` (`{keyId, kind: 'ml-kem-768' | 'ml-kem-1024', publicKey, signature}` or `null`; the server serves `null`, the harness too) and `X3DHInitPacket.pqPreKeyId` / `kemCiphertext` (absent today; the Message model stores them if ever sent). **No wire bump:** nothing PQ leaves the handshake until a client encapsulates, and that day is a wire bump (§8.2) plus `@noble/post-quantum`, not a schema migration. Tests: a bundle with `pqPreKey: null` derives the classical keys and emits no PQ field; with a KEM secret both sides agree and the keys differ from classical; a responder without the secret gets the classical keys, never the PQ ones; wrong length is `INVALID_KEY_LENGTH`; the secret is consumed.
 
 ---
@@ -691,67 +693,82 @@ Implement §8.1 step 2 exactly. `pn` is read in exactly one place.
 ## 8.1 Normative ratchet algorithm (replaces v1 §8.1)
 
 ```
-// ───────── Initialisation (T2.0) ─────────
-initInitiatorSession(SK, spkB_pub):        initResponderSession(SK, spkB_pair):
-  RK  := SK                                   RK  := SK
-  DHs := fresh X25519 pair                    DHs := spkB_pair          // copied into the session
-  DHr := spkB_pub                             DHr := null
-  RK, CKs := KDF_RK(RK, DH(DHs, DHr))         CKs := null
-  CKr := null                                 CKr := null
-  Ns := Nr := PN := 0                         Ns := Nr := PN := 0
-  skippedKeys := {}; skippedEpochOrder := []
+// ───────── Initialisation (T2.0; header-encryption variant since T3.6) ─────────
+// X3DH (T2.9, T3.6) → SK ‖ ck ‖ HK_A ‖ NHK_B  (HKDF "WhisperText", 128 bytes; first 64 = libsignal)
+initInitiatorSession(SK, HK_A, NHK_B, spkB_pub):     initResponderSession(SK, HK_A, NHK_B, spkB_pair):
+  RK  := SK                                              RK  := SK
+  DHs := fresh X25519 pair                               DHs := spkB_pair          // copied into the session
+  DHr := spkB_pub                                        DHr := null
+  RK, CKs, NHKs := KDF_RK_HE(RK, DH(DHs, DHr))           CKs := CKr := null
+  CKr := null                                            HKs := null; HKr := null
+  HKs := HK_A; HKr := null; NHKr := NHK_B                NHKs := NHK_B; NHKr := HK_A
+  Ns := Nr := PN := 0                                    Ns := Nr := PN := 0
+  skippedKeys := {}; skippedEpochOrder := []; epochHeaderKeys := {}; recentlyReceived := []
 
-// ───────── Encrypt ─────────
+// KDF_RK_HE(RK, dh) := HKDF-SHA256(salt = RK, ikm = dh, info = "WhisperRatchet", 96) → RK ‖ CK ‖ NHK
+// (the first 64 bytes are Signal's KDF_RK; libsignal vectors unchanged)
+
+// ───────── Encrypt (RatchetEncryptHE) ─────────
 ratchetEncrypt(session, plaintext, AD):
   work := clone(session)
   mk, work.CKs := KDF_CK(work.CKs)
   header := { dhPub: work.DHs.pub, pn: work.PN, n: work.Ns }
+  encHeader := nonce ‖ secretbox(canonicalHeader(header), nonce, work.HKs)   // nonce random, 24 bytes
   work.Ns += 1
-  envelope := aeadSeal(mk, nonce, plaintext, AD || canonicalHeader(header))
-  return { work, envelope, derivedKeys: [] }          // keys are NOT archived (T2.14)
+  envelope := { encHeader, ciphertext, mac } with
+    ciphertext := secretbox(plaintext, nonce(mk), cipherKey(mk))
+    mac        := HMAC-SHA256(macKey(mk), IK_A ‖ IK_B ‖ encHeader ‖ ciphertext)[0..16)
+  return { work, envelope, header }                    // keys are NOT archived (T2.14); no key material leaves (T3.4)
 
-// ───────── Decrypt ─────────
+// ───────── Decrypt (RatchetDecryptHE) ─────────
 ratchetDecrypt(session, envelope, AD):
-  header := envelope.header
-  work   := clone(session)                            // never mutate the input (R7)
+  work := clone(session)                            // never mutate the input (R7)
+
+  // 0. the header must open under a key this session knows (T3.6)
+  header, epoch := open(HKr) → 'current' | open(NHKr) → 'next' | open(epochHeaderKeys[e]) → 'previous'
+  if none opens: throw DECRYPT_FAILED               // modified header, or a session we do not have
+  a header under a known key must name that key's epoch, else DECRYPT_FAILED
 
   // 1. skipped-key fast path
   id := skippedKeyId(header.dhPub, header.n)
   if work.skippedKeys[id] exists:
       mk := work.skippedKeys[id]
-      plaintext := aeadOpen(mk, envelope, AD || canonicalHeader(header))
-      if plaintext is null: throw DECRYPT_FAILED       // keep the key
-      delete work.skippedKeys[id]
-      return { work, plaintext }
+      plaintext := aeadOpen(mk, envelope, AD ‖ encHeader)
+      if plaintext is null: throw DECRYPT_FAILED    // keep the key
+      delete work.skippedKeys[id]; remember id in recentlyReceived (T3.4)
+      return { work, plaintext, header }
+  if id in work.recentlyReceived: throw REPLAY_DETECTED           // (T3.4)
+  if epoch == 'previous': throw UNKNOWN_OLD_MESSAGE               // its keys were evicted
 
-  // 2. DH ratchet if the peer key is new — ALWAYS ratchet, never merely adopt (R13)
-  if work.DHr == null OR work.DHr != header.dhPub:
-      if work.DHr != null:                             // an old receiving chain exists
-          work := skipMessageKeys(work, work.DHr, header.pn)     // (T2.8)
-      work := dhRatchet(work, header.dhPub)            // (T2.0) — must NOT clear skippedKeys (T2.7)
+  // 2. new epoch: drain the old chain to header.pn, then ALWAYS ratchet (R13)
+  if epoch == 'next':
+      if work.DHr != null: work := skipMessageKeys(work, work.DHr, header.pn)   // (T2.8)
+      work := dhRatchet(work, header.dhPub)                                     // (T2.0, T3.6)
 
   // 3. fill the gap on the current receiving chain
+  if header.n < work.Nr: throw UNKNOWN_OLD_MESSAGE
   work := skipMessageKeys(work, header.dhPub, header.n)
 
   // 4. derive the target key
-  assert work.Nr == header.n
   mk, nextCK := KDF_CK(work.CKr)
 
   // 5. authenticate — NOTHING above this line may be persisted
-  plaintext := aeadOpen(mk, envelope, AD || canonicalHeader(header))
-  if plaintext is null: throw DECRYPT_FAILED
+  plaintext := aeadOpen(mk, envelope, AD ‖ encHeader)
+  if plaintext is null: throw DECRYPT_FAILED (or HEADER_TAMPERED when the payload opens but the MAC fails)
 
   // 6. commit
-  work.CKr := nextCK; work.Nr := header.n + 1
-  work := pruneSkippedKeys(work)
-  return { work, plaintext }
+  work.CKr := nextCK; work.Nr := header.n + 1; remember id in recentlyReceived
+  work := pruneSkippedKeys(work)                    // also prunes epochHeaderKeys with the epochs
+  return { work, plaintext, header }
 
-dhRatchet(work, dhPub):
+dhRatchet(work, dhPub):                             // DHRatchetHE
   work.PN := work.Ns; work.Ns := 0; work.Nr := 0
+  work.HKs := work.NHKs; work.HKr := work.NHKr
+  if work.DHr != null: work.epochHeaderKeys[work.DHr] := old HKr   // late messages of the epoch being left
   work.DHr := dhPub
-  work.RK, work.CKr := KDF_RK(work.RK, DH(work.DHs, work.DHr))
+  work.RK, work.CKr, work.NHKr := KDF_RK_HE(work.RK, DH(work.DHs, work.DHr))
   work.DHs := fresh X25519 pair
-  work.RK, work.CKs := KDF_RK(work.RK, DH(work.DHs, work.DHr))
+  work.RK, work.CKs, work.NHKs := KDF_RK_HE(work.RK, DH(work.DHs, work.DHr))
   push dhPub onto work.skippedEpochOrder
   return work
 
@@ -773,8 +790,8 @@ skipMessageKeys(work, dhPub, until):
 |---|---|---|---|
 | 1 | removed | legacy shared-secret | pre-history |
 | 2 | removed 2026-09-28 | `{header:{n,pn,dhPub}, nonce, ciphertext}` + optional `initPacket`; header unauthenticated; non-standard bootstrap | Open Beta 0.1 |
-| 3 | **current** | `{header:{n,pn,dhPub}, ciphertext, mac}` + optional `initPacket` on the session-creating message. Standard bootstrap (T2.0, `WhisperRatchet`), message keys expanded with `WhisperMessageKeys` into cipher key + MAC key + derived nonce (no nonce on the wire), MAC-SHA256 over `IK_sign_sender || IK_sign_receiver || canonicalHeader || ciphertext` truncated to 16 bytes, secretbox payload (D3 = C, no new primitive), identity binding in bundles and identity lookups (T2.13). Signed-prekey signature over `keyId || pub` with a domain tag landed with T2.10. **One bump, one migration: all existing sessions reset.** | T2.0–T2.13, 2026-09-28 |
-| 4 | Phase 3' | header encrypted under `HKs`/`NHKs` (T3.6, conditional) | T3.6 |
+| 3 | removed 2026-09-28 | `{header:{n,pn,dhPub}, ciphertext, mac}` + optional `initPacket` on the session-creating message. Standard bootstrap (T2.0, `WhisperRatchet`), message keys expanded with `WhisperMessageKeys` into cipher key + MAC key + derived nonce (no nonce on the wire), MAC-SHA256 over `IK_sign_sender || IK_sign_receiver || canonicalHeader || ciphertext` truncated to 16 bytes, secretbox payload (D3 = C, no new primitive), identity binding in bundles and identity lookups (T2.13). Signed-prekey signature over `keyId || pub` with a domain tag landed with T2.10. **One bump, one migration: all existing sessions reset.** | T2.0–T2.13, 2026-09-28 |
+| 4 | **current** | `{encHeader, ciphertext, mac}` + optional `initPacket`. Header encryption (Double Ratchet §4): the header `{n, pn, dhPub}` is sealed under the sender's header key (`nonce ‖ secretbox(canonicalHeader)`, 85 bytes), header keys come from `KDF_RK_HE` (96-byte `WhisperRatchet` expansion, prefix-stable with libsignal) and X3DH's 128-byte `WhisperText` expansion (`SK ‖ ck ‖ HK_A ‖ NHK_B`); MAC over `IK_sign_sender ‖ IK_sign_receiver ‖ encHeader ‖ ciphertext`. The server sees three opaque strings (P1-8). Session format v3. **One bump, one migration: all existing sessions reset; the pre-T2.14 archive migration and `/messages/with/:userId` are gone.** | T3.6, 2026-09-28 |
 
 Every bump: update this table, the server validator, `Message.ts`, and the client's supported-versions constant.
 
