@@ -4,6 +4,7 @@ import { ProtocolError } from '../errors';
 import { normalizeB64 } from '../primitives/base64';
 import type { RatchetSessionV2 } from '../types/session';
 import { kdfRootKey } from './root';
+import { wipe } from '../primitives/zeroize';
 
 /** True once the session has decrypted anything from the peer (a receiving chain exists). */
 export function sessionHasReceived(session: RatchetSessionV2): boolean {
@@ -56,14 +57,20 @@ export function initInitiatorSession(params: {
   const dhsPriv = requireKey(dhs.privateKey, 'DHsPrivateKey');
   const dhr = requireKey(params.theirSignedPreKeyPublicKey, 'theirSignedPreKeyPublicKey');
 
-  const { newRootKey, newChainKey } = kdfRootKey({ rootKey: sk, dhOut: nacl.scalarMult(dhsPriv, dhr) });
+  const dhOut = nacl.scalarMult(dhsPriv, dhr);
+  wipe(dhsPriv);
+  const { newRootKey, newChainKey } = kdfRootKey({ rootKey: sk, dhOut });
+  wipe(sk, dhOut);
+  const rootKey = encodeBase64(newRootKey);
+  const chainKeySend = encodeBase64(newChainKey);
+  wipe(newRootKey, newChainKey); // T3.4
 
   return {
     v: 2,
     protoVersion: 3,
     peerUserId: params.peerUserId,
-    rootKey: encodeBase64(newRootKey),
-    chainKeySend: encodeBase64(newChainKey),
+    rootKey,
+    chainKeySend,
     chainKeyRecv: null,
     Ns: 0,
     Nr: 0,
@@ -90,8 +97,8 @@ export function initResponderSession(params: {
   sharedSecret: string; // base64 32 bytes, the X3DH root key
   signedPreKey: DhKeyPairB64; // our SPK pair the initiator used
 }): RatchetSessionV2 {
-  requireKey(params.sharedSecret, 'sharedSecret');
-  requireKey(params.signedPreKey.privateKey, 'signedPreKey.privateKey');
+  wipe(requireKey(params.sharedSecret, 'sharedSecret'));
+  wipe(requireKey(params.signedPreKey.privateKey, 'signedPreKey.privateKey'));
   requireKey(params.signedPreKey.publicKey, 'signedPreKey.publicKey');
 
   return {

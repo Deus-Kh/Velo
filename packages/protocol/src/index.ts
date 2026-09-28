@@ -7,7 +7,8 @@
  *
  * T2.1 moved the pure modules here unchanged (session creation split into a
  * pure builder). T2.2 made the ratchet steps pure: they return the next
- * session and the derived keys, and the client adapter persists them. T2.4
+ * session, and the client adapter persists it (T3.4: no key material leaves
+ * a step; every intermediate key is wiped). T2.4
  * moved the X3DH math here; the client keeps only the I/O wrappers. T2.0
  * replaced the HKDF directional split with the standard Double Ratchet
  * initialisation (initInitiatorSession / initResponderSession).
@@ -26,6 +27,7 @@ export { normalizeB64 } from './primitives/base64';
 export { encodeKey, decodeKey } from './primitives/encoding';
 export { utf8Encode, utf8Decode } from './primitives/utf8';
 export { sha256Bytes, hmacSha256, hkdfSha256 } from './primitives/kdf';
+export { wipe } from './primitives/zeroize';
 
 export { chainKdf, type ChainStep } from './ratchet/chain';
 export { kdfRootKey } from './ratchet/root';
@@ -41,7 +43,6 @@ export {
   type AssociatedData,
   type V2Header,
   type V2Encrypted,
-  type DerivedMessageKey,
   type RatchetEncryptResult,
   type RatchetDecryptResult,
 } from './ratchet/message';

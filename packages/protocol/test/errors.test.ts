@@ -1,3 +1,4 @@
+import { chainKdf } from '../src/ratchet/chain';
 import { readdirSync, readFileSync, statSync } from 'fs';
 import { join } from 'path';
 import nacl from 'tweetnacl';
@@ -144,7 +145,8 @@ describe('throw sites map to the taxonomy', () => {
     }
     expect(isProtocolError(caught)).toBe(true);
     const ctx = JSON.stringify((caught as ProtocolError).context);
-    for (const secret of [a.chainKeySend!, a.rootKey, b.rootKey, e.derivedKeys[0]!.messageKeyB64]) {
+    const mkB64 = encodeBase64(chainKdf(decodeBase64(a.chainKeySend!)).messageKey);
+    for (const secret of [a.chainKeySend!, a.rootKey, b.rootKey, mkB64]) {
       expect(ctx).not.toContain(secret);
       expect(ctx).not.toContain(Array.from(decodeBase64(secret), (x) => x.toString(16).padStart(2, '0')).join(''));
     }

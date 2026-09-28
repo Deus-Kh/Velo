@@ -4,6 +4,7 @@ import { ProtocolError } from '../errors';
 import { normalizeB64 } from '../primitives/base64';
 import { hmacSha256 } from '../primitives/kdf';
 import { utf8Decode, utf8Encode } from '../primitives/utf8';
+import { wipe } from '../primitives/zeroize';
 import { canonicalHeaderBytes, WIRE_VERSION, type MessageHeader } from './header';
 import { expandMessageKey } from './messageKeys';
 
@@ -60,13 +61,20 @@ function computeMac(macKey: Uint8Array, adBytes: Uint8Array, ciphertext: Uint8Ar
  *   (cipherKey, macKey, nonce) := expandMessageKey(mk)
  *   ciphertext := secretbox(plaintext, nonce, cipherKey)
  *   mac := HMAC-SHA256(macKey, AD ‖ ciphertext)[0..16)
+ * T3.4: consumes `messageKey` — the caller's buffer and every expanded key
+ * are zeroed before this returns.
  */
 export function sealMessage(params: { messageKey: Uint8Array; header: MessageHeader; plaintext: string; ad: AssociatedData }): MessageEnvelope {
   const keys = expandMessageKey(params.messageKey);
-  const adBytes = associatedDataBytes(params.ad, params.header);
-  const ciphertext = nacl.secretbox(utf8Encode(params.plaintext), keys.nonce, keys.cipherKey);
-  const mac = computeMac(keys.macKey, adBytes, ciphertext);
-  return { header: params.header, ciphertext: encodeBase64(ciphertext), mac: encodeBase64(mac) };
+  wipe(params.messageKey);
+  try {
+    const adBytes = associatedDataBytes(params.ad, params.header);
+    const ciphertext = nacl.secretbox(utf8Encode(params.plaintext), keys.nonce, keys.cipherKey);
+    const mac = computeMac(keys.macKey, adBytes, ciphertext);
+    return { header: params.header, ciphertext: encodeBase64(ciphertext), mac: encodeBase64(mac) };
+  } finally {
+    wipe(keys.cipherKey, keys.macKey, keys.nonce);
+  }
 }
 
 /**
@@ -78,40 +86,48 @@ export function sealMessage(params: { messageKey: Uint8Array; header: MessageHea
  * DECRYPT_FAILED. A tampered `dhPub` or `n` changes which key is derived,
  * so it lands in the second class; a tampered `pn` or a re-attributed
  * sender/receiver lands in the first.
+ * T3.4: consumes `messageKey`; the expanded keys and the plaintext bytes
+ * are zeroed before this returns, on success and on failure.
  */
 export function openMessage(params: { messageKey: Uint8Array; envelope: MessageEnvelope; ad: AssociatedData }): string {
   const { envelope } = params;
   const keys = expandMessageKey(params.messageKey);
-  const adBytes = associatedDataBytes(params.ad, envelope.header);
-  const ciphertext = decodeBase64(normalizeB64(envelope.ciphertext));
-  let mac: Uint8Array;
+  wipe(params.messageKey);
+  let plain: Uint8Array | null = null;
   try {
-    mac = decodeBase64(normalizeB64(envelope.mac ?? ''));
-  } catch {
-    mac = new Uint8Array(0);
-  }
-
-  const expected = computeMac(keys.macKey, adBytes, ciphertext);
-  const macOk = mac.length === MAC_LENGTH && nacl.verify(mac, expected);
-  const plain = nacl.secretbox.open(ciphertext, keys.nonce, keys.cipherKey);
-
-  if (!macOk) {
-    if (plain) {
-      throw new ProtocolError('HEADER_TAMPERED', 'Message authentication failed: header or identities modified', {
-        n: envelope.header.n,
-        pn: envelope.header.pn,
-      });
+    const adBytes = associatedDataBytes(params.ad, envelope.header);
+    const ciphertext = decodeBase64(normalizeB64(envelope.ciphertext));
+    let mac: Uint8Array;
+    try {
+      mac = decodeBase64(normalizeB64(envelope.mac ?? ''));
+    } catch {
+      mac = new Uint8Array(0);
     }
-    throw new ProtocolError('DECRYPT_FAILED', 'Message authentication failed', { n: envelope.header.n, pn: envelope.header.pn });
+
+    const expected = computeMac(keys.macKey, adBytes, ciphertext);
+    const macOk = mac.length === MAC_LENGTH && nacl.verify(mac, expected);
+    plain = nacl.secretbox.open(ciphertext, keys.nonce, keys.cipherKey);
+
+    if (!macOk) {
+      if (plain) {
+        throw new ProtocolError('HEADER_TAMPERED', 'Message authentication failed: header or identities modified', {
+          n: envelope.header.n,
+          pn: envelope.header.pn,
+        });
+      }
+      throw new ProtocolError('DECRYPT_FAILED', 'Message authentication failed', { n: envelope.header.n, pn: envelope.header.pn });
+    }
+    if (!plain) {
+      // MAC verified but secretbox did not open: cannot happen with an intact ciphertext.
+      throw new ProtocolError('DECRYPT_FAILED', 'secretbox.open failed', { n: envelope.header.n, pn: envelope.header.pn });
+    }
+    return utf8Decode(plain);
+  } finally {
+    wipe(keys.cipherKey, keys.macKey, keys.nonce, plain);
   }
-  if (!plain) {
-    // MAC verified but secretbox did not open: cannot happen with an intact ciphertext.
-    throw new ProtocolError('DECRYPT_FAILED', 'secretbox.open failed', { n: envelope.header.n, pn: envelope.header.pn });
-  }
-  return utf8Decode(plain);
 }
 
-/** History path: open an archived message with its stored message key. */
+/** LEGACY (pre-T2.14 archive migration only): open an envelope with a stored message key. */
 export function decryptWithMessageKey(params: { messageKeyB64: string; envelope: MessageEnvelope; ad: AssociatedData }): string {
   const mk = decodeBase64(normalizeB64(params.messageKeyB64));
   return openMessage({ messageKey: mk, envelope: params.envelope, ad: params.ad });

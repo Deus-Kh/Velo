@@ -2,6 +2,7 @@ import nacl from 'tweetnacl';
 import { decodeBase64, encodeBase64 } from 'tweetnacl-util';
 import { hkdfSha256 } from '../primitives/kdf';
 import { ProtocolError } from '../errors';
+import { wipe } from '../primitives/zeroize';
 import { verifySignedPreKeyBundle } from './bundle';
 import { verifyIdentityBinding } from '../identity/binding';
 import type { PreKeyBundle } from './types';
@@ -58,8 +59,13 @@ function key(b64: string, what: string): Uint8Array {
  * Byte-identical to libsignal for the T2.15 vectors.
  */
 function deriveSessionKeys(dhParts: Uint8Array[]): X3DHSessionKeys {
-  const okm = hkdfSha256({ ikm: concatBytes([X3DH_PREFIX, ...dhParts]), info: INFO_X3DH, length: 64 });
-  return { rootKey: encodeBase64(okm.slice(0, 32)), chainKey: encodeBase64(okm.slice(32, 64)) };
+  const ikm = concatBytes([X3DH_PREFIX, ...dhParts]);
+  wipe(...dhParts);
+  const okm = hkdfSha256({ ikm, info: INFO_X3DH, length: 64 });
+  wipe(ikm);
+  const out = { rootKey: encodeBase64(okm.slice(0, 32)), chainKey: encodeBase64(okm.slice(32, 64)) };
+  wipe(okm); // T3.4: DH outputs, IKM and the HKDF block are all zeroed
+  return out;
 }
 
 /**
@@ -102,6 +108,9 @@ export function x3dhInitiate(params: {
     oneTimePreKeyId = bundle.oneTimePreKey.keyId;
   }
 
+  const sessionKeys = deriveSessionKeys(dhParts);
+  if (!params.ephemeral) wipe(eph.secretKey); // T3.4: the ephemeral secret is never needed again
+
   return {
     initPacket: {
       peerUserId: params.peerUserId,
@@ -110,7 +119,7 @@ export function x3dhInitiate(params: {
       oneTimePreKeyId,
       initiatorIdentityDhPublicKey: params.identityDhPublicKey,
     },
-    sessionKeys: deriveSessionKeys(dhParts),
+    sessionKeys,
     theirSignedPreKeyPublicKey: bundle.signedPreKey.publicKey,
   };
 }

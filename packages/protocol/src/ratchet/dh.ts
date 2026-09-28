@@ -6,6 +6,7 @@ import { normalizeB64 } from '../primitives/base64';
 import { ProtocolError } from '../errors';
 import type { DhKeyPairB64 } from './session';
 import { PEER_EPOCH_HISTORY } from './limits';
+import { wipe } from '../primitives/zeroize';
 
 /**
  * DH ratchet step (spec §8.1 `dhRatchet`, Signal's DHRatchet):
@@ -39,24 +40,38 @@ export function dhRatchet(session: RatchetSessionV2, newPeerDhPubB64: string, ne
   }
 
   // Receiving chain from DH(DHs, DHr_new).
-  const step1 = kdfRootKey({ rootKey: rootKeyBytes, dhOut: nacl.scalarMult(dhsPriv, dhrNewPub) });
+  const dh1 = nacl.scalarMult(dhsPriv, dhrNewPub);
+  wipe(dhsPriv);
+  const step1 = kdfRootKey({ rootKey: rootKeyBytes, dhOut: dh1 });
+  wipe(rootKeyBytes, dh1);
 
   // Fresh sending ratchet key, sending chain from DH(DHs_new, DHr_new).
   const next = nextDhs ?? (() => {
     const kp = nacl.box.keyPair();
-    return { publicKey: encodeBase64(kp.publicKey), privateKey: encodeBase64(kp.secretKey) };
+    const pair = { publicKey: encodeBase64(kp.publicKey), privateKey: encodeBase64(kp.secretKey) };
+    wipe(kp.secretKey);
+    return pair;
   })();
   const nextPriv = decodeBase64(normalizeB64(next.privateKey));
   if (nextPriv.length !== 32) {
+    wipe(step1.newRootKey, step1.newChainKey);
     throw new ProtocolError('INVALID_KEY_LENGTH', 'Bad next DHs private key length', { what: 'nextDhsPrivateKey', length: nextPriv.length });
   }
-  const step2 = kdfRootKey({ rootKey: step1.newRootKey, dhOut: nacl.scalarMult(nextPriv, dhrNewPub) });
+  const dh2 = nacl.scalarMult(nextPriv, dhrNewPub);
+  wipe(nextPriv);
+  const step2 = kdfRootKey({ rootKey: step1.newRootKey, dhOut: dh2 });
+  wipe(dh2);
+
+  const rootKey = encodeBase64(step2.newRootKey);
+  const chainKeyRecv = encodeBase64(step1.newChainKey);
+  const chainKeySend = encodeBase64(step2.newChainKey);
+  wipe(step1.newRootKey, step1.newChainKey, step2.newRootKey, step2.newChainKey); // T3.4
 
   return {
     ...session,
-    rootKey: encodeBase64(step2.newRootKey),
-    chainKeyRecv: encodeBase64(step1.newChainKey),
-    chainKeySend: encodeBase64(step2.newChainKey),
+    rootKey,
+    chainKeyRecv,
+    chainKeySend,
     PN: session.Ns,
     Ns: 0,
     Nr: 0,

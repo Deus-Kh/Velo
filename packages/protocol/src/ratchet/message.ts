@@ -1,5 +1,6 @@
 import { decodeBase64, encodeBase64 } from 'tweetnacl-util';
 import { normalizeB64 } from '../primitives/base64';
+import { wipe } from '../primitives/zeroize';
 import { chainKdf } from './chain';
 import { dhRatchet } from './dh';
 import type { RatchetSessionV2 } from '../types/session';
@@ -16,26 +17,19 @@ export type V2Header = MessageHeader;
 export type V2Encrypted = MessageEnvelope;
 
 /**
- * A message key the step derived. The client decides what to do with it
- * (today: archive it for history; after T2.14: delete after use).
+ * T3.4: a step returns the next session, the envelope or plaintext, and
+ * nothing else. No message key leaves the step (there is no archive since
+ * T2.14, so nothing needs one), and every intermediate key the step
+ * derived is wiped before it returns, on success and on failure.
  */
-export type DerivedMessageKey = {
-  direction: 'in' | 'out';
-  dhPub: string;
-  n: number;
-  messageKeyB64: string;
-};
-
 export type RatchetEncryptResult = {
   session: RatchetSessionV2;
   envelope: MessageEnvelope;
-  derivedKeys: DerivedMessageKey[];
 };
 
 export type RatchetDecryptResult = {
   session: RatchetSessionV2;
   plaintext: string;
-  derivedKeys: DerivedMessageKey[];
   /** Set when the message was decrypted with a previously skipped key. */
   consumedSkippedKeyId: string | null;
 };
@@ -115,28 +109,27 @@ export function ratchetEncrypt(session: RatchetSessionV2, plaintext: string, ad:
 
   const ck = decodeBase64(session.chainKeySend);
   const { messageKey, nextChainKey } = chainKdf(ck);
+  wipe(ck);
+  try {
+    const header: MessageHeader = { n: session.Ns, pn: session.PN, dhPub: session.DHsPublicKey };
+    const envelope = sealMessage({ messageKey, header, plaintext, ad }); // consumes (wipes) messageKey
 
-  const header: MessageHeader = { n: session.Ns, pn: session.PN, dhPub: session.DHsPublicKey };
-  const envelope = sealMessage({ messageKey, header, plaintext, ad });
-
-  const next: RatchetSessionV2 = {
-    ...session,
-    chainKeySend: encodeBase64(nextChainKey),
-    Ns: session.Ns + 1,
-  };
-
-  return {
-    session: next,
-    envelope,
-    derivedKeys: [{ direction: 'out', dhPub: session.DHsPublicKey, n: session.Ns, messageKeyB64: encodeBase64(messageKey) }],
-  };
+    const next: RatchetSessionV2 = {
+      ...session,
+      chainKeySend: encodeBase64(nextChainKey),
+      Ns: session.Ns + 1,
+    };
+    return { session: next, envelope };
+  } finally {
+    wipe(messageKey, nextChainKey);
+  }
 }
 
 /**
  * Pure receiving step (spec §8.1). Synchronous, no I/O, never mutates
  * `session`. On any throw the caller must persist nothing (R7).
  *
- *  1. skipped-key fast path;
+ *  1. skipped-key fast path; 1b. explicit replay window (T3.4);
  *  2. if the peer's ratchet key is new (or there is none yet): drain the
  *     previous receiving chain to header.pn into the skipped keys (T2.8),
  *     then perform a full DH ratchet step — never merely adopt (R13);
@@ -144,6 +137,8 @@ export function ratchetEncrypt(session: RatchetSessionV2, plaintext: string, ad:
  *     the skipped keys (T2.7);
  *  4-6. derive the target key, authenticate (MAC over identities and the
  *     canonical header, T2.5), decrypt, commit.
+ * Every chain key and message key derived along the way is wiped before
+ * the step returns, whether it returns or throws (T3.4).
  */
 export function ratchetDecrypt(session: RatchetSessionV2, envelope: MessageEnvelope, ad: AssociatedData): RatchetDecryptResult {
   const incomingDhPub = normalizeB64(envelope.header.dhPub);
@@ -156,12 +151,12 @@ export function ratchetDecrypt(session: RatchetSessionV2, envelope: MessageEnvel
   const skippedId = skippedKeyId(incomingDhPub, targetN);
   const skippedKey = retained[skippedId];
   if (skippedKey) {
-    const plaintext = openMessage({ messageKey: decodeBase64(normalizeB64(skippedKey)), envelope, ad });
+    const mk = decodeBase64(normalizeB64(skippedKey));
+    const plaintext = openMessage({ messageKey: mk, envelope, ad }); // consumes (wipes) mk
     delete retained[skippedId];
     return {
       session: { ...session, skippedKeys: retained, recentlyReceived: rememberReceived(session, skippedId) },
       plaintext,
-      derivedKeys: [{ direction: 'in', dhPub: incomingDhPub, n: targetN, messageKeyB64: skippedKey }],
       consumedSkippedKeyId: skippedId,
     };
   }
@@ -171,7 +166,6 @@ export function ratchetDecrypt(session: RatchetSessionV2, envelope: MessageEnvel
     throw new ProtocolError('REPLAY_DETECTED', 'Message already received', { n: targetN });
   }
 
-  const derivedKeys: DerivedMessageKey[] = [];
   let work = session;
 
   // 2. New peer ratchet key: drain the old chain to header.pn (T2.8), then ratchet (R13).
@@ -186,12 +180,12 @@ export function ratchetDecrypt(session: RatchetSessionV2, envelope: MessageEnvel
       let oldNr = work.Nr;
       while (oldNr < envelope.header.pn) {
         const step = chainKdf(oldCk);
-        const mkB64 = encodeBase64(step.messageKey);
-        retained[skippedKeyId(work.DHrPublicKey, oldNr)] = mkB64;
-        derivedKeys.push({ direction: 'in', dhPub: work.DHrPublicKey, n: oldNr, messageKeyB64: mkB64 });
+        retained[skippedKeyId(work.DHrPublicKey, oldNr)] = encodeBase64(step.messageKey);
+        wipe(oldCk, step.messageKey);
         oldCk = step.nextChainKey;
         oldNr += 1;
       }
+      wipe(oldCk);
     }
     work = dhRatchet(work, incomingDhPub);
   }
@@ -211,31 +205,32 @@ export function ratchetDecrypt(session: RatchetSessionV2, envelope: MessageEnvel
   let nr = work.Nr;
   let messageKey: Uint8Array | null = null;
 
-  while (nr <= targetN) {
-    const step = chainKdf(ck);
-    const mkB64 = encodeBase64(step.messageKey);
-
-    if (nr === targetN) {
-      messageKey = step.messageKey;
-    } else {
-      retained[skippedKeyId(incomingDhPub, nr)] = mkB64;
+  try {
+    while (nr <= targetN) {
+      const step = chainKdf(ck);
+      if (nr === targetN) {
+        messageKey = step.messageKey;
+      } else {
+        retained[skippedKeyId(incomingDhPub, nr)] = encodeBase64(step.messageKey);
+        wipe(step.messageKey);
+      }
+      wipe(ck);
+      ck = step.nextChainKey;
+      nr += 1;
     }
-    derivedKeys.push({ direction: 'in', dhPub: incomingDhPub, n: nr, messageKeyB64: mkB64 });
 
-    ck = step.nextChainKey;
-    nr += 1;
+    if (!messageKey) throw new ProtocolError('DECRYPT_FAILED', 'Failed to derive message key', { n: targetN, nr: work.Nr });
+
+    // 5. Authenticate and decrypt — nothing above this line may be persisted.
+    const plaintext = openMessage({ messageKey, envelope, ad }); // consumes (wipes) messageKey
+
+    // 6. Commit, then prune (bounded by epochs and total, T2.6).
+    return {
+      session: pruneSkippedKeys({ ...work, chainKeyRecv: encodeBase64(ck), Nr: nr, skippedKeys: retained, recentlyReceived: rememberReceived(work, skippedId) }),
+      plaintext,
+      consumedSkippedKeyId: null,
+    };
+  } finally {
+    wipe(ck, messageKey);
   }
-
-  if (!messageKey) throw new ProtocolError('DECRYPT_FAILED', 'Failed to derive message key', { n: targetN, nr: work.Nr });
-
-  // 5. Authenticate and decrypt — nothing above this line may be persisted.
-  const plaintext = openMessage({ messageKey, envelope, ad });
-
-  // 6. Commit, then prune (bounded by epochs and total, T2.6).
-  return {
-    session: pruneSkippedKeys({ ...work, chainKeyRecv: encodeBase64(ck), Nr: nr, skippedKeys: retained, recentlyReceived: rememberReceived(work, skippedId) }),
-    plaintext,
-    derivedKeys,
-    consumedSkippedKeyId: null,
-  };
 }

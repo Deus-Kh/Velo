@@ -8,7 +8,7 @@ import { requireIdentityMatch } from '../../src/identity/trust';
 import { x3dhInitiate, x3dhRespond, type X3DHInitPacket } from '../../src/handshake/x3dh';
 import { rotateSignedPreKeySet, selectSignedPreKey, signSignedPreKey, type SignedPreKeyRecord, type SignedPreKeySet } from '../../src/handshake/signedPrekey';
 import { normalizeB64 } from '../../src/primitives/base64';
-import { ratchetDecrypt, ratchetEncrypt, type DerivedMessageKey, type MessageEnvelope } from '../../src/ratchet/message';
+import { ratchetDecrypt, ratchetEncrypt, type MessageEnvelope } from '../../src/ratchet/message';
 import type { AssociatedData } from '../../src/ratchet/envelope';
 import { glareWinner, initInitiatorSession, initResponderSession, sessionHasReceived } from '../../src/ratchet/session';
 import type { RatchetSessionV2 } from '../../src/types/session';
@@ -191,9 +191,8 @@ export class VirtualClient {
     this.store.setJson(this.sessionKey(peerUserId), session);
   }
 
-  private persistStep(peerUserId: string, session: RatchetSessionV2, derivedKeys: DerivedMessageKey[]): void {
-    // ratchetAdapter.ts since T2.14: the session only; message keys are never archived.
-    void derivedKeys;
+  private persistStep(peerUserId: string, session: RatchetSessionV2): void {
+    // ratchetAdapter.ts since T2.14: the session only; since T3.4 no key material leaves a step.
     this.saveSession(peerUserId, session);
   }
 
@@ -261,13 +260,13 @@ export class VirtualClient {
    */
   private bootstrapAndDecrypt(peerUserId: string, initPacket: X3DHInitPacket, envelope: MessageEnvelope): { plaintext: string; session: RatchetSessionV2 } {
     const candidate = this.decryptWithCandidate(peerUserId, initPacket, envelope);
-    this.persistStep(peerUserId, candidate.session, candidate.derivedKeys);
+    this.persistStep(peerUserId, candidate.session);
     this.finishBootstrap(peerUserId, initPacket);
     return { plaintext: candidate.plaintext, session: candidate.session };
   }
 
   /** Authenticate, refuse replays, build the candidate and decrypt with it. Persists nothing. */
-  private decryptWithCandidate(peerUserId: string, initPacket: X3DHInitPacket, envelope: MessageEnvelope): { plaintext: string; session: RatchetSessionV2; derivedKeys: DerivedMessageKey[] } {
+  private decryptWithCandidate(peerUserId: string, initPacket: X3DHInitPacket, envelope: MessageEnvelope): { plaintext: string; session: RatchetSessionV2 } {
     this.authenticateInitiator(peerUserId, initPacket);
     const seen = this.store.getJson<string[]>('bootstrap-seen:' + peerUserId) ?? [];
     if (seen.includes(initPacket.ephPublicKey)) {
@@ -275,7 +274,7 @@ export class VirtualClient {
     }
     const candidate = this.candidateSession(peerUserId, initPacket);
     const step = ratchetDecrypt(candidate, envelope, this.associatedData(peerUserId, 'in'));
-    return { plaintext: step.plaintext, session: step.session, derivedKeys: step.derivedKeys };
+    return { plaintext: step.plaintext, session: step.session };
   }
 
   /** After the session is persisted: drop the one-time prekey secret and remember the packet. */
@@ -326,7 +325,7 @@ export class VirtualClient {
     if (!session) throw new ProtocolError('NO_SESSION', 'No v2 session for this peer');
 
     const step = ratchetEncrypt(session, text, this.associatedData(peerUserId, 'out'));
-    this.persistStep(peerUserId, step.session, step.derivedKeys);
+    this.persistStep(peerUserId, step.session);
 
     this.msgCounter += 1;
     const dto = this.network.send(this.userId, {
@@ -356,10 +355,10 @@ export class VirtualClient {
       // chat/incoming.ts: a packet for a session we do not have — glare or a peer reset. Candidate must decrypt.
       const candidate = this.decryptWithCandidate(peerUserId, dto.initPacket, dto.v3);
       if (!sessionHasReceived(session) && glareWinner(this.userId, peerUserId)) {
-        this.persistStep(peerUserId, session, candidate.derivedKeys);
+        this.persistStep(peerUserId, session);
         this.store.setJson(secondaryKey, candidate.session);
       } else {
-        this.persistStep(peerUserId, candidate.session, candidate.derivedKeys);
+        this.persistStep(peerUserId, candidate.session);
         this.store.delete(secondaryKey);
       }
       this.finishBootstrap(peerUserId, dto.initPacket);
@@ -367,7 +366,7 @@ export class VirtualClient {
     } else {
       try {
         const step = ratchetDecrypt(session, dto.v3, this.associatedData(peerUserId, 'in'));
-        this.persistStep(peerUserId, step.session, step.derivedKeys);
+        this.persistStep(peerUserId, step.session);
         this.store.delete(secondaryKey); // the peer sends on our session: the glare secondary is retired
         plaintext = step.plaintext;
       } catch (e) {
@@ -375,7 +374,7 @@ export class VirtualClient {
         const code = e instanceof ProtocolError ? e.code : null;
         if (!secondary || (code !== 'DECRYPT_FAILED' && code !== 'HEADER_TAMPERED' && code !== 'UNKNOWN_OLD_MESSAGE')) throw e;
         const step = ratchetDecrypt(secondary, dto.v3, this.associatedData(peerUserId, 'in'));
-        this.persistStep(peerUserId, session, step.derivedKeys);
+        this.persistStep(peerUserId, session);
         this.store.setJson(secondaryKey, step.session);
         plaintext = step.plaintext;
       }

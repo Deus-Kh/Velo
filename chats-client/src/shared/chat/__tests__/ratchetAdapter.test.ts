@@ -122,7 +122,7 @@ describe('ratchetAdapter', () => {
 
     await expect(
       decryptAndPersist({ myUserId: PEER, peerUserId: ME, session: b, encrypted: e.encrypted }),
-    ).rejects.toThrow('Replay or unknown old message');
+    ).rejects.toMatchObject({ code: 'REPLAY_DETECTED' }); // T3.4: the explicit replay window
     expect(await loadSession({ myUserId: PEER, peerUserId: ME })).toEqual(b);
     expect(await messageKeyRows()).toEqual(rows);
     expect(a.Ns).toBe(1);

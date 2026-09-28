@@ -55,13 +55,13 @@ export async function receiveIncoming(params: {
     const candidate = await decryptWithCandidate({ myUserId, peerUserId, initPacket, encrypted });
     if (!sessionHasReceived(session as RatchetSessionV2) && glareWinner(myUserId, peerUserId)) {
       // Glare, we win: keep ours, decrypt the peer's in-flight messages with theirs.
-      await persistStep({ myUserId, peerUserId, session: session as RatchetSessionV2, derivedKeys: candidate.derivedKeys });
+      await persistStep({ myUserId, peerUserId, session: session as RatchetSessionV2 });
       await saveSecondarySession({ myUserId, peerUserId, session: candidate.session });
       await finishBootstrap({ myUserId, peerUserId, initPacket, oneTimePreKeyId: candidate.oneTimePreKeyId });
       return { plaintext: candidate.plaintext, outcome: 'glare-secondary' };
     }
     // Glare, we lose — or the peer reset and re-initiated: adopt the peer's session.
-    await persistStep({ myUserId, peerUserId, session: candidate.session, derivedKeys: candidate.derivedKeys });
+    await persistStep({ myUserId, peerUserId, session: candidate.session });
     await deleteSecondarySession({ myUserId, peerUserId });
     await finishBootstrap({ myUserId, peerUserId, initPacket, oneTimePreKeyId: candidate.oneTimePreKeyId });
     return { plaintext: candidate.plaintext, outcome: sessionHasReceived(session as RatchetSessionV2) ? 'peer-reset-adopted' : 'glare-adopted' };
@@ -77,7 +77,7 @@ export async function receiveIncoming(params: {
     if (!secondary || !isProtocolError(e) || (e.code !== 'DECRYPT_FAILED' && e.code !== 'HEADER_TAMPERED' && e.code !== 'UNKNOWN_OLD_MESSAGE')) throw e;
     const ad = await associatedDataFor({ myUserId, peerUserId, direction: 'in' });
     const step = ratchetDecrypt(secondary as RatchetSessionV2, encrypted, ad);
-    await persistStep({ myUserId, peerUserId, session: session as RatchetSessionV2, derivedKeys: step.derivedKeys });
+    await persistStep({ myUserId, peerUserId, session: session as RatchetSessionV2 });
     await saveSecondarySession({ myUserId, peerUserId, session: step.session });
     return { plaintext: step.plaintext, outcome: 'secondary' };
   }
@@ -92,7 +92,7 @@ export async function bootstrapAndDecrypt(params: {
 }): Promise<{ plaintext: string; session: RatchetSessionV2 }> {
   const { myUserId, peerUserId, initPacket, encrypted } = params;
   const candidate = await decryptWithCandidate({ myUserId, peerUserId, initPacket, encrypted });
-  await persistStep({ myUserId, peerUserId, session: candidate.session, derivedKeys: candidate.derivedKeys });
+  await persistStep({ myUserId, peerUserId, session: candidate.session });
   await finishBootstrap({ myUserId, peerUserId, initPacket, oneTimePreKeyId: candidate.oneTimePreKeyId });
   return { plaintext: candidate.plaintext, session: candidate.session };
 }
@@ -103,7 +103,7 @@ async function decryptWithCandidate(params: {
   peerUserId: string;
   initPacket: X3DHInitPacket;
   encrypted: MessageEnvelope;
-}): Promise<{ plaintext: string; session: RatchetSessionV2; derivedKeys: ReturnType<typeof ratchetDecrypt>['derivedKeys']; oneTimePreKeyId: number | null }> {
+}): Promise<{ plaintext: string; session: RatchetSessionV2; oneTimePreKeyId: number | null }> {
   const { myUserId, peerUserId, initPacket, encrypted } = params;
 
   // T2.13: the initiator's identity DH key must be the pinned one. Throws IDENTITY_MISMATCH.
@@ -117,7 +117,7 @@ async function decryptWithCandidate(params: {
   const candidate = initResponderSession({ peerUserId, sharedSecret: sessionKeys.rootKey, signedPreKey });
   const ad = await associatedDataFor({ myUserId, peerUserId, direction: 'in' });
   const step = ratchetDecrypt(candidate, encrypted, ad);
-  return { plaintext: step.plaintext, session: step.session, derivedKeys: step.derivedKeys, oneTimePreKeyId };
+  return { plaintext: step.plaintext, session: step.session, oneTimePreKeyId };
 }
 
 /** After the session is persisted: drop the one-time prekey secret and remember the packet. */

@@ -1,5 +1,6 @@
 import { hkdfSha256 } from '../primitives/kdf';
 import { ProtocolError } from '../errors';
+import { wipe } from '../primitives/zeroize';
 
 /** "WhisperMessageKeys" — Signal's message-key expansion label. Wire constant (R8). */
 const INFO_MESSAGE_KEYS = new Uint8Array([87, 104, 105, 115, 112, 101, 114, 77, 101, 115, 115, 97, 103, 101, 75, 101, 121, 115]);
@@ -25,5 +26,7 @@ export function expandMessageKey(messageKey: Uint8Array): ExpandedMessageKeys {
     throw new ProtocolError('INVALID_KEY_LENGTH', 'messageKey must be 32 bytes', { what: 'messageKey', length: messageKey.length });
   }
   const okm = hkdfSha256({ ikm: messageKey, info: INFO_MESSAGE_KEYS, length: 88 });
-  return { cipherKey: okm.slice(0, 32), macKey: okm.slice(32, 64), nonce: okm.slice(64, 88) };
+  const out = { cipherKey: okm.slice(0, 32), macKey: okm.slice(32, 64), nonce: okm.slice(64, 88) };
+  wipe(okm); // T3.4
+  return out;
 }

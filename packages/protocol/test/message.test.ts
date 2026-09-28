@@ -3,6 +3,7 @@ import { encodeBase64, decodeBase64 } from 'tweetnacl-util';
 import { describe, expect, it } from 'vitest';
 import { initInitiatorSession, initResponderSession } from '../src/ratchet/session';
 import { pruneSkippedKeys, ratchetDecrypt, ratchetEncrypt, skippedKeyId, type MessageEnvelope } from '../src/ratchet/message';
+import { chainKdf } from '../src/ratchet/chain';
 import { MAX_MESSAGE_NUMBER, MAX_SKIP_EPOCHS, MAX_SKIP_PER_STEP, MAX_SKIP_TOTAL, REPLAY_WINDOW } from '../src/ratchet/limits';
 import { decryptWithMessageKey, MAC_LENGTH, type AssociatedData } from '../src/ratchet/envelope';
 import type { RatchetSessionV2 } from '../src/types/session';
@@ -52,7 +53,7 @@ describe('ratchetEncrypt / ratchetDecrypt', () => {
     expect(e1.session.Ns).toBe(1);
     expect(e1.envelope.header).toEqual({ n: 0, pn: 0, dhPub: dhsA0.publicKey });
     expect(decodeBase64(e1.envelope.mac).length).toBe(MAC_LENGTH);
-    expect(e1.derivedKeys).toEqual([{ direction: 'out', dhPub: dhsA0.publicKey, n: 0, messageKeyB64: expect.any(String) }]);
+    expect(Object.keys(e1).sort()).toEqual(['envelope', 'session']); // T3.4: no key material leaves the step
     a = e1.session;
 
     const d1 = ratchetDecrypt(b, e1.envelope, AB);
@@ -63,7 +64,7 @@ describe('ratchetEncrypt / ratchetDecrypt', () => {
     expect(d1.session.DHsPublicKey, 'responder rotated its ratchet key on the first inbound message (R13)').not.toBe(spkB.publicKey);
     expect(d1.session.chainKeySend, 'responder now has a sending chain').not.toBeNull();
     expect(d1.consumedSkippedKeyId).toBeNull();
-    expect(d1.derivedKeys).toEqual([{ direction: 'in', dhPub: dhsA0.publicKey, n: 0, messageKeyB64: e1.derivedKeys[0]!.messageKeyB64 }]);
+    expect(Object.keys(d1).sort()).toEqual(['consumedSkippedKeyId', 'plaintext', 'session']);
     b = d1.session;
 
     const e2 = ratchetEncrypt(b, 'reply', BA);
@@ -84,17 +85,18 @@ describe('ratchetEncrypt / ratchetDecrypt', () => {
     const e = ratchetEncrypt(a, 'frozen', AB);
     expect(hex(decodeBase64(e.envelope.ciphertext))).toBe('2ad488a2e6636032fbb66ba73aae921c3bb409152f7a');
     expect(hex(decodeBase64(e.envelope.mac))).toBe('c58e798ea0191c43db8494fa87a760de');
-    expect(e.derivedKeys[0]!.messageKeyB64).toBe('odK3b3KVPxNIFmsQy11o7+UusV0W5yDf8mw1TzKgtkg=');
+    expect(encodeBase64(chainKdf(decodeBase64(a.chainKeySend!)).messageKey)).toBe('odK3b3KVPxNIFmsQy11o7+UusV0W5yDf8mw1TzKgtkg=');
     expect(hex(decodeBase64(e.session.chainKeySend!))).toBe('e3d95e3d9b1273732c117e750ded362b4d9c8980cce236ab4fea21c614763558');
     expect(ratchetEncrypt(a, 'frozen', AB).envelope).toEqual(e.envelope);
   });
 
-  it('a stored message key opens the archived envelope (history path) with the right AD only', () => {
+  it('a stored message key opens the archived envelope (legacy migration path) with the right AD only', () => {
     const { a, b } = pair();
     const e = ratchetEncrypt(a, 'archived', AB);
     ratchetDecrypt(b, e.envelope, AB);
-    expect(decryptWithMessageKey({ messageKeyB64: e.derivedKeys[0]!.messageKeyB64, envelope: e.envelope, ad: AB })).toBe('archived');
-    expect(codeOf(() => decryptWithMessageKey({ messageKeyB64: e.derivedKeys[0]!.messageKeyB64, envelope: e.envelope, ad: BA }))).toBe('HEADER_TAMPERED');
+    const mkB64 = encodeBase64(chainKdf(decodeBase64(a.chainKeySend!)).messageKey);
+    expect(decryptWithMessageKey({ messageKeyB64: mkB64, envelope: e.envelope, ad: AB })).toBe('archived');
+    expect(codeOf(() => decryptWithMessageKey({ messageKeyB64: mkB64, envelope: e.envelope, ad: BA }))).toBe('HEADER_TAMPERED');
   });
 
   it('decrypts out-of-order messages within an epoch via skipped keys and reports the consumed id', () => {
@@ -108,7 +110,6 @@ describe('ratchetEncrypt / ratchetDecrypt', () => {
 
     const d2 = ratchetDecrypt(b, e2.envelope, AB);
     expect(d2.plaintext).toBe('m2');
-    expect(d2.derivedKeys.map((k) => k.n)).toEqual([0, 1, 2]);
     expect(Object.keys(d2.session.skippedKeys ?? {})).toEqual([skippedKeyId(dhsA0.publicKey, 0), skippedKeyId(dhsA0.publicKey, 1)]);
     b = d2.session;
 
