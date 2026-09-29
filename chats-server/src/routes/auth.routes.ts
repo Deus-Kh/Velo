@@ -6,6 +6,7 @@ import { requireAuth, type AuthedRequest } from "../middleware/auth";
 import { authLimiter } from "../middleware/rateLimit";
 import { services } from "../lib/services";
 import { checkPasswordPolicy } from "../lib/passwordPolicy";
+import { deleteAccount } from "../lib/accountDeletion";
 import {
   issueTokenPair,
   revokeAllRefreshTokens,
@@ -13,6 +14,7 @@ import {
   rotateRefreshToken,
 } from "../lib/refreshTokens";
 import {
+  deleteAccountSchema,
   changePasswordSchema,
   loginSchema,
   logoutSchema,
@@ -122,6 +124,18 @@ authRouter.post("/logout", requireAuth, validateBody(logoutSchema), async (req: 
     await revokeFamilyByToken(refreshToken, String(req.userId));
   }
   return res.json({ ok: true });
+});
+
+// T7.6: account deletion (GDPR Art. 17). Password once more; then everything the server holds goes (lib/accountDeletion.ts).
+authRouter.delete("/account", requireAuth, validateBody(deleteAccountSchema), async (req: AuthedRequest, res) => {
+  const { password } = req.body as { password: string };
+  const user = await UserModel.findById(req.userId);
+  if (!user) return res.status(404).json({ error: "User not found", code: "NOT_FOUND" });
+  const ok = await bcrypt.compare(password, user.passwordHash);
+  if (!ok) return res.status(401).json({ error: "Password is incorrect", code: "INVALID_CREDENTIALS" });
+  const report = await deleteAccount(String(user._id));
+  if (!report) return res.status(404).json({ error: "User not found", code: "NOT_FOUND" });
+  return res.json({ ok: true, deleted: true, groupsLeft: report.groupsLeft, peersNotified: report.peersNotified });
 });
 
 authRouter.post(

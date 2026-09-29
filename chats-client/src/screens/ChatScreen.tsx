@@ -355,6 +355,7 @@ const { keyboardShown , keyboardHeight } = useKeyboard()
     deleteLocally,
     timer,
     setTimer,
+    peerDeleted,
   } = useChatE2EE(peerUserId);
   const [showTimerSheet, setShowTimerSheet] = useState(false);
   const [showReportSheet, setShowReportSheet] = useState(false);
@@ -382,7 +383,7 @@ const { keyboardShown , keyboardHeight } = useKeyboard()
   const typingIndicatorTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const trimmedText = text.trim();
-  const canSend = socketReady && trimmedText.length > 0 && !peerBlocked;
+  const canSend = socketReady && trimmedText.length > 0 && !peerBlocked && !peerDeleted;
   const conversationName = peerUsername ?? 'Secure chat';
   const messageListItems = buildMessageListItems(messages);
   const presenceMeta = getHeaderPresenceMeta({
@@ -403,6 +404,7 @@ const { keyboardShown , keyboardHeight } = useKeyboard()
     interfaceDensity === 'compact' ? 'min-h-[44px]' : 'min-h-[48px]';
   const healthPresentation = describeSessionHealth(sessionHealth, conversationName);
   const composerDisabledReason =
+    (peerDeleted ? 'This account was deleted. Your copy of the conversation stays on this device.' : null) ??
     (peerBlocked ? 'You blocked this contact. Unblock from the chat actions to send again.' : null) ??
     healthPresentation?.composerDisabledReason ??
     (!socketReady ? 'Reconnect to send messages. Your draft stays here.' : null);

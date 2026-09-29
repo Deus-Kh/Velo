@@ -54,7 +54,9 @@ interface AuthState {
    * `eraseLocalData`, sessions, message keys, the history master key and the
    * plaintext outgoing queue are wiped first ('messages' scope).
    */
-  logout: (opts?: { eraseLocalData?: boolean }) => Promise<void>;
+  logout: (opts?: { eraseLocalData?: boolean; scope?: 'messages' | 'all' }) => Promise<void>;
+  /** T7.6: delete the account on the server, then erase everything local and sign out. */
+  deleteAccount: (password: string) => Promise<void>;
   hydrate: () => Promise<void>;
 }
 
@@ -205,6 +207,11 @@ export const useAuthStore = create<AuthState>((set) => ({
     }
   },
 
+  deleteAccount: async (password) => {
+    await authApi.deleteAccount(password); // throws on a wrong password: nothing local changes
+    await useAuthStore.getState().logout({ eraseLocalData: true, scope: 'all' });
+  },
+
   logout: async (opts) => {
     const currentUserId = useAuthStore.getState().userId;
 
@@ -233,7 +240,7 @@ export const useAuthStore = create<AuthState>((set) => ({
     disconnectSocket();
 
     if (opts?.eraseLocalData && currentUserId) {
-      const report = await wipeLocalStateForUser(currentUserId, 'messages');
+      const report = await wipeLocalStateForUser(currentUserId, opts.scope ?? 'messages');
       if (report.failures.length) {
         console.warn('[auth] local wipe incomplete:', report.failures.join('; '));
       }

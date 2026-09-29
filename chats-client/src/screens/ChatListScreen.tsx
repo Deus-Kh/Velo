@@ -673,10 +673,12 @@ export default function ChatListScreen({
         };
         socket.on('message:new', handler);
         socket.on('connect', refreshConversationsSilently);
+        socket.on('user:deleted', refreshConversationsSilently); // T7.6: the pair's conversation is gone server-side
         socket.on('group:changed', onGroupChanged);
         cleanup = () => {
           socket.off('message:new', handler);
           socket.off('connect', refreshConversationsSilently);
+          socket.off('user:deleted', refreshConversationsSilently);
           socket.off('group:changed', onGroupChanged);
         };
       } catch (e) {

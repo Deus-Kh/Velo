@@ -75,6 +75,11 @@ export const refreshSchema = z.object({
   refreshToken: z.string().min(16).max(512),
 });
 
+/** T7.6: account deletion re-asks the password. */
+export const deleteAccountSchema = z.object({
+  password: z.string().min(1, 'Password is required').max(PASSWORD_MAX_LENGTH),
+});
+
 export const logoutSchema = z.object({
   refreshToken: z.string().min(16).max(512).optional(),
 });

@@ -17,6 +17,7 @@ import { setAccessToken } from '../shared/auth/session';
 import { authApi } from '../shared/api/auth.api';
 import { DEFAULT_PRIVACY_SETTINGS, userApi, type MeResponse, type PrivacySettings } from '../shared/api/user.api';
 import BlockedContactsSheet from '../components/BlockedContactsSheet';
+import DeleteAccountSheet from '../components/DeleteAccountSheet';
 import { useBlocksStore } from '../store/blocks.store';
 import {
   disablePushMessaging,
@@ -286,6 +287,10 @@ export default function SettingsScreen() {
   const [privacy, setPrivacy] = useState<PrivacySettings>(DEFAULT_PRIVACY_SETTINGS);
   const [privacyError, setPrivacyError] = useState<string | null>(null);
   const [showBlocked, setShowBlocked] = useState(false);
+  const [showDeleteAccount, setShowDeleteAccount] = useState(false);
+  const [deleteBusy, setDeleteBusy] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const deleteAccount = useAuthStore((s) => s.deleteAccount);
   const blockedCount = useBlocksStore((s) => (userId ? s.blockedByUser[String(userId)] : undefined)?.length ?? 0);
   const [profileLoading, setProfileLoading] = useState(true);
   const [editingField, setEditingField] = useState<EditableProfileField>(null);
@@ -1189,6 +1194,16 @@ export default function SettingsScreen() {
               onPress={confirmLogout}
               value="Exit"
               danger
+            />
+            <SettingsRow
+              title="Delete account"
+              subtitle="Removes everything the server holds for you and erases this device. Cannot be undone."
+              onPress={() => {
+                setDeleteError(null);
+                setShowDeleteAccount(true);
+              }}
+              value="Delete"
+              danger
               last
             />
           </SettingsGroup>
@@ -1198,6 +1213,21 @@ export default function SettingsScreen() {
       </ScrollView>
 
       {showBlocked && userId ? <BlockedContactsSheet myUserId={String(userId)} onClose={() => setShowBlocked(false)} /> : null}
+      {showDeleteAccount ? (
+        <DeleteAccountSheet
+          busy={deleteBusy}
+          error={deleteError}
+          onClose={() => setShowDeleteAccount(false)}
+          onConfirm={(password) => {
+            setDeleteBusy(true);
+            setDeleteError(null);
+            deleteAccount(password)
+              .then(() => setShowDeleteAccount(false))
+              .catch((e: any) => setDeleteError(e?.response?.status === 401 ? 'Password is incorrect.' : e?.response?.data?.error || e?.message || 'Could not delete the account'))
+              .finally(() => setDeleteBusy(false));
+          }}
+        />
+      ) : null}
     </View>
   );
 }

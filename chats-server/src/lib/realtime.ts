@@ -14,3 +14,9 @@ export function emitToUser(userId: string, event: string, payload: unknown): voi
   if (!io) return;
   io.to(String(userId)).emit(event, payload);
 }
+
+/** T7.6: drop every socket of a user (account deleted). */
+export function disconnectUser(userId: string): void {
+  if (!io) return;
+  io.in(String(userId)).disconnectSockets(true);
+}

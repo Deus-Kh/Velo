@@ -228,6 +228,8 @@ export function useChatE2EE(peerUserId: string) {
   const [hasMore, setHasMore] = useState(false);
   const [sessionHealth, setSessionHealth] = useState<SessionHealth>({ status: 'healthy' });
   const [reloadToken, setReloadToken] = useState(0);
+  /** T7.6: the peer deleted its account (server notice); sending is pointless. */
+  const [peerDeleted, setPeerDeleted] = useState(false);
   /** T7.3: the disappearing-message timer of this conversation. */
   const [timer, setTimerState] = useState<ConversationSettings>(DEFAULT_CONVERSATION_SETTINGS);
 
@@ -642,15 +644,22 @@ export function useChatE2EE(peerUserId: string) {
             }
           };
 
+          // T7.6: the server tells every peer when an account is deleted.
+          const deletedHandler = (evt: { userId?: string }) => {
+            if (!cancelled && String(evt?.userId) === String(peerUserId)) setPeerDeleted(true);
+          };
+
           socket.on('connect', handleSocketConnect);
           socket.on('disconnect', handleSocketDisconnect);
           socket.on('message:status-changed', statusHandler);
           socket.on('identity:changed', identityHandler);
+          socket.on('user:deleted', deletedHandler);
           statusUnsubRef.current = () => {
             socket.off('connect', handleSocketConnect);
             socket.off('disconnect', handleSocketDisconnect);
             socket.off('message:status-changed', statusHandler);
             socket.off('identity:changed', identityHandler);
+            socket.off('user:deleted', deletedHandler);
           };
         } catch (e) {
           console.warn('Failed to setup message:status-changed listener:', (e as any)?.message);
@@ -813,5 +822,6 @@ export function useChatE2EE(peerUserId: string) {
     deleteLocally,
     timer,
     setTimer,
+    peerDeleted,
   };
 }
