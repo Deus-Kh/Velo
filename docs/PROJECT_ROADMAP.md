@@ -144,7 +144,7 @@ What a user can actually do today: 1:1 text with replies, receipts, typing, pres
 | Feature | Signal | **Velo today** | **6 months** |
 |---|---|---|---|
 | 1:1 text, reply/quote | ✅ | ✅ | ✅ |
-| Read receipts / typing / presence | ✅ with toggles (no presence) | ⚠️ always-on, no toggles, subscribable by anyone | ✅ toggles + relationship check (P2-10) |
+| Read receipts / typing / presence | ✅ with toggles (no presence) | ✅ toggles for read receipts, typing, last seen, online; presence off by default; relationship check (T1.7, T7.4) | done |
 | Push notifications | ✅ data-only, decrypted on device | ✅ data-only wake-up, fetched and decrypted on the device, rendered with the local contact name and an honest preview toggle (T3.3, Android); iOS parked | done (Android) |
 | iOS build | ✅ | ❌ cannot connect | ⏸ T1.16 deferred by owner (2026-09-28): Android only for now |
 | Reactions, edit, delete, forward | ✅ | ❌ | ✅ Phase 7' |
@@ -297,7 +297,7 @@ Fix: after T2.0, an inbound `initPacket` whose identity matches the pin but whos
 - **P2-7 · `cors({ origin: true, credentials: true })`** `[PARITY]` → T4.4 — **fixed 2026-09-28 (allow-list from `CORS_ORIGINS` for Express and socket.io)**
 - **P2-8 · No structured error taxonomy** `[PARITY]` → T2.3, T4.8 — **fixed 2026-09-28 (typed codes since T2.3; the UI derives banners, header and composer state from the taxonomy since T4.8)**
 - **P2-9 · Ordering keyed on the client clock** `[PARITY]` *(new)* — any client pins itself to the top of everyone's history. Server-assigned per-conversation sequence. → T3.2 — **fixed 2026-09-28**
-- **P2-10 · Presence/typing subscribable by anyone; no privacy toggles** `[PARITY]` *(new)* — relationship check; toggles for read receipts, typing, last-seen; consider dropping "online" broadcast entirely (Signal has none). → T1.7, Phase 7'
+- **P2-10 · Presence/typing subscribable by anyone; no privacy toggles** `[PARITY]` *(new)* — relationship check; toggles for read receipts, typing, last-seen; consider dropping "online" broadcast entirely (Signal has none). → T1.7, T7.4 — **fixed 2026-09-29** (relationship check T1.7; toggles T7.4; online and last seen are off by default)
 - **P2-11 · 69 dependency advisories, 7 critical** `[CORE]` *(new)* → T1.12
   **Status 2026-09-28:** resolved by T1.12. Server: 26 → 8 advisories, all moderate, none high or critical. Client: 43 → 1; the remaining one is `image-size` inside Metro (the bundler, pinned by `@react-native/metro-config` 0.83.1), a build-time-only dependency that never ships in the app — accepted until the next React Native upgrade. Removed unused packages: `crypto-js`, `date-fns`, `uuid`, `@react-native/new-app-screen`, `@bam.tech/react-native-make`, legacy `react-native-vector-icons` and its type shim.
 - **P2-12 · Stack traces returned to clients; no error middleware; `NODE_ENV` unset** `[CORE]` *(new)* → T1.9
@@ -475,6 +475,8 @@ Extraction happens in T2.1. Secrets (`*.pem`, `*.keystore`, service-account JSON
 **7' progress — T7.2 done 2026-09-28** (one commit): reactions, edits, "delete for everyone" (a request the other devices honour) and forwarding with provenance, in 1:1 chats and groups, applied on every inbound path and sent local-first over the session. Next in order: T7.3 (disappearing messages).
 
 **7' progress — T7.3 done 2026-09-29** (one commit): disappearing messages as a per-conversation timer agreed over the session (admins only in groups), expiry fixed when a record is stored, sweeper on open / every 30 s / foreground, system lines and a timer sheet. Next in order: T7.4 (privacy toggles; no presence broadcast by default).
+
+**7' progress — T7.4 done 2026-09-29** (one commit): privacy toggles enforced server-side; a fresh account broadcasts no presence; P2-10 closed. Next in order: T7.5 (block and report).
 
 **2b progress — T2.14 done 2026-09-28** (one commit, D7 = A): plaintext stored locally in sealed records, message keys never archived, history read from the device with the server asked only for newer messages, one-time migration of the old archive. **The known-red registry is empty: every scenario the harness owns is green.** Remaining in Phase 2: T2.12 (manual two-device checklist, owner).
 
