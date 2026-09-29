@@ -100,6 +100,16 @@ store by one path (`chat/actions.ts`) with the rule that only a message's
 sender may edit or delete it, and never shown as messages. Profiles (name,
 avatar) reach each contact this way too; the server stores none.
 
+**Attachments (Phase 8').** A photo or voice note is sealed on the device
+under a fresh 32-byte key (64 KiB XSalsa20-Poly1305 chunks, an HMAC-SHA256
+trailer, SHA-256 digest of the blob), metadata stripped first; the
+ciphertext goes to the server's blob store (files under `BLOB_DIR`, or an
+S3-compatible bucket by presigned URL) under a 128-bit random id with a
+30-day TTL, and the message carries id, key, digest, size and type inside
+the session. A recipient downloads by id, checks the digest before touching
+a key and the MAC before opening a chunk, and keeps the plaintext as a file
+sealed under its session master key. The server learns size and timing.
+
 **Groups (Phase 6').** Per-user Sender Keys: each member keeps one
 symmetric chain and one Ed25519 signing key per group and membership
 epoch; a message is encrypted once under the sender's chain and signed
@@ -161,11 +171,15 @@ post-compromise security inside an epoch (DEVIATION-9, as Signal).
 ## 6. Known limits (deliberate, recorded)
 
 - Android only; iOS parked (T1.16).
-- One device per account; no media, calls, backup of history (Phase 8'
-  and later). Groups: `deviceId` is always 0 in the distribution record, so
+- One device per account; no calls, no backup of history, no video or
+  generic files (photos and voice notes since Phase 8'). Groups: `deviceId` is always 0 in the distribution record, so
   multi-device changes nothing in the format.
-- Profiles: no photo picker ships (emoji-on-colour avatars; a JPEG is
-  accepted and shown when received). Local search is a linear scan of the
+- Profiles: avatars are emoji-on-colour (the photo picker now shipped for
+  attachments could feed a JPEG avatar later; a JPEG is accepted and shown).
+- Attachments: capped at 8 MiB; a single upload with one retry (no resume);
+  no thumbnail asset (dimensions and auto-download up to 2 MiB); voice
+  notes show duration and progress, not a waveform; a decrypted voice note
+  exists as a temporary plaintext file for the duration of playback. Local search is a linear scan of the
   sealed store, bounded to the newest 2000 records per conversation.
 - "Delete for everyone" is a request the other devices honour; a copy may
   already have been read. A block is silent: the blocked user is not told,

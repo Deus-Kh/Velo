@@ -494,6 +494,8 @@ Extraction happens in T2.1. Secrets (`*.pem`, `*.keystore`, service-account JSON
 
 **8' progress — T8.3 + T8.4 done 2026-09-29** (one commit): photos and voice notes over the attachment path, sealed media files on the device, the app's own Android audio module instead of a third library; Android debug build verified. Next in order: T8.5 (harness S30, docs, gate).
 
+**8' progress — T8.5 done 2026-09-29** (one commit): S30 over the harness, the blob format and the content-kind row in the spec, DEVIATION-10, architecture. **Phase 8' is code-complete.** Remaining human step: the two-phone media gate. Next per §11: Phase 12' (interface) or the owner's call.
+
 **2b progress — T2.14 done 2026-09-28** (one commit, D7 = A): plaintext stored locally in sealed records, message keys never archived, history read from the device with the server asked only for newer messages, one-time migration of the old archive. **The known-red registry is empty: every scenario the harness owns is green.** Remaining in Phase 2: T2.12 (manual two-device checklist, owner).
 
 **2b progress — T2.11 done 2026-09-28** (two commits): bootstrap persists only after the first message decrypts, bootstrap replay refused, glare converges on the lower user id without losing messages, a peer's local reset is adopted automatically. Next in order: T2.14.

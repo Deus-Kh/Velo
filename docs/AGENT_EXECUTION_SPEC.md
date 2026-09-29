@@ -808,6 +808,8 @@ Written when Phase 7' closed; the roadmap (§7 Phase 8') fixes the shape: a rand
 
 **T8.4 status 2026-09-29: done** (same commit as T8.3). Recording and playback are the app's own Android module (`android/app/src/main/java/com/velo/VeloAudioModule.kt`, `VeloAudioPackage.kt`; `RECORD_AUDIO` requested at first use): MediaRecorder (AAC in MP4, 64 kbit/s, 44.1 kHz) and MediaPlayer behind four methods with progress events. **Deviation from D11:** the third library was dropped: `react-native-audio-recorder-player@3` uses APIs React Native 0.83 removed and does not compile, and `@4` requires the Nitro build system; ~150 lines of Kotlin in the repository replace it, which is also what the owner's rule prefers. A recording goes to the app's cache, is read once, deleted, encrypted and sent on the attachment path as `audio/mp4` with `durationMs`; releases shorter than 0.7 s are dropped, 5 minutes is the cap. Playback decrypts to a temporary file the player can open and removes it when playback ends or is stopped; one playback at a time. UI: hold-to-record replaces the send button while the composer is empty (both chats); the bubble shows download state, play/stop, duration and a progress bar. **Deviation:** duration and a progress bar instead of a waveform with scrubbing. iOS has no implementation (deferred with the rest of iOS).
 
+**T8.5 status 2026-09-29: done** (one commit). §8.2 carries the `attachment v1` blob format beside the pairwise and group formats and the `attachment` row in the content-kinds table; §8.4 lists S30; DEVIATION-10 is in the register; the harness records attachment references it receives and **S30** shows the reference crossing the pairwise session and the group chain opaque to the wire, the blob store holding no plaintext, integrity failures refused before any key is used, and the group chain carrying the reference through reordering; the known-red registry pins 36 files. `architecture.md` §3 and §6 describe attachments as built. **Phase 8' is code-complete.** The gate (a photo and a voice note between two phones over a real server; the bucket or `BLOB_DIR` holding nothing readable; the blob gone after its TTL) is a human step. Recorded deviations for the phase: no thumbnail asset, single upload with one retry, no waveform, video and generic files deferred, one library fewer than planned (the audio module is the app's own).
+
 # 8. REFERENCE
 
 ## 8.1 Normative ratchet algorithm (replaces v1 §8.1)
@@ -928,6 +930,13 @@ Every bump: update this table, the server validator, `Message.ts`, and the clien
 | `delete` | `target` | the target's sender only | a tombstone (a *request*; a copy may have been read) |
 | `timer` | `seconds \| null` (≤ 1 year) | either side of a 1:1; admins in a group | a system line; new records get `expiresAt` |
 | `profile` | `name` (≤ 64), `avatar` (emoji+colour or JPEG ≤ 32 KiB base64), `updatedAt` | the sender, about itself; newest wins | name and avatar wherever the sender appears |
+| `attachment` | `blobId`, `key` (32 B), `digest` (SHA-256 of the blob), `size`, `contentType`, `name?`, `width?`, `height?`, `durationMs?`, `caption?` | anyone; the blob is fetched by id, opened only with this key | a photo or voice note with the caption (T8.1–T8.4) |
+
+**Attachment blobs (Phase 8', T8.1)** are what the server (or the bucket) stores under `blobId`; the reference above is what opens them:
+
+| Format | Status | Blob | Introduced |
+|---|---|---|---|
+| `attachment v1` | **current** | `chunk_0 ‖ … ‖ chunk_{n-1} ‖ HMAC-SHA256(macKey, chunks)`, `chunk_i = secretbox(plain[i·64 KiB ..], nonce_i, cipherKey)`; keys from HKDF-SHA256(key, "VeloAttachmentKeys", 88) → cipherKey ‖ macKey ‖ nonceBase, `nonce_i` = nonceBase with its last four bytes XOR *i*; the message carries SHA-256(blob) and the plaintext size; decrypt verifies digest, then MAC, then opens; ≤ 8 MiB plaintext. The server stores the blob for `ATTACHMENT_TTL_DAYS` and learns only its size. | T8.1, 2026-09-29 |
 
 | Format | Status | Envelope | Introduced |
 |---|---|---|---|
@@ -956,7 +965,7 @@ Every bump: update this table, the server validator, `Message.ts`, and the clien
 The two bold codes are the security-warning class and must look different from technical errors.
 
 ## 8.4 Scenario catalog
-Canonical list in T2.4 (S01–S28), T6.6 (G01–G06: in order, out of order across senders, forged sender, late joiner, removed member, rotation redistributes) and T7.9 (S29: actions, timer and profile over the pairwise session and the group chain). Each scenario file states the checklist row it automates, the defect it covers, and expected state before and after the fix. Implemented in `packages/protocol/test/scenarios/` (2026-09-28/29); the red set is pinned by `knownRed.test.ts` (35 files) and must be updated in the same commit as any fix that flips a scenario.
+Canonical list in T2.4 (S01–S28), T6.6 (G01–G06: in order, out of order across senders, forged sender, late joiner, removed member, rotation redistributes), T7.9 (S29: actions, timer and profile over the pairwise session and the group chain) and T8.5 (S30: the attachment reference opaque on the wire, blob integrity, the group chain). Each scenario file states the checklist row it automates, the defect it covers, and expected state before and after the fix. Implemented in `packages/protocol/test/scenarios/` (2026-09-28/29); the red set is pinned by `knownRed.test.ts` (36 files) and must be updated in the same commit as any fix that flips a scenario.
 
 ## 8.5 Deviation register
 
@@ -970,6 +979,7 @@ Canonical list in T2.4 (S01–S28), T6.6 (G01–G06: in order, out of order acro
 | `DEVIATION-6` | Random 24-byte AEAD nonce instead of a KDF-derived nonce | — | **Removed by T2.5 (2026-09-28): the nonce is derived from the message key with `WhisperMessageKeys`, as in Signal.** |
 | `DEVIATION-7` | Glare keeps one decrypt-only secondary session on the winner's side until the peer switches, where libsignal keeps a list of previous session states per address | bounded state, deterministic tie-break (lower user id), no lost in-flight messages | **Active since 2026-09-28 (T2.11)** |
 | `DEVIATION-9` | Group messages use per-user Sender Keys (`group v1`, §8.2): forward secrecy per message, no post-compromise security inside an epoch; rotation on every membership change; copies in flight from a member removed before they are opened are lost | groups before multi-device (D6); Signal's Sender Keys have the same property | **Active since 2026-09-28 (T6.1–T6.5)** |
+| `DEVIATION-10` | Attachments are sealed as 64 KiB XSalsa20-Poly1305 chunks with an HMAC-SHA256 trailer and a SHA-256 digest in the message, where Signal uses AES-256-CBC + HMAC-SHA256 with the same digest | no new primitive (§0.3-6); the same shape, verify-before-decrypt order and cap | **Active since 2026-09-29 (T8.1)** |
 | `DEVIATION-8` | Zeroization is best effort: every intermediate byte array is wiped (`primitives/zeroize.ts`), but the keys stored base64 in a session are JavaScript strings and cannot be wiped, and the engine may hold copies of a byte array | JavaScript has no secure memory; libsignal (Rust) zeroizes on drop | **Active since 2026-09-28 (T3.4)** |
 
 ## 8.6 Glossary
