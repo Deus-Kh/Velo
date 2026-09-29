@@ -1,3 +1,5 @@
+import type { AttachmentMeta } from '../storage/messageStore';
+
 export type ReplyReference = {
   serverMessageId?: string | null;
   clientMessageId?: string | null;
@@ -22,4 +24,6 @@ export type UIMessage = {
   /** T7.3 */
   system?: boolean;
   expiresAt?: number | null;
+  /** T8.3 */
+  attachment?: AttachmentMeta | null;
 };

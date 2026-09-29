@@ -19,7 +19,7 @@ import {
 import { deleteSession } from '../storage/sessionStore';
 import { protocolErrorCode, type ProtocolErrorCode } from '@velo/protocol';
 import { acceptNewIdentity as acceptNewIdentityForPair } from '../crypto/identityTrust';
-import { listStoredMessages, upsertStoredMessage, type StoredMessage } from '../storage/messageStore';
+import { listStoredMessages, upsertStoredMessage, type AttachmentMeta, type StoredMessage } from '../storage/messageStore';
 import { syncNewerFromServer } from './historySync';
 import { deleteForEveryone, deleteForMe, editMessage, reactToMessage, subscribeToMessagePatches, type ConversationTarget } from './actions';
 import { setDisappearingTimer, subscribeToTimerChanges, sweepExpiredMessages } from './disappearing';
@@ -51,6 +51,8 @@ export type UIMessage = {
   /** T7.3 */
   system?: boolean;
   expiresAt?: number | null;
+  /** T8.3 */
+  attachment?: AttachmentMeta | null;
 };
 
 export type SessionHealth =
@@ -191,6 +193,7 @@ function toUI(m: StoredMessage): UIMessage {
     forwardedFrom: m.forwardedFrom ?? null,
     system: m.system ?? false,
     expiresAt: m.expiresAt,
+    attachment: m.attachment ?? null,
   };
 }
 
@@ -213,6 +216,7 @@ export function toStored(m: UIMessage): StoredMessage {
     forwardedFrom: m.forwardedFrom ?? null,
     system: m.system ?? false,
     expiresAt: m.expiresAt,
+    attachment: m.attachment ?? null,
   };
 }
 
@@ -550,6 +554,7 @@ export function useChatE2EE(peerUserId: string) {
               deliveredAt: m.deliveredAt || null,
               readAt: m.readAt || null,
               forwardedFrom: m.forwardedFrom ?? null,
+              attachment: m.attachment ?? null, // T8.3
             };
             setMessages((prev) => upsertMessage(prev, incoming));
             setSessionHealth((prev) => (prev.status === 'degraded' ? { status: 'healthy' } : prev)); // a good message clears a degraded state

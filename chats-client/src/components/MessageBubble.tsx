@@ -1,3 +1,4 @@
+import type React from 'react';
 import { Pressable, Text, View } from 'react-native';
 import { useRef } from 'react';
 import ReanimatedSwipeable, {
@@ -69,6 +70,7 @@ export default function MessageBubble({
   edited,
   deleted,
   forwarded,
+  attachment,
 }: {
   text: string;
   mine: boolean;
@@ -79,6 +81,8 @@ export default function MessageBubble({
   edited?: boolean;
   deleted?: boolean;
   forwarded?: boolean;
+  /** T8.3: rendered above the text (the caption). */
+  attachment?: React.ReactNode;
   replyPreview?: {
     title: string;
     text: string;
@@ -102,6 +106,7 @@ export default function MessageBubble({
     !deleted &&
     !forwarded &&
     !hasReactions &&
+    !attachment &&
     !text.includes('\n') &&
     text.trim().length <= 24;
   const replyPreviewSurfaceClass = mine ? 'bg-[#0A6F80]' : 'bg-surface';
@@ -193,13 +198,14 @@ export default function MessageBubble({
           {forwarded && !deleted ? (
             <Text className={`mb-0.5 text-[11px] font-semibold ${mine ? 'text-background/70' : 'text-primary'}`}>{'\u21AA'} Forwarded</Text>
           ) : null}
+          {!deleted && attachment ? attachment : null}
           {deleted ? (
             <Text className={`text-[15px] italic leading-[21px] ${mine ? 'text-background/75' : 'text-muted'}`}>This message was deleted</Text>
-          ) : (
+          ) : text || !attachment ? (
             <Text className={`text-[15px] leading-[21px] ${messageTextTone}`}>
               {text}
             </Text>
-          )}
+          ) : null}
 
           {showMeta ? (
             <View className="mt-1 flex-row items-center self-end">

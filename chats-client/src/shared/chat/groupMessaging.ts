@@ -4,7 +4,7 @@ import { groupPeerKey, type GroupView } from '../api/groups.api';
 import { messagesApi, type HistoryItem } from '../api/messages.api';
 import { ensureSocketConnected } from '../socket/socket';
 import { loadPeerSenderKey, savePeerSenderKey, saveOwnSenderKey } from '../storage/senderKeyStore';
-import { upsertStoredMessage, type StoredMessage } from '../storage/messageStore';
+import { upsertStoredMessage, type AttachmentMeta, type StoredMessage } from '../storage/messageStore';
 import { distributeSenderKey, ensureOwnSenderKey, requestSenderKey } from './groupKeys';
 import { reportDecryptFailure } from '../api/telemetry.api';
 
@@ -36,6 +36,30 @@ async function sendGroupEnvelope(params: { myUserId: string; group: GroupView; c
 /** T7.2: an action (reaction, edit, delete request, timer) on the group chain; nothing is stored as a message. */
 export async function sendGroupContent(params: { myUserId: string; group: GroupView; content: Content }): Promise<GroupSendAck> {
   return sendGroupEnvelope({ ...params, clientMessageId: `${Date.now()}-${Math.random().toString(16).slice(2)}`, createdAt: Date.now() });
+}
+
+/** T8.3: an attachment (or any content shown as a message) on the group chain, stored locally with its meta. */
+export async function sendGroupContentMessage(params: { myUserId: string; group: GroupView; content: Content; text: string; attachment: AttachmentMeta | null; clientMessageId: string; createdAt: number }): Promise<{ stored: StoredMessage; ack: GroupSendAck }> {
+  const { myUserId, group, content, clientMessageId, createdAt } = params;
+  const peerKey = groupPeerKey(group.groupId);
+  const ack = await sendGroupEnvelope({ myUserId, group, content, clientMessageId, createdAt });
+  const stored: StoredMessage = {
+    id: clientMessageId,
+    clientMessageId,
+    serverMessageId: ack.ok ? ack.serverMessageId : null,
+    direction: 'out',
+    senderUserId: myUserId,
+    text: params.text,
+    createdAt,
+    seq: ack.ok ? ack.seq : null,
+    status: ack.ok ? 'sent' : 'failed',
+    deliveredAt: null,
+    readAt: null,
+    replyTo: null,
+    attachment: params.attachment,
+  };
+  await upsertStoredMessage({ myUserId, peerUserId: peerKey, message: stored });
+  return { stored, ack };
 }
 
 export async function sendGroupMessage(params: { myUserId: string; group: GroupView; text: string; clientMessageId: string; createdAt: number; forwardedFrom?: { userId: string; createdAt: number } | null }): Promise<{ stored: StoredMessage; ack: GroupSendAck }> {
@@ -118,25 +142,27 @@ export async function ingestGroupItems(params: {
     try {
       const r = groupDecryptContent(state, message, { groupId, senderUserId: fromUserId });
       await savePeerSenderKey(myUserId, groupId, fromUserId, r.state);
-      if (r.content.kind !== 'text') {
+      if (r.content.kind !== 'text' && r.content.kind !== 'attachment') {
         await handleInboundAction({ myUserId, peerKey, actorUserId: fromUserId, content: r.content, groupAdminIds: params.adminIds ?? null }); // T7.2 / T7.3
         acked.push(it.serverMessageId);
         continue;
       }
+      const c = r.content;
       const stored: StoredMessage = {
         id: it.clientMessageId || it.serverMessageId,
         clientMessageId: it.clientMessageId ?? null,
         serverMessageId: it.serverMessageId,
         direction: 'in',
         senderUserId: fromUserId,
-        text: r.content.text,
+        text: c.kind === 'attachment' ? (c.caption ?? '') : c.text,
         createdAt: Number(it.createdAt ?? Date.now()),
         seq: typeof it.seq === 'number' ? it.seq : null,
         status: it.status ?? 'sent',
         deliveredAt: null,
         readAt: null,
         replyTo: null,
-        forwardedFrom: r.content.forwardedFrom ?? null,
+        forwardedFrom: c.kind === 'text' ? (c.forwardedFrom ?? null) : null,
+        attachment: c.kind === 'attachment' ? { blobId: c.blobId, key: c.key, digest: c.digest, size: c.size, contentType: c.contentType, ...(c.width !== undefined ? { width: c.width } : {}), ...(c.height !== undefined ? { height: c.height } : {}), ...(c.durationMs !== undefined ? { durationMs: c.durationMs } : {}), ...(c.name !== undefined ? { name: c.name } : {}) } : null, // T8.3
       };
       await upsertStoredMessage({ myUserId, peerUserId: peerKey, message: stored });
       received.push(stored);

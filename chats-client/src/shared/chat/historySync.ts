@@ -1,5 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { normalizeB64, protocolErrorCode, decodeContent, isControlContent, type Content, type MessageEnvelope, type ProtocolErrorCode } from '@velo/protocol';
+import { normalizeB64, protocolErrorCode, decodeContent, isControlContent, isAttachmentContent, type Content, type MessageEnvelope, type ProtocolErrorCode } from '@velo/protocol';
 import { messagesApi, type HistoryItem, type ReceiptItem } from '../api/messages.api';
 import { patchStoredMessage, storedMessageId, upsertStoredMessage, type StoredMessage } from '../storage/messageStore';
 import { receiveIncoming } from './incoming';
@@ -82,7 +82,7 @@ export async function ingestUndeliveredItems(params: {
     try {
       const r = await receiveIncoming({ myUserId, peerUserId, initPacket: it.initPacket ?? null, encrypted: envelope });
       const content = decodeContent(r.plaintext); // T6.2
-      if (content.kind !== 'text' && !isControlContent(content)) {
+      if (content.kind !== 'text' && !isControlContent(content) && !isAttachmentContent(content)) {
         await handleInboundAction({ myUserId, peerKey: peerUserId, actorUserId: peerUserId, content }); // T7.2
         acked.push(it.serverMessageId);
         continue;
@@ -93,8 +93,9 @@ export async function ingestUndeliveredItems(params: {
         acked.push(it.serverMessageId);
         continue;
       }
-      const record = toStored(it, 'in', content.text);
-      if (record && content.forwardedFrom) record.forwardedFrom = content.forwardedFrom;
+      const record = toStored(it, 'in', content.kind === 'attachment' ? (content.caption ?? '') : content.text);
+      if (record && content.kind === 'text' && content.forwardedFrom) record.forwardedFrom = content.forwardedFrom;
+      if (record && content.kind === 'attachment') record.attachment = { blobId: content.blobId, key: content.key, digest: content.digest, size: content.size, contentType: content.contentType, ...(content.width !== undefined ? { width: content.width } : {}), ...(content.height !== undefined ? { height: content.height } : {}), ...(content.durationMs !== undefined ? { durationMs: content.durationMs } : {}), ...(content.name !== undefined ? { name: content.name } : {}) }; // T8.3
       if (record) {
         await upsertStoredMessage({ myUserId, peerUserId, message: record });
         received.push(record);

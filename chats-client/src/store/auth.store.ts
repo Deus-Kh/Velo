@@ -16,6 +16,7 @@ import {
 } from '../shared/socket/socket';
 import { drainPendingMessagesForUser } from '../shared/chat/drainPendingMessages';
 import { wipeLocalStateForUser } from '../shared/storage/localWipe';
+import { deleteAllMediaForUser } from '../shared/media/mediaStore';
 import {
   clearStoredSession,
   loadStoredSession,
@@ -241,6 +242,7 @@ export const useAuthStore = create<AuthState>((set) => ({
 
     if (opts?.eraseLocalData && currentUserId) {
       const report = await wipeLocalStateForUser(currentUserId, opts.scope ?? 'messages');
+      await deleteAllMediaForUser(currentUserId).catch((e) => console.warn('[auth] media wipe failed:', e)); // T8.3
       if (report.failures.length) {
         console.warn('[auth] local wipe incomplete:', report.failures.join('; '));
       }

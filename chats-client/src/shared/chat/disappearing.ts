@@ -7,6 +7,7 @@ import { sendContent } from '../socket/messaging';
 import { openJson } from '../storage/sealed';
 import { loadConversationSettings, saveConversationSettings, type ConversationSettings } from '../storage/conversationSettingsStore';
 import { deleteStoredMessage, storedMessagesPrefixForUser, upsertStoredMessage, type StoredMessage } from '../storage/messageStore';
+import { deleteMedia } from '../media/mediaStore';
 import { peerKeyOf, publishMessagePatch, type ConversationTarget } from './actions';
 import { sendGroupContent } from './groupMessaging';
 
@@ -146,6 +147,7 @@ export async function sweepExpiredMessages(params: { myUserId: string; peerKey?:
     const rest = k.slice(userPrefix.length);
     const peerKey = rest.slice(0, rest.length - (16 + m.id.length) - 1);
     await deleteStoredMessage({ myUserId, peerUserId: peerKey, id: m.id, createdAt: m.createdAt });
+    if (m.attachment) await deleteMedia(myUserId, m.attachment.blobId); // T8.3
     publishMessagePatch({ myUserId, peerKey, id: m.id, message: null });
     touched.add(peerKey);
     removed += 1;

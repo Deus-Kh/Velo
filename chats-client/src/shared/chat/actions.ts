@@ -6,6 +6,7 @@ import { deleteStoredMessage, findStoredMessage, patchStoredMessage, upsertStore
 import { sendGroupContent, sendGroupMessage } from './groupMessaging';
 import { handleInboundTimer } from './disappearing';
 import { applyInboundProfile } from './profile';
+import { deleteMedia } from '../media/mediaStore';
 
 /**
  * Message actions (T7.2): reactions, edits, "delete for everyone" and
@@ -91,7 +92,8 @@ export async function applyActionContent(params: { myUserId: string; peerKey: st
       if (found.deletedAt) return { applied: false, reason: 'target is deleted' };
       patch = { text: content.text, editedAt: now };
     } else {
-      patch = { text: '', deletedAt: now, editedAt: null, reactions: {} };
+      patch = { text: '', deletedAt: now, editedAt: null, reactions: {}, attachment: null };
+      if (found.attachment) await deleteMedia(myUserId, found.attachment.blobId); // T8.3: the tombstone keeps no media
     }
   }
   const next = await patchStoredMessage({ myUserId, peerUserId: peerKey, id: found.id, createdAt: found.createdAt, patch });
@@ -163,6 +165,7 @@ export async function deleteForEveryone(params: { myUserId: string; target: Conv
 /** Local only: the record is removed from this device. */
 export async function deleteForMe(params: { myUserId: string; peerKey: string; message: StoredMessage }): Promise<void> {
   await deleteStoredMessage({ myUserId: params.myUserId, peerUserId: params.peerKey, id: params.message.id, createdAt: params.message.createdAt });
+  if (params.message.attachment) await deleteMedia(params.myUserId, params.message.attachment.blobId); // T8.3
   publishMessagePatch({ myUserId: params.myUserId, peerKey: params.peerKey, id: params.message.id, message: null });
 }
 
@@ -174,7 +177,13 @@ const genId = () => `${Date.now()}-${Math.random().toString(16).slice(2)}`;
  */
 export async function forwardMessage(params: { myUserId: string; fromPeerKey: string; message: StoredMessage; to: ConversationTarget }): Promise<StoredMessage> {
   const { myUserId, message, to } = params;
-  if (message.deletedAt || !message.text) throw new Error('nothing to forward');
+  if (message.deletedAt) throw new Error('nothing to forward');
+  if (message.attachment) {
+    // T8.3: the reference (id, key, digest) is forwarded; the blob is not re-uploaded while it lives.
+    const { sendAttachmentMessage, contentOf } = await import('../media/attachments');
+    return sendAttachmentMessage({ myUserId, target: to, content: contentOf(message.attachment, message.text) });
+  }
+  if (!message.text) throw new Error('nothing to forward');
   const originalSender = senderOf(message, myUserId, params.fromPeerKey) ?? myUserId;
   const forwardedFrom = message.forwardedFrom ?? { userId: originalSender, createdAt: message.createdAt };
   const clientMessageId = genId();

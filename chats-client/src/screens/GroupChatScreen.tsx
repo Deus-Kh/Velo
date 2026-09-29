@@ -23,6 +23,11 @@ import { forwardMessage, summarizeReactions } from '../shared/chat/actions';
 import { formatTimer } from '../shared/chat/disappearing';
 import Avatar from '../components/Avatar';
 import SearchInChatSheet from '../components/SearchInChatSheet';
+import AttachmentView from '../components/AttachmentView';
+import ImageViewer from '../components/ImageViewer';
+import { pickImage, sendAttachmentMessage, uploadAttachment } from '../shared/media/attachments';
+import RecordButton from '../components/RecordButton';
+import { uploadVoiceNote, type Recording } from '../shared/media/voiceNotes';
 import { useProfilesStore } from '../store/profiles.store';
 import TimerSheet from '../components/TimerSheet';
 import StatusChip from '../components/StatusChip';
@@ -66,6 +71,8 @@ export default function GroupChatScreen({ groupId, initialName, jumpToMessageId,
   const [sheet, setSheet] = useState<MemberSheet>(null);
   const [selected, setSelected] = useState<GroupUIMessage | null>(null);
   const [jumpTarget, setJumpTarget] = useState<string | null>(jumpToMessageId ?? null);
+  const [viewerUri, setViewerUri] = useState<string | null>(null);
+  const [uploadState, setUploadState] = useState<{ label: string; progress: number | null } | null>(null);
   const [editTarget, setEditTarget] = useState<GroupUIMessage | null>(null);
   const [forwardTarget, setForwardTarget] = useState<GroupUIMessage | null>(null);
   const [memberQuery, setMemberQuery] = useState('');
@@ -121,6 +128,45 @@ export default function GroupChatScreen({ groupId, initialName, jumpToMessageId,
     }, 250);
     return () => clearTimeout(handle);
   }, [memberQuery, membersById, sheet]);
+
+  // T8.3: a photo on the group chain; the composer text is the caption.
+  const onSendPhoto = useCallback(async () => {
+    if (!myUserId || !group || uploadState) return;
+    try {
+      const picked = await pickImage();
+      if (!picked) return;
+      setUploadState({ label: 'Encrypting photo…', progress: null });
+      const caption = text.trim();
+      const content = await uploadAttachment({ myUserId: String(myUserId), bytes: picked.bytes, contentType: picked.contentType, width: picked.width, height: picked.height, name: picked.name, caption, onProgress: (l, t) => setUploadState({ label: 'Uploading encrypted photo…', progress: t > 0 ? l / t : null }) });
+      setUploadState({ label: 'Sending…', progress: null });
+      await sendAttachmentMessage({ myUserId: String(myUserId), target: { kind: 'group', group }, content });
+      if (caption) setText('');
+    } catch (e: any) {
+      console.warn('[groups] photo send failed:', e);
+      if (Platform.OS === 'android') ToastAndroid.show(e?.message || 'Could not send the photo', ToastAndroid.SHORT);
+    } finally {
+      setUploadState(null);
+    }
+  }, [group, myUserId, text, uploadState]);
+
+  // T8.4: voice note on the group chain.
+  const onVoiceNote = useCallback(
+    async (recording: Recording) => {
+      if (!myUserId || !group) return;
+      try {
+        setUploadState({ label: 'Encrypting voice message…', progress: null });
+        const content = await uploadVoiceNote({ myUserId: String(myUserId), recording, onProgress: (l, t) => setUploadState({ label: 'Uploading encrypted voice message…', progress: t > 0 ? l / t : null }) });
+        setUploadState({ label: 'Sending…', progress: null });
+        await sendAttachmentMessage({ myUserId: String(myUserId), target: { kind: 'group', group }, content });
+      } catch (e: any) {
+        console.warn('[groups] voice note failed:', e);
+        if (Platform.OS === 'android') ToastAndroid.show(e?.message || 'Could not send the voice message', ToastAndroid.SHORT);
+      } finally {
+        setUploadState(null);
+      }
+    },
+    [group, myUserId],
+  );
 
   const onSend = useCallback(async () => {
     const value = text;
@@ -283,6 +329,7 @@ export default function GroupChatScreen({ groupId, initialName, jumpToMessageId,
                     edited={Boolean(item.editedAt)}
                     deleted={Boolean(item.deletedAt)}
                     forwarded={Boolean(item.forwardedFrom)}
+                    attachment={item.attachment && myUserId ? <AttachmentView myUserId={String(myUserId)} meta={item.attachment} mine={item.mine} onOpen={setViewerUri} /> : undefined}
                     onPress={() => setSelected(item)}
                   />
                 </View>
@@ -409,6 +456,8 @@ export default function GroupChatScreen({ groupId, initialName, jumpToMessageId,
         </BottomSheetPanel>
       ) : null}
 
+      <ImageViewer uri={viewerUri} onClose={() => setViewerUri(null)} />
+
       {sheet === 'search' && myUserId ? (
         <SearchInChatSheet
           myUserId={String(myUserId)}
@@ -501,7 +550,22 @@ export default function GroupChatScreen({ groupId, initialName, jumpToMessageId,
             </Pressable>
           </View>
         ) : null}
+        {uploadState ? (
+          <View className={`mb-2.5 rounded-[20px] border border-border px-4 py-3 ${surfaceStyle === 'glass' ? 'bg-surface/82' : 'bg-surface-elevated'}`}>
+            <Text className="text-[12px] font-semibold uppercase tracking-[1px] text-primary">{uploadState.label}</Text>
+            <View className="mt-2 h-1.5 overflow-hidden rounded-full bg-background-alt/70">
+              <View className="h-full bg-primary" style={{ width: `${Math.round((uploadState.progress ?? 0.05) * 100)}%` }} />
+            </View>
+          </View>
+        ) : null}
         <View className="flex-row items-center gap-2.5">
+          <Pressable
+            onPress={onSendPhoto}
+            disabled={!group || removed || Boolean(uploadState)}
+            className={`${buttonSizeClass} items-center justify-center rounded-full border border-border ${composerSurfaceClass} active:opacity-80`}
+          >
+            <Text className="text-[20px] leading-none text-text">{'\u{1F4F7}'}</Text>
+          </Pressable>
           <View className={`flex-1 rounded-[24px] border border-border bg-surface-elevated px-4 ${interfaceDensity === 'compact' ? 'py-0.5' : 'py-1'}`}>
             <TextInput
               value={text}
@@ -520,13 +584,25 @@ export default function GroupChatScreen({ groupId, initialName, jumpToMessageId,
               textAlignVertical="top"
             />
           </View>
-          <Pressable
-            onPress={onSend}
-            disabled={!canSend}
-            className={`${buttonSizeClass} items-center justify-center rounded-full ${canSend ? 'bg-primary' : `border border-border ${composerSurfaceClass}`} active:opacity-80`}
-          >
-            <Text className={`text-lg font-semibold ${canSend ? 'text-background' : 'text-muted'}`}>{'↑'}</Text>
-          </Pressable>
+          {text.trim().length === 0 && group && !removed && !editTarget ? (
+            <RecordButton
+              sizeClass={buttonSizeClass}
+              surfaceClass={composerSurfaceClass}
+              disabled={Boolean(uploadState)}
+              onRecorded={onVoiceNote}
+              onError={(m) => {
+                if (Platform.OS === 'android') ToastAndroid.show(m, ToastAndroid.SHORT);
+              }}
+            />
+          ) : (
+            <Pressable
+              onPress={onSend}
+              disabled={!canSend}
+              className={`${buttonSizeClass} items-center justify-center rounded-full ${canSend ? 'bg-primary' : `border border-border ${composerSurfaceClass}`} active:opacity-80`}
+            >
+              <Text className={`text-lg font-semibold ${canSend ? 'text-background' : 'text-muted'}`}>{'↑'}</Text>
+            </Pressable>
+          )}
         </View>
       </View>
     </KeyboardAvoidingView>

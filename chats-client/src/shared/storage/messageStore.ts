@@ -43,6 +43,21 @@ export type StoredMessage = {
   system?: boolean;
   /** T7.3: when this record is removed by the sweeper; fixed when first stored; null = never. */
   expiresAt?: number | null;
+  /** T8.3: the attachment this message is (the key stays inside this sealed record); `text` is the caption. */
+  attachment?: AttachmentMeta | null;
+};
+
+/** What a message needs to fetch and open its attachment; the blob itself lives on the server until it expires. */
+export type AttachmentMeta = {
+  blobId: string;
+  key: string;
+  digest: string;
+  size: number;
+  contentType: string;
+  name?: string;
+  width?: number;
+  height?: number;
+  durationMs?: number;
 };
 
 const PREFIX = 'msg:v1';

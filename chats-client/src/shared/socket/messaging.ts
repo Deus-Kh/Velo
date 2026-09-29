@@ -11,9 +11,10 @@ import { encryptAndPersist } from '../chat/ratchetAdapter';
 import { receiveIncoming } from '../chat/incoming';
 import { handleInboundAction } from '../chat/actions';
 import { isBlockedLocally } from '../../store/blocks.store';
+import type { AttachmentMeta } from '../storage/messageStore';
 import { ensureV2Session } from '../crypto/sessionBootstrap';
 import { reportDecryptFailure } from '../api/telemetry.api';
-import { ProtocolError, protocolErrorCode, type ProtocolErrorCode, type RatchetSessionV2, encodeContent, decodeContent, isControlContent, textContent, type Content } from '@velo/protocol';
+import { ProtocolError, protocolErrorCode, type ProtocolErrorCode, type RatchetSessionV2, encodeContent, decodeContent, isControlContent, isAttachmentContent, textContent, type Content, type AttachmentContent } from '@velo/protocol';
 import type { X3DHInitPacket } from '../crypto/x3dh';
 
 function requireMyUserId(): string {
@@ -65,6 +66,28 @@ export async function sendMessageV2(params: {
     replyTo: params.replyTo ?? null,
   };
 
+  return new Promise((resolve, reject) => {
+    socket.emit('message:send', dto, (ack: any) => {
+      if (!ack?.ok) return reject(new ProtocolError('SEND_FAILED', ack?.error || 'Send failed'));
+      resolve({ serverMessageId: ack.serverMessageId, seq: typeof ack.seq === 'number' ? ack.seq : null });
+    });
+  });
+}
+
+/** T8.3: a message whose content is not text (an attachment): the same path as sendMessageV2 with the envelope given. */
+export async function sendContentMessage(params: {
+  toUserId: string;
+  content: Content;
+  clientMessageId: string;
+  initPacket?: X3DHInitPacket | null;
+  replyTo?: ReplyReference | null;
+}): Promise<{ serverMessageId: string; seq: number | null }> {
+  const socket = await ensureSocketConnected();
+  const myUserId = requireMyUserId();
+  const session = await loadSession({ myUserId, peerUserId: params.toUserId });
+  if (!session || session.protoVersion !== 4) throw new ProtocolError('NO_SESSION', 'No v2 session for this peer');
+  const { encrypted } = await encryptAndPersist({ myUserId, peerUserId: params.toUserId, session: session as RatchetSessionV2, plaintext: encodeContent(params.content) });
+  const dto: SendMessageDTO = { toUserId: params.toUserId, clientMessageId: params.clientMessageId, createdAt: Date.now(), protoVersion: 4, v4: encrypted, initPacket: params.initPacket ?? null, replyTo: params.replyTo ?? null };
   return new Promise((resolve, reject) => {
     socket.emit('message:send', dto, (ack: any) => {
       if (!ack?.ok) return reject(new ProtocolError('SEND_FAILED', ack?.error || 'Send failed'));
@@ -134,6 +157,7 @@ export async function subscribeToMessages(onMessage: (m: {
   deliveredAt?: number | null;
   readAt?: number | null;
   forwardedFrom?: { userId: string; createdAt: number } | null;
+  attachment?: AttachmentMeta | null;
 }) => void, options?: {
   peerUserId?: string;
   onFailure?: (reason: string, code: ProtocolErrorCode | null) => void;
@@ -179,7 +203,7 @@ export async function subscribeToMessages(onMessage: (m: {
       
       // T6.2: the plaintext is a content envelope; control messages take their own path and are still acked.
       const content = decodeContent(plaintext);
-      if (content.kind !== 'text' && !isControlContent(content)) {
+      if (content.kind !== 'text' && !isControlContent(content) && !isAttachmentContent(content)) {
         // T7.2: a reaction, edit, delete request or timer: applied to the local store, then acked.
         handleInboundAction({ myUserId, peerKey: msg.fromUserId, actorUserId: msg.fromUserId, content }).finally(() => {
           socket.emit('message:delivered', { serverMessageId: msg.serverMessageId }, () => {});
@@ -195,8 +219,9 @@ export async function subscribeToMessages(onMessage: (m: {
 
       onMessage({
         fromUserId: msg.fromUserId,
-        text: content.text,
-        forwardedFrom: content.forwardedFrom ?? null,
+        text: content.kind === 'attachment' ? (content.caption ?? '') : content.text,
+        forwardedFrom: content.kind === 'text' ? (content.forwardedFrom ?? null) : null,
+        attachment: content.kind === 'attachment' ? attachmentMetaOf(content) : null, // T8.3
         serverMessageId: msg.serverMessageId,
         clientMessageId: msg.clientMessageId,
         createdAt: msg.createdAt,
@@ -237,4 +262,14 @@ export async function subscribeToMessages(onMessage: (m: {
 
   socket.on('message:new', handler);
   return () => socket.off('message:new', handler);
+}
+
+/** T8.3: what the store keeps for an attachment message (the key stays inside the sealed record). */
+function attachmentMetaOf(c: AttachmentContent): AttachmentMeta {
+  const meta: AttachmentMeta = { blobId: c.blobId, key: c.key, digest: c.digest, size: c.size, contentType: c.contentType };
+  if (c.width !== undefined) meta.width = c.width;
+  if (c.height !== undefined) meta.height = c.height;
+  if (c.durationMs !== undefined) meta.durationMs = c.durationMs;
+  if (c.name !== undefined) meta.name = c.name;
+  return meta;
 }

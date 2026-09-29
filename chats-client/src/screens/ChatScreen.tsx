@@ -30,6 +30,11 @@ import { useBlocksStore } from '../store/blocks.store';
 import { blockPeer, reportPeer, unblockPeer } from '../shared/chat/blocks';
 import Avatar from '../components/Avatar';
 import SearchInChatSheet from '../components/SearchInChatSheet';
+import AttachmentView from '../components/AttachmentView';
+import ImageViewer from '../components/ImageViewer';
+import { pickImage, sendAttachmentMessage, uploadAttachment } from '../shared/media/attachments';
+import RecordButton from '../components/RecordButton';
+import { uploadVoiceNote, type Recording } from '../shared/media/voiceNotes';
 import { useProfilesStore } from '../store/profiles.store';
 import StatusChip from '../components/StatusChip';
 import { conversationsApi } from '../shared/api/conversations.api';
@@ -366,6 +371,8 @@ const { keyboardShown , keyboardHeight } = useKeyboard()
   const [showTimerSheet, setShowTimerSheet] = useState(false);
   const [showReportSheet, setShowReportSheet] = useState(false);
   const [showSearchSheet, setShowSearchSheet] = useState(false);
+  const [viewerUri, setViewerUri] = useState<string | null>(null);
+  const [uploadState, setUploadState] = useState<{ label: string; progress: number | null } | null>(null);
   const [jumpTarget, setJumpTarget] = useState<string | null>(jumpToMessageId ?? null);
   const jumpAttemptsRef = useRef(0);
   const [reportBusy, setReportBusy] = useState(false);
@@ -693,6 +700,54 @@ useEffect(() => {
     await send(trimmedText, { replyTo });
   };
 
+  // T8.3: pick a photo, strip its metadata, encrypt, upload, send; the caption is the composer text.
+  const handleSendPhoto = useCallback(async () => {
+    if (!myUserId || uploadState) return;
+    try {
+      const picked = await pickImage();
+      if (!picked) return;
+      setUploadState({ label: 'Encrypting photo…', progress: null });
+      const caption = text.trim();
+      const content = await uploadAttachment({
+        myUserId: String(myUserId),
+        bytes: picked.bytes,
+        contentType: picked.contentType,
+        width: picked.width,
+        height: picked.height,
+        name: picked.name,
+        caption,
+        onProgress: (loaded, total) => setUploadState({ label: 'Uploading encrypted photo…', progress: total > 0 ? loaded / total : null }),
+      });
+      setUploadState({ label: 'Sending…', progress: null });
+      await sendAttachmentMessage({ myUserId: String(myUserId), target: { kind: 'peer', peerUserId }, content });
+      if (caption) setText('');
+    } catch (e: any) {
+      console.warn('[ChatScreen] photo send failed:', e);
+      if (Platform.OS === 'android') ToastAndroid.show(e?.message || 'Could not send the photo', ToastAndroid.SHORT);
+    } finally {
+      setUploadState(null);
+    }
+  }, [myUserId, peerUserId, text, uploadState]);
+
+  // T8.4: a finished recording is encrypted, uploaded and sent like a photo.
+  const handleVoiceNote = useCallback(
+    async (recording: Recording) => {
+      if (!myUserId) return;
+      try {
+        setUploadState({ label: 'Encrypting voice message…', progress: null });
+        const content = await uploadVoiceNote({ myUserId: String(myUserId), recording, onProgress: (l, t) => setUploadState({ label: 'Uploading encrypted voice message…', progress: t > 0 ? l / t : null }) });
+        setUploadState({ label: 'Sending…', progress: null });
+        await sendAttachmentMessage({ myUserId: String(myUserId), target: { kind: 'peer', peerUserId }, content });
+      } catch (e: any) {
+        console.warn('[ChatScreen] voice note failed:', e);
+        if (Platform.OS === 'android') ToastAndroid.show(e?.message || 'Could not send the voice message', ToastAndroid.SHORT);
+      } finally {
+        setUploadState(null);
+      }
+    },
+    [myUserId, peerUserId],
+  );
+
   const handleOpenComposerActions = useCallback(() => {
     setShowComposerActions(true);
   }, []);
@@ -955,6 +1010,7 @@ useEffect(() => {
                     edited={Boolean(item.message.editedAt)}
                     deleted={Boolean(item.message.deletedAt)}
                     forwarded={Boolean(item.message.forwardedFrom)}
+                    attachment={item.message.attachment && myUserId ? <AttachmentView myUserId={String(myUserId)} meta={item.message.attachment} mine={item.message.mine} onOpen={setViewerUri} /> : undefined}
                     replyPreview={replyPreview}
                     onReplyPreviewPress={
                       replyPreview?.targetMessageId
@@ -1063,6 +1119,17 @@ useEffect(() => {
           <Pressable
             onPress={() => {
               handleCloseComposerActions();
+              handleSendPhoto();
+            }}
+            className="rounded-[18px] px-3 py-3 active:opacity-80"
+          >
+            <Text className="text-[15px] font-medium text-text">Send a photo</Text>
+            <Text className="mt-1 text-[13px] leading-5 text-muted">Metadata is stripped, the photo is encrypted on this device; the composer text becomes the caption.</Text>
+          </Pressable>
+
+          <Pressable
+            onPress={() => {
+              handleCloseComposerActions();
               setShowSearchSheet(true);
             }}
             className="rounded-[18px] px-3 py-3 active:opacity-80"
@@ -1153,6 +1220,8 @@ useEffect(() => {
           })()
         : null}
 
+      <ImageViewer uri={viewerUri} onClose={() => setViewerUri(null)} />
+
       {showSearchSheet && myUserId ? (
         <SearchInChatSheet
           myUserId={String(myUserId)}
@@ -1242,6 +1311,15 @@ useEffect(() => {
           </View>
         ) : null}
 
+        {uploadState ? (
+          <View className={`mb-2.5 rounded-[20px] border border-border px-4 py-3 ${surfaceStyle === 'glass' ? 'bg-surface/82' : 'bg-surface-elevated'}`}>
+            <Text className="text-[12px] font-semibold uppercase tracking-[1px] text-primary">{uploadState.label}</Text>
+            <View className="mt-2 h-1.5 overflow-hidden rounded-full bg-background-alt/70">
+              <View className="h-full bg-primary" style={{ width: `${Math.round((uploadState.progress ?? 0.05) * 100)}%` }} />
+            </View>
+          </View>
+        ) : null}
+
         {editTarget ? (
           <View
             className={`mb-2.5 rounded-[20px] border border-border px-4 py-3 ${
@@ -1305,15 +1383,27 @@ useEffect(() => {
             />
           </View>
 
-          <Pressable
-            onPress={onSend}
-            disabled={!canSend}
-            className={`${composerButtonSizeClass} items-center justify-center rounded-full ${
-              canSend ? 'bg-primary' : `border border-border ${composerSurfaceClass}`
-            } active:opacity-80`}
-          >
-            <SendIcon color={canSend ? '#04131E' : '#94A3B8'} />
-          </Pressable>
+          {trimmedText.length === 0 && socketReady && !peerBlocked && !peerDeleted && !editTarget ? (
+            <RecordButton
+              sizeClass={composerButtonSizeClass}
+              surfaceClass={composerSurfaceClass}
+              disabled={Boolean(uploadState)}
+              onRecorded={handleVoiceNote}
+              onError={(m) => {
+                if (Platform.OS === 'android') ToastAndroid.show(m, ToastAndroid.SHORT);
+              }}
+            />
+          ) : (
+            <Pressable
+              onPress={onSend}
+              disabled={!canSend}
+              className={`${composerButtonSizeClass} items-center justify-center rounded-full ${
+                canSend ? 'bg-primary' : `border border-border ${composerSurfaceClass}`
+              } active:opacity-80`}
+            >
+              <SendIcon color={canSend ? '#04131E' : '#94A3B8'} />
+            </Pressable>
+          )}
         </View>
       </View>
     </KeyboardAvoidingView>

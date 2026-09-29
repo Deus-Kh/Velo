@@ -68,6 +68,42 @@ jest.mock('@react-native-firebase/messaging', () => ({
 
 jest.mock('react-native-safe-area-context', () => require('react-native-safe-area-context/jest/mock').default);
 
+// T8.3/T8.4: media libraries. The file system is an in-memory map keyed by path.
+jest.mock('react-native-blob-util', () => {
+  const files = new Map();
+  const fs = {
+    dirs: { DocumentDir: '/doc', CacheDir: '/cache' },
+    exists: jest.fn(async (p) => files.has(p) || [...files.keys()].some((k) => k.startsWith(p + '/'))),
+    mkdir: jest.fn(async () => undefined),
+    writeFile: jest.fn(async (p, data) => {
+      files.set(p, String(data));
+    }),
+    readFile: jest.fn(async (p) => {
+      if (!files.has(p)) throw new Error('ENOENT ' + p);
+      return files.get(p);
+    }),
+    unlink: jest.fn(async (p) => {
+      files.delete(p);
+      for (const k of [...files.keys()]) if (k.startsWith(p + '/')) files.delete(k);
+    }),
+    stat: jest.fn(async (p) => ({ size: (files.get(p) || '').length })),
+  };
+  return { __esModule: true, default: { fs, __reset: () => files.clear() }, ReactNativeBlobUtil: { fs } };
+});
+// T8.4: the app's own Android audio module (record / play) as the JS side sees it.
+{
+  const { NativeModules } = require('react-native');
+  NativeModules.VeloAudio = {
+    startRecording: jest.fn(async (path) => path),
+    stopRecording: jest.fn(async () => ''),
+    startPlaying: jest.fn(async () => 0),
+    stopPlaying: jest.fn(async () => undefined),
+    addListener: jest.fn(),
+    removeListeners: jest.fn(),
+  };
+}
+jest.mock('react-native-image-picker', () => ({ launchImageLibrary: jest.fn(async () => ({ didCancel: true })), launchCamera: jest.fn(async () => ({ didCancel: true })) }));
+
 jest.mock('@react-native-clipboard/clipboard', () => ({
   __esModule: true,
   default: { getString: jest.fn(async () => ''), setString: jest.fn() },
