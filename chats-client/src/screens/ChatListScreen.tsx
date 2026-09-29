@@ -28,7 +28,7 @@ import { ingestLiveGroupMessage, ingestLiveMessage } from '../shared/notificatio
 import { groupPeerKey, groupsApi, type GroupView } from '../shared/api/groups.api';
 import { ensureOwnSenderKey } from '../shared/chat/groupKeys';
 import { deleteGroupKeys } from '../shared/storage/senderKeyStore';
-import { useBlocksStore } from '../store/blocks.store';
+import { selectBlockedIds, useBlocksStore } from '../store/blocks.store';
 import { blockPeer, unblockPeer } from '../shared/chat/blocks';
 import Avatar from '../components/Avatar';
 import { searchStoredMessages, type SearchHit } from '../shared/storage/messageStore';
@@ -249,7 +249,7 @@ export default function ChatListScreen({
   const togglePinnedConversation = useChatListStore((s) => s.togglePinnedConversation);
   const toggleArchivedConversation = useChatListStore((s) => s.toggleArchivedConversation);
   const activeChatPeerUserId = useAppUiStore((s) => s.activeChatPeerUserId);
-  const blockedIds = useBlocksStore((s) => (myUserId ? s.blockedByUser[String(myUserId)] : undefined) ?? []);
+  const blockedIds = useBlocksStore(selectBlockedIds(myUserId));
   const profiles = useProfilesStore((s) => s.byUser); // T7.7
   const [messageHits, setMessageHits] = useState<SearchHit[]>([]); // T7.8
 

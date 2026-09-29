@@ -14,6 +14,20 @@ type BlocksState = {
   removeBlocked: (myUserId: string, userId: string) => void;
 };
 
+/**
+ * Shared empty list for users with no blocks entry. Zustand v5 selects through
+ * useSyncExternalStore, which compares snapshots by reference: a selector that
+ * returns a fresh `[]` on every call re-renders forever ("The result of
+ * getSnapshot should be cached"), so the fallback must be one stable object.
+ */
+export const EMPTY_BLOCKED: readonly string[] = Object.freeze([]);
+
+/** Stable selector: the caller's block list, or the shared empty list. */
+export const selectBlockedIds =
+  (myUserId: string | null | undefined) =>
+  (s: { blockedByUser: Record<string, string[]> }): readonly string[] =>
+    (myUserId ? s.blockedByUser[String(myUserId)] : undefined) ?? EMPTY_BLOCKED;
+
 export const useBlocksStore = create<BlocksState>()(
   persist(
     (set) => ({
