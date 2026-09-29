@@ -148,7 +148,7 @@ What a user can actually do today: 1:1 text with replies, receipts, typing, pres
 | Push notifications | ✅ data-only, decrypted on device | ✅ data-only wake-up, fetched and decrypted on the device, rendered with the local contact name and an honest preview toggle (T3.3, Android); iOS parked | done (Android) |
 | iOS build | ✅ | ❌ cannot connect | ⏸ T1.16 deferred by owner (2026-09-28): Android only for now |
 | Reactions, edit, delete, forward | ✅ | ✅ as content over the session; delete for everyone is a request (T7.2) | done |
-| Images / video / files / voice notes | ✅ | ❌ | ✅ Phase 8' |
+| Images / video / files / voice notes | ✅ | ✅ photos and voice notes end-to-end encrypted, blobs opaque to the server (T8.3/T8.4); video and files deferred | photos + voice notes done |
 | Disappearing messages | ✅ | ✅ off / 1 h / 1 d / 1 w, admins in groups (T7.3) | done |
 | Avatars / profiles | ✅ encrypted | ✅ name + emoji/JPEG avatar over the session, server stores none; no photo picker yet (T7.7) | done (picker later) |
 | Groups | ✅ | ✅ create, add/remove/leave, roles, group chat screen, notifications (Phase 6') | done; media, disappearing, reactions per Phases 7'/8' |
@@ -491,6 +491,8 @@ Extraction happens in T2.1. Secrets (`*.pem`, `*.keystore`, service-account JSON
 **8' progress — T8.1 done 2026-09-29** (one commit): attachment keys, chunked cipher with MAC and digest, metadata stripping, the `attachment` content kind, four error codes, frozen vector. Next in order: T8.2 (server: blob storage).
 
 **8' progress — T8.2 done 2026-09-29** (one commit): blob storage behind one interface (local files with signed tokens, or S3 with presigned URLs written in the repository), reservation budget, hourly sweep. Next in order: T8.3 (client: images).
+
+**8' progress — T8.3 + T8.4 done 2026-09-29** (one commit): photos and voice notes over the attachment path, sealed media files on the device, the app's own Android audio module instead of a third library; Android debug build verified. Next in order: T8.5 (harness S30, docs, gate).
 
 **2b progress — T2.14 done 2026-09-28** (one commit, D7 = A): plaintext stored locally in sealed records, message keys never archived, history read from the device with the server asked only for newer messages, one-time migration of the old archive. **The known-red registry is empty: every scenario the harness owns is green.** Remaining in Phase 2: T2.12 (manual two-device checklist, owner).
 
