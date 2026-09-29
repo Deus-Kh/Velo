@@ -4,6 +4,7 @@ import { ensureV2Session } from '../crypto/sessionBootstrap';
 import { sendContent, sendMessageV2 } from '../socket/messaging';
 import { deleteStoredMessage, findStoredMessage, patchStoredMessage, upsertStoredMessage, type StoredMessage } from '../storage/messageStore';
 import { sendGroupContent, sendGroupMessage } from './groupMessaging';
+import { handleInboundTimer } from './disappearing';
 
 /**
  * Message actions (T7.2): reactions, edits, "delete for everyone" and
@@ -98,9 +99,13 @@ export async function applyActionContent(params: { myUserId: string; peerKey: st
 }
 
 /** Every inbound path calls this for non-text, non-control content. Never throws. */
-export async function handleInboundAction(params: { myUserId: string; peerKey: string; actorUserId: string; content: Content }): Promise<void> {
+export async function handleInboundAction(params: { myUserId: string; peerKey: string; actorUserId: string; content: Content; groupAdminIds?: string[] | null }): Promise<void> {
   if (!isActionContent(params.content)) return;
   try {
+    if (params.content.kind === 'timer') {
+      await handleInboundTimer({ myUserId: params.myUserId, peerKey: params.peerKey, actorUserId: params.actorUserId, content: params.content, groupAdminIds: params.groupAdminIds }); // T7.3
+      return;
+    }
     const r = await applyActionContent({ myUserId: params.myUserId, peerKey: params.peerKey, actorUserId: params.actorUserId, content: params.content });
     if (!r.applied) console.warn('[actions] inbound action not applied:', { kind: params.content.kind, reason: r.reason });
   } catch (e) {

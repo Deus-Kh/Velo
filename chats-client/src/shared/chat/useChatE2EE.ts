@@ -22,6 +22,9 @@ import { acceptNewIdentity as acceptNewIdentityForPair } from '../crypto/identit
 import { listStoredMessages, upsertStoredMessage, type StoredMessage } from '../storage/messageStore';
 import { syncNewerFromServer } from './historySync';
 import { deleteForEveryone, deleteForMe, editMessage, reactToMessage, subscribeToMessagePatches, type ConversationTarget } from './actions';
+import { setDisappearingTimer, subscribeToTimerChanges, sweepExpiredMessages } from './disappearing';
+import { CHAT_SWEEP_INTERVAL_MS } from './useExpirySweeper';
+import { loadConversationSettings, DEFAULT_CONVERSATION_SETTINGS, type ConversationSettings } from '../storage/conversationSettingsStore';
 import { classifyPendingMessageError, presentProtocolError } from './protocolErrors';
 import { makeConversationId } from '../utils/conversation';
 import type { ReplyReference } from './types';
@@ -44,6 +47,9 @@ export type UIMessage = {
   editedAt?: number | null;
   deletedAt?: number | null;
   forwardedFrom?: { userId: string; createdAt: number } | null;
+  /** T7.3 */
+  system?: boolean;
+  expiresAt?: number | null;
 };
 
 export type SessionHealth =
@@ -182,6 +188,8 @@ function toUI(m: StoredMessage): UIMessage {
     editedAt: m.editedAt ?? null,
     deletedAt: m.deletedAt ?? null,
     forwardedFrom: m.forwardedFrom ?? null,
+    system: m.system ?? false,
+    expiresAt: m.expiresAt,
   };
 }
 
@@ -202,6 +210,8 @@ export function toStored(m: UIMessage): StoredMessage {
     editedAt: m.editedAt ?? null,
     deletedAt: m.deletedAt ?? null,
     forwardedFrom: m.forwardedFrom ?? null,
+    system: m.system ?? false,
+    expiresAt: m.expiresAt,
   };
 }
 
@@ -218,6 +228,8 @@ export function useChatE2EE(peerUserId: string) {
   const [hasMore, setHasMore] = useState(false);
   const [sessionHealth, setSessionHealth] = useState<SessionHealth>({ status: 'healthy' });
   const [reloadToken, setReloadToken] = useState(0);
+  /** T7.3: the disappearing-message timer of this conversation. */
+  const [timer, setTimerState] = useState<ConversationSettings>(DEFAULT_CONVERSATION_SETTINGS);
 
   const unsubRef = useRef<null | (() => void)>(null);
   const statusUnsubRef = useRef<null | (() => void)>(null);
@@ -457,6 +469,17 @@ export function useChatE2EE(peerUserId: string) {
       console.warn('Failed to load pending messages:', e);
     });
 
+    // T7.3: the timer setting and a periodic sweep of expired records while the chat is open.
+    const me = String(myUserId);
+    loadConversationSettings(me, peerUserId).then((s) => {
+      if (!cancelled) setTimerState(s);
+    });
+    const unsubTimer = subscribeToTimerChanges((e) => {
+      if (!cancelled && e.myUserId === me && e.peerKey === peerUserId) setTimerState(e.settings);
+    });
+    const sweep = () => sweepExpiredMessages({ myUserId: me, peerKey: peerUserId }).catch((e) => console.warn('[disappearing] sweep failed:', e));
+    const sweepInterval = setInterval(sweep, CHAT_SWEEP_INTERVAL_MS);
+
     // T7.2: reactions, edits and deletions change stored records; mirror them into the list.
     const unsubPatches = subscribeToMessagePatches((p) => {
       if (cancelled || p.myUserId !== String(myUserId) || p.peerKey !== peerUserId) return;
@@ -465,8 +488,8 @@ export function useChatE2EE(peerUserId: string) {
 
     async function loadInitialHistory() {
       setHistoryLoading(true);
-      const me = String(myUserId);
       try {
+        await sweep(); // T7.3: never show what has already expired
         // T2.14: history lives on the device: the newest page from the store, then only what
         // the server still holds beyond it (the pre-T2.14 archive migration ended with wire v4).
         const page = await listStoredMessages({ myUserId: me, peerUserId, limit: PAGE_SIZE });
@@ -645,6 +668,8 @@ export function useChatE2EE(peerUserId: string) {
 
     return () => {
       cancelled = true;
+      clearInterval(sweepInterval);
+      unsubTimer();
       unsubPatches();
       unsubRef.current?.();
       unsubRef.current = null;
@@ -765,6 +790,10 @@ export function useChatE2EE(peerUserId: string) {
     if (!myUserId) return;
     await deleteForMe({ myUserId: String(myUserId), peerKey: peerUserId, message: toStored(message) });
   }
+  async function setTimer(seconds: number | null) {
+    if (!myUserId) return;
+    await setDisappearingTimer({ myUserId: String(myUserId), target: actionTarget, seconds });
+  }
 
   return {
     socketReady,
@@ -782,5 +811,7 @@ export function useChatE2EE(peerUserId: string) {
     edit,
     deleteEverywhere,
     deleteLocally,
+    timer,
+    setTimer,
   };
 }

@@ -9,6 +9,9 @@ import { deleteGroupKeys } from '../storage/senderKeyStore';
 import { distributeSenderKey, ensureOwnSenderKey, forgetDepartedMembers, handleControlContent } from './groupKeys';
 import { ingestGroupItems, sendGroupMessage, syncGroupFromServer } from './groupMessaging';
 import { deleteForEveryone, deleteForMe, editMessage, reactToMessage, subscribeToMessagePatches } from './actions';
+import { setDisappearingTimer, subscribeToTimerChanges, sweepExpiredMessages } from './disappearing';
+import { CHAT_SWEEP_INTERVAL_MS } from './useExpirySweeper';
+import { loadConversationSettings, DEFAULT_CONVERSATION_SETTINGS, type ConversationSettings } from '../storage/conversationSettingsStore';
 import { subscribeToControlContent } from '../socket/messaging';
 
 /**
@@ -42,6 +45,8 @@ export function useGroupChat(groupId: string) {
   const [removed, setRemoved] = useState(false);
   const groupRef = useRef<GroupView | null>(null);
   const memberIdsRef = useRef<string[]>([]);
+  const adminIdsRef = useRef<string[]>([]);
+  const [timer, setTimerState] = useState<ConversationSettings>(DEFAULT_CONVERSATION_SETTINGS);
 
   const onSecurityWarning = useCallback((code: string, fromUserId: string) => setSecurityWarning({ code, fromUserId }), []);
 
@@ -65,6 +70,7 @@ export function useGroupChat(groupId: string) {
     const previous = memberIdsRef.current;
     groupRef.current = g;
     memberIdsRef.current = g.members.map((m) => m.userId);
+    adminIdsRef.current = g.members.filter((m) => m.role === 'admin').map((m) => m.userId);
     setGroup(g);
     // T6.5: a new epoch rotates our key; departed members' keys are dead.
     await ensureOwnSenderKey({ myUserId: String(myUserId), groupId, epoch: g.epoch });
@@ -74,7 +80,7 @@ export function useGroupChat(groupId: string) {
 
   const sync = useCallback(async () => {
     if (!myUserId) return;
-    const r = await syncGroupFromServer({ myUserId: String(myUserId), groupId, memberIds: memberIdsRef.current.length ? memberIdsRef.current : null, onSecurityWarning });
+    const r = await syncGroupFromServer({ myUserId: String(myUserId), groupId, memberIds: memberIdsRef.current.length ? memberIdsRef.current : null, adminIds: adminIdsRef.current.length ? adminIdsRef.current : null, onSecurityWarning });
     setWaitingForKeys(r.waitingForKey);
     if (r.received.length) setMessages((prev) => r.received.reduce((acc, m) => upsert(acc, toUI(String(myUserId), m)), prev));
   }, [groupId, myUserId, onSecurityWarning]);
@@ -88,10 +94,22 @@ export function useGroupChat(groupId: string) {
       if (cancelled || !myUserId || p.myUserId !== String(myUserId) || p.peerKey !== groupPeerKey(groupId)) return;
       setMessages((prev) => (p.message ? upsert(prev, toUI(String(myUserId), p.message)) : prev.filter((m) => m.id !== p.id && m.clientMessageId !== p.id)));
     });
+    // T7.3: the timer setting and the sweep for this conversation.
+    const unsubscribeTimer = subscribeToTimerChanges((e) => {
+      if (!cancelled && myUserId && e.myUserId === String(myUserId) && e.peerKey === groupPeerKey(groupId)) setTimerState(e.settings);
+    });
+    const sweep = () => {
+      if (myUserId) sweepExpiredMessages({ myUserId: String(myUserId), peerKey: groupPeerKey(groupId) }).catch((e) => console.warn('[disappearing] sweep failed:', e));
+    };
+    const sweepInterval = setInterval(sweep, CHAT_SWEEP_INTERVAL_MS);
     (async () => {
       if (!myUserId) return;
       setLoading(true);
       try {
+        await sweepExpiredMessages({ myUserId: String(myUserId), peerKey: groupPeerKey(groupId) });
+        loadConversationSettings(String(myUserId), groupPeerKey(groupId)).then((s) => {
+          if (!cancelled) setTimerState(s);
+        });
         const stored = await listStoredMessages({ myUserId: String(myUserId), peerUserId: groupPeerKey(groupId), limit: PAGE_SIZE });
         if (!cancelled) setMessages(stored.map((m) => toUI(String(myUserId), m)));
         const g = await refreshGroup();
@@ -109,7 +127,7 @@ export function useGroupChat(groupId: string) {
         const socket = await ensureSocketConnected();
         const onNew = async (evt: HistoryItem & { groupId?: string | null }) => {
           if (!evt?.g1 || String(evt.groupId ?? '') !== groupId) return;
-          const r = await ingestGroupItems({ myUserId: String(myUserId), groupId, items: [evt], memberIds: memberIdsRef.current.length ? memberIdsRef.current : null, onSecurityWarning });
+          const r = await ingestGroupItems({ myUserId: String(myUserId), groupId, items: [evt], memberIds: memberIdsRef.current.length ? memberIdsRef.current : null, adminIds: adminIdsRef.current.length ? adminIdsRef.current : null, onSecurityWarning });
           if (r.received.length) setMessages((prev) => r.received.reduce((acc, m) => upsert(acc, toUI(String(myUserId), m)), prev));
           if (r.waitingForKey.length) setWaitingForKeys((prev) => Array.from(new Set([...prev, ...r.waitingForKey])));
         };
@@ -143,6 +161,8 @@ export function useGroupChat(groupId: string) {
     })();
     return () => {
       cancelled = true;
+      clearInterval(sweepInterval);
+      unsubscribeTimer();
       unsubscribePatches();
       unsubscribe?.();
       unsubscribeControl?.();
@@ -200,5 +220,12 @@ export function useGroupChat(groupId: string) {
     await deleteForMe({ myUserId: String(myUserId), peerKey: groupPeerKey(groupId), message });
   }, [groupId, myUserId]);
 
-  return { group, messages, loading, removed, waitingForKeys, securityWarning, send, sync, addMembers, removeMember, refreshGroup, react, edit, deleteEverywhere, deleteLocally };
+  const setTimer = useCallback(async (seconds: number | null) => {
+    if (!myUserId || !groupRef.current) return;
+    const g = groupRef.current;
+    const nameOf = (userId: string) => g.members.find((m) => m.userId === userId)?.username ?? userId;
+    await setDisappearingTimer({ myUserId: String(myUserId), target: { kind: 'group', group: g }, seconds, nameOf });
+  }, [myUserId]);
+
+  return { group, messages, loading, removed, waitingForKeys, securityWarning, timer, setTimer, send, sync, addMembers, removeMember, refreshGroup, react, edit, deleteEverywhere, deleteLocally };
 }

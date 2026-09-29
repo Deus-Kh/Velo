@@ -23,6 +23,8 @@ import ForwardPicker from '../components/ForwardPicker';
 import MessageActionsSheet from '../components/MessageActionsSheet';
 import MessageBubble from '../components/MessageBubble';
 import { forwardMessage, summarizeReactions } from '../shared/chat/actions';
+import { formatTimer } from '../shared/chat/disappearing';
+import TimerSheet from '../components/TimerSheet';
 import StatusChip from '../components/StatusChip';
 import { conversationsApi } from '../shared/api/conversations.api';
 import { messagesApi } from '../shared/api/messages.api';
@@ -348,7 +350,10 @@ const { keyboardShown , keyboardHeight } = useKeyboard()
     edit,
     deleteEverywhere,
     deleteLocally,
+    timer,
+    setTimer,
   } = useChatE2EE(peerUserId);
+  const [showTimerSheet, setShowTimerSheet] = useState(false);
 
   const [text, setText] = useState('');
   const [editTarget, setEditTarget] = useState<UIMessage | null>(null);
@@ -802,6 +807,11 @@ useEffect(() => {
                   <StatusPill label={presenceMeta.pillLabel} tone={presenceMeta.pillTone} />
                 </View>
               ) : null}
+              {timer.timerSeconds ? (
+                <View className="mt-2">
+                  <StatusChip tone="primary" label={`\u23F1 Disappear after ${formatTimer(timer.timerSeconds)}`} />
+                </View>
+              ) : null}
             </View>
 
             <Pressable
@@ -880,6 +890,16 @@ useEffect(() => {
                     <View className="mb-3 items-center">
                       <View className="rounded-full border border-border bg-surface/82 px-3 py-1.5">
                         <Text className="text-xs font-medium text-muted">{item.label}</Text>
+                      </View>
+                    </View>
+                  );
+                }
+
+                if (item.message.system) {
+                  return (
+                    <View className="mb-3 items-center">
+                      <View className="rounded-full border border-primary/25 bg-primary/10 px-3 py-1.5">
+                        <Text className="text-xs font-medium text-primary">{item.message.text}</Text>
                       </View>
                     </View>
                   );
@@ -981,6 +1001,19 @@ useEffect(() => {
           <Pressable
             onPress={() => {
               handleCloseComposerActions();
+              setShowTimerSheet(true);
+            }}
+            className="rounded-[18px] px-3 py-3 active:opacity-80"
+          >
+            <Text className="text-[15px] font-medium text-text">Disappearing messages</Text>
+            <Text className="mt-1 text-[13px] leading-5 text-muted">
+              {timer.timerSeconds ? `Currently ${formatTimer(timer.timerSeconds)}. New messages vanish from both devices after that.` : 'Off. Set a timer after which new messages vanish from both devices.'}
+            </Text>
+          </Pressable>
+
+          <Pressable
+            onPress={() => {
+              handleCloseComposerActions();
               if (sessionHealth.status === 'reset_required') {
                 resetSession();
               }
@@ -1046,6 +1079,17 @@ useEffect(() => {
             );
           })()
         : null}
+
+      {showTimerSheet ? (
+        <TimerSheet
+          current={timer.timerSeconds}
+          onClose={() => setShowTimerSheet(false)}
+          onPick={(seconds) => {
+            setShowTimerSheet(false);
+            setTimer(seconds).catch((e) => console.warn('[ChatScreen] timer change failed:', e));
+          }}
+        />
+      ) : null}
 
       {forwardTarget && myUserId ? (
         <ForwardPicker

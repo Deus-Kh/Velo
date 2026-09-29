@@ -138,7 +138,7 @@ export async function ingestLiveGroupMessage(params: { myUserId: string; item: H
   const groupId = String(params.item.groupId ?? '');
   if (!groupId || String(params.item.fromUserId) === params.myUserId) return null;
   const group = await loadGroupOrNull(groupId);
-  const { received } = await ingestGroupItems({ myUserId: params.myUserId, groupId, items: [params.item], memberIds: group ? group.members.map((m) => m.userId) : null });
+  const { received } = await ingestGroupItems({ myUserId: params.myUserId, groupId, items: [params.item], memberIds: group ? group.members.map((m) => m.userId) : null, adminIds: group ? group.members.filter((m) => m.role === 'admin').map((m) => m.userId) : null });
   if (received.length) await notifyStoredGroup({ myUserId: params.myUserId, groupId, title: group?.name ?? 'Group message', messages: received });
   return received[0] ?? null;
 }
@@ -172,7 +172,7 @@ export async function fetchAndIngestUndelivered(myUserId: string): Promise<Store
   // T6.4: group copies, one notification per message with the group's name.
   for (const [groupId, groupItems] of byGroup) {
     const group = await loadGroupOrNull(groupId);
-    const { received } = await ingestGroupItems({ myUserId, groupId, items: groupItems, memberIds: group ? group.members.map((m) => m.userId) : null });
+    const { received } = await ingestGroupItems({ myUserId, groupId, items: groupItems, memberIds: group ? group.members.map((m) => m.userId) : null, adminIds: group ? group.members.filter((m) => m.role === 'admin').map((m) => m.userId) : null });
     all.push(...received);
     if (received.length) await notifyStoredGroup({ myUserId, groupId, title: group?.name ?? 'Group message', messages: received });
   }

@@ -2,6 +2,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getOrCreateSessionMasterKey } from '../crypto/sessionMasterKey';
 import { openJson, sealJson } from './sealed';
 import type { ReplyReference } from '../chat/types';
+import { loadConversationSettings } from './conversationSettingsStore';
 
 /**
  * Local encrypted message store (T2.14, decision D7 = A: sealed records in
@@ -38,6 +39,10 @@ export type StoredMessage = {
   editedAt?: number | null;
   deletedAt?: number | null;
   forwardedFrom?: { userId: string; createdAt: number } | null;
+  /** T7.3: a system line (timer change), shown centred, never expires. */
+  system?: boolean;
+  /** T7.3: when this record is removed by the sweeper; fixed when first stored; null = never. */
+  expiresAt?: number | null;
 };
 
 const PREFIX = 'msg:v1';
@@ -59,10 +64,23 @@ export function storedMessageId(message: { clientMessageId?: string | null; serv
 }
 
 export async function upsertStoredMessage(params: { myUserId: string; peerUserId: string; message: StoredMessage }): Promise<void> {
-  const { myUserId, peerUserId, message } = params;
+  const { myUserId, peerUserId } = params;
+  const message: StoredMessage = { ...params.message };
   if (!message.id) return;
   const mk = await getOrCreateSessionMasterKey(myUserId);
-  await AsyncStorage.setItem(recordKey(myUserId, peerUserId, message), sealJson(mk, message));
+  const key = recordKey(myUserId, peerUserId, message);
+  if (message.expiresAt === undefined) {
+    // T7.3: the expiry is fixed when the record is first stored (send time for ours, now for the peer's);
+    // a later update (status, edit) keeps it.
+    const prev = openJson<StoredMessage>(mk, await AsyncStorage.getItem(key));
+    if (prev && prev.expiresAt !== undefined) message.expiresAt = prev.expiresAt;
+    else if (message.system) message.expiresAt = null;
+    else {
+      const settings = await loadConversationSettings(myUserId, peerUserId);
+      message.expiresAt = settings.timerSeconds ? (message.direction === 'out' ? message.createdAt : Date.now()) + settings.timerSeconds * 1000 : null;
+    }
+  }
+  await AsyncStorage.setItem(key, sealJson(mk, message));
 }
 
 /**

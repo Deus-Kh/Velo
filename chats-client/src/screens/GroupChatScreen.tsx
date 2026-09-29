@@ -20,6 +20,8 @@ import ForwardPicker from '../components/ForwardPicker';
 import MessageActionsSheet from '../components/MessageActionsSheet';
 import MessageBubble from '../components/MessageBubble';
 import { forwardMessage, summarizeReactions } from '../shared/chat/actions';
+import { formatTimer } from '../shared/chat/disappearing';
+import TimerSheet from '../components/TimerSheet';
 import StatusChip from '../components/StatusChip';
 import { userApi, type UserListItem } from '../shared/api/user.api';
 import { groupPeerKey, groupsApi, type GroupMember } from '../shared/api/groups.api';
@@ -36,7 +38,7 @@ import { formatHandle } from '../shared/utils/identity';
  */
 const messageListContentStyle = { paddingBottom: 20 };
 
-type MemberSheet = 'members' | 'add' | null;
+type MemberSheet = 'members' | 'add' | 'timer' | null;
 
 function memberName(m: GroupMember | undefined, userId: string): string {
   return m?.username ? m.username : userId.slice(-6);
@@ -52,7 +54,7 @@ export default function GroupChatScreen({ groupId, initialName, onClose }: { gro
   const interfaceDensity = useAppearanceStore((s) => s.interfaceDensity);
   const surfaceStyle = useAppearanceStore((s) => s.surfaceStyle);
   const { keyboardShown, keyboardHeight } = useKeyboard();
-  const { group, messages, loading, removed, waitingForKeys, securityWarning, send, addMembers, removeMember, react, edit, deleteEverywhere, deleteLocally } = useGroupChat(groupId);
+  const { group, messages, loading, removed, waitingForKeys, securityWarning, timer, setTimer, send, addMembers, removeMember, react, edit, deleteEverywhere, deleteLocally } = useGroupChat(groupId);
 
   const [text, setText] = useState('');
   const [sheet, setSheet] = useState<MemberSheet>(null);
@@ -94,7 +96,7 @@ export default function GroupChatScreen({ groupId, initialName, onClose }: { gro
       setCandidates([]);
       return;
     }
-    const timer = setTimeout(async () => {
+    const handle = setTimeout(async () => {
       try {
         const res = await userApi.getUsers({ q, limit: 20 });
         setCandidates(res.data.items.filter((u) => !membersById.has(u.userId)));
@@ -102,7 +104,7 @@ export default function GroupChatScreen({ groupId, initialName, onClose }: { gro
         setActionError(e?.message || 'Search failed');
       }
     }, 250);
-    return () => clearTimeout(timer);
+    return () => clearTimeout(handle);
   }, [memberQuery, membersById, sheet]);
 
   const onSend = useCallback(async () => {
@@ -189,6 +191,11 @@ export default function GroupChatScreen({ groupId, initialName, onClose }: { gro
                   <StatusChip tone="danger" label={`Bad signature from ${memberName(membersById.get(securityWarning.fromUserId), securityWarning.fromUserId)}`} />
                 </View>
               ) : null}
+              {timer.timerSeconds ? (
+                <View className="mt-2">
+                  <StatusChip tone="primary" label={`\u23F1 Disappear after ${formatTimer(timer.timerSeconds)}`} />
+                </View>
+              ) : null}
             </View>
 
             <Pressable
@@ -229,6 +236,15 @@ export default function GroupChatScreen({ groupId, initialName, onClose }: { gro
             data={reversed}
             keyExtractor={(item) => item.id}
             renderItem={({ item, index }) => {
+              if (item.system) {
+                return (
+                  <View className="mb-3 items-center">
+                    <View className="rounded-full border border-primary/25 bg-primary/10 px-3 py-1.5">
+                      <Text className="text-xs font-medium text-primary">{item.text}</Text>
+                    </View>
+                  </View>
+                );
+              }
               const newer = reversed[index - 1];
               const showSender = !item.mine && (!newer || newer.senderUserId !== item.senderUserId);
               return (
@@ -349,6 +365,14 @@ export default function GroupChatScreen({ groupId, initialName, onClose }: { gro
               }}
             />
           </View>
+          {isAdmin ? (
+            <Pressable onPress={() => setSheet('timer')} className="mt-2 rounded-[16px] border border-border px-3 py-2.5 active:opacity-80">
+              <Text className="text-sm font-semibold text-text">Disappearing messages: {formatTimer(timer.timerSeconds)}</Text>
+              <Text className="mt-0.5 text-xs text-muted">Admins set it for everyone; members are told over their sessions.</Text>
+            </Pressable>
+          ) : timer.timerSeconds ? (
+            <Text className="mt-2 px-1 text-xs text-muted">Messages disappear after {formatTimer(timer.timerSeconds)} (set by an admin).</Text>
+          ) : null}
           {actionError ? <Text className="mt-2 px-1 text-xs text-danger">{actionError}</Text> : null}
           <View className="mt-3 flex-row gap-2">
             {isAdmin ? (
@@ -361,6 +385,18 @@ export default function GroupChatScreen({ groupId, initialName, onClose }: { gro
             </Pressable>
           </View>
         </BottomSheetPanel>
+      ) : null}
+
+      {sheet === 'timer' ? (
+        <TimerSheet
+          current={timer.timerSeconds}
+          note="New group messages disappear from every member's device after the chosen time. Members are told over their encrypted sessions; the server never learns it."
+          onClose={() => setSheet('members')}
+          onPick={(seconds) => {
+            setSheet(null);
+            runAction('timer', () => setTimer(seconds));
+          }}
+        />
       ) : null}
 
       {sheet === 'add' ? (

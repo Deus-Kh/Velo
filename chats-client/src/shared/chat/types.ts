@@ -19,4 +19,7 @@ export type UIMessage = {
   editedAt?: number | null;
   deletedAt?: number | null;
   forwardedFrom?: { userId: string; createdAt: number } | null;
+  /** T7.3 */
+  system?: boolean;
+  expiresAt?: number | null;
 };

@@ -85,6 +85,8 @@ export async function ingestGroupItems(params: {
   groupId: string;
   items: HistoryItem[];
   memberIds?: string[] | null;
+  /** T7.3: who may change the timer; unknown (null) refuses timer changes. */
+  adminIds?: string[] | null;
   onSecurityWarning?: (code: string, fromUserId: string) => void;
 }): Promise<GroupIngestResult> {
   const { myUserId, groupId, items } = params;
@@ -117,7 +119,7 @@ export async function ingestGroupItems(params: {
       const r = groupDecryptContent(state, message, { groupId, senderUserId: fromUserId });
       await savePeerSenderKey(myUserId, groupId, fromUserId, r.state);
       if (r.content.kind !== 'text') {
-        await handleInboundAction({ myUserId, peerKey, actorUserId: fromUserId, content: r.content }); // T7.2
+        await handleInboundAction({ myUserId, peerKey, actorUserId: fromUserId, content: r.content, groupAdminIds: params.adminIds ?? null }); // T7.2 / T7.3
         acked.push(it.serverMessageId);
         continue;
       }
@@ -165,8 +167,8 @@ export async function ingestGroupItems(params: {
 }
 
 /** Pull everything the server still holds for this group and ingest it. */
-export async function syncGroupFromServer(params: { myUserId: string; groupId: string; memberIds?: string[] | null; onSecurityWarning?: (code: string, fromUserId: string) => void }): Promise<GroupIngestResult> {
+export async function syncGroupFromServer(params: { myUserId: string; groupId: string; memberIds?: string[] | null; adminIds?: string[] | null; onSecurityWarning?: (code: string, fromUserId: string) => void }): Promise<GroupIngestResult> {
   const res = await messagesApi.getUndelivered({ groupId: params.groupId, limit: 100 });
   const items: HistoryItem[] = Array.isArray(res.data?.items) ? res.data.items : [];
-  return ingestGroupItems({ myUserId: params.myUserId, groupId: params.groupId, items, memberIds: params.memberIds, onSecurityWarning: params.onSecurityWarning });
+  return ingestGroupItems({ myUserId: params.myUserId, groupId: params.groupId, items, memberIds: params.memberIds, adminIds: params.adminIds, onSecurityWarning: params.onSecurityWarning });
 }

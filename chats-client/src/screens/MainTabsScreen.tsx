@@ -25,6 +25,7 @@ import { useContactsStore } from '../store/contacts.store';
 import { useAppUiStore } from '../store/app-ui.store';
 import { cancelConversationNotifications } from '../shared/notifications/notifee';
 import { usePushHandlers } from '../shared/notifications/pushHandlers';
+import { useExpirySweeper } from '../shared/chat/useExpirySweeper';
 import { Icon } from '../components/Icon';
 
 import { useColorScheme } from 'react-native';
@@ -139,6 +140,8 @@ export default function MainTabsScreen() {
 
   // T3.3: push in the foreground, notification taps, and the notification that launched the app.
   usePushHandlers(Boolean(userId));
+  // T7.3: expired messages go when the app comes to the foreground.
+  useExpirySweeper(userId);
 
   useEffect(() => {
     if (!pendingOpenChatPeerUserId || !userId) return;
