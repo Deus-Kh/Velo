@@ -17,6 +17,7 @@ import { messagesRouter } from './routes/messages.routes';
 import { keysRouter } from './routes/keys.routes';
 import { groupsRouter } from './routes/groups.routes';
 import { reportsRouter } from './routes/reports.routes';
+import { attachmentsRouter, blobsRouter } from './routes/attachments.routes';
 
 /**
  * Builds the Express application without binding a port or connecting to
@@ -48,6 +49,8 @@ export function createApp(): express.Express {
   app.use('/telemetry', telemetryRouter);
   app.use('/groups', groupsRouter); // T6.3
   app.use('/reports', reportsRouter); // T7.5
+  app.use('/attachments', attachmentsRouter); // T8.2
+  app.use('/blobs', blobsRouter); // T8.2: the local store's transport (signed, expiring tokens)
 
   // T4.6: Prometheus scrape, bearer-protected; 404 when METRICS_TOKEN is unset.
   app.get('/metrics', metricsHandler());

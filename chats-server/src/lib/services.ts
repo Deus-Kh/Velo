@@ -20,6 +20,8 @@ export const MESSAGE_SEND_LIMIT = { limit: 60, windowSeconds: 60 } as const;
  */
 export const BUNDLE_PAIR_LIMIT = { limit: 5, windowSeconds: 60 * 60 } as const;
 export const BUNDLE_ISSUE_LIMIT = { limit: 30, windowSeconds: 60 * 60 } as const;
+/** T8.2: attachment reservations per user per hour (a reservation is a promise of storage). */
+export const ATTACHMENT_LIMIT = { limit: 100, windowSeconds: 60 * 60 } as const;
 
 interface Services {
   kv: KeyValueStore;
@@ -31,6 +33,8 @@ interface Services {
   bundleIssueLimiter: FixedWindowLimiter;
   /** T4.3: who has a live socket, shared across processes. */
   presence: PresenceStore;
+  /** T8.2: attachment reservation budget. */
+  attachmentLimiter: FixedWindowLimiter;
 }
 
 function build(redis: Redis | null): Services {
@@ -42,6 +46,7 @@ function build(redis: Redis | null): Services {
     bundlePairLimiter: new FixedWindowLimiter(kv, { prefix: 'rl:bundle:pair', ...BUNDLE_PAIR_LIMIT }),
     bundleIssueLimiter: new FixedWindowLimiter(kv, { prefix: 'rl:bundle:req', ...BUNDLE_ISSUE_LIMIT }),
     presence: createPresenceStore(redis),
+    attachmentLimiter: new FixedWindowLimiter(kv, { prefix: 'rl:attach', ...ATTACHMENT_LIMIT }),
   };
 }
 

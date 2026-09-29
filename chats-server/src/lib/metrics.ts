@@ -87,6 +87,10 @@ export const metrics = {
     help: 'Bundle issues that found a user with no one-time prekey left',
     registers: [registry],
   }),
+  // T8.2
+  attachmentsReserved: new Counter({ name: 'velo_attachments_reserved_total', help: 'Attachment reservations', registers: [registry] }),
+  attachmentsUploaded: new Counter({ name: 'velo_attachments_uploaded_total', help: 'Attachments completed', registers: [registry] }),
+  attachmentBytes: new Counter({ name: 'velo_attachment_bytes_total', help: 'Ciphertext bytes accepted', registers: [registry] }),
   clientDecryptFailures: new Counter({
     name: 'velo_client_decrypt_failures_total',
     help: 'Decrypt failures reported by devices, by protocol error code',

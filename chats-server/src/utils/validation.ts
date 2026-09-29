@@ -110,6 +110,14 @@ export const reportSchema = z
   })
   .strict();
 
+/** T8.2: an attachment reservation: the ciphertext length (8 MiB plaintext + chunk overhead + MAC at most). */
+export const MAX_BLOB_BYTES_SCHEMA = 8 * 1024 * 1024 + Math.ceil((8 * 1024 * 1024) / (64 * 1024)) * 16 + 32;
+export const reserveAttachmentSchema = z
+  .object({
+    size: z.number().int().min(1).max(MAX_BLOB_BYTES_SCHEMA),
+  })
+  .strict();
+
 export const pushTokenSchema = z.object({
   token: z.string().trim().min(1, 'token is required').max(4096),
   platform: z.enum(['android', 'ios']),

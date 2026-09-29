@@ -63,6 +63,17 @@ export const config = {
 
   /** T3.1: undelivered ciphertext and delivery receipts expire after this many days (TTL index on Message.expiresAt). */
   MESSAGE_TTL_DAYS: optionalNumber('MESSAGE_TTL_DAYS', 30),
+  // T8.2: ciphertext blobs. Local files under BLOB_DIR by default; an S3-compatible bucket when S3_* are set.
+  ATTACHMENT_TTL_DAYS: optionalNumber('ATTACHMENT_TTL_DAYS', 30),
+  BLOB_DIR: optionalString('BLOB_DIR', ''),
+  /** Prefix for the URLs the local store hands to clients ('' = relative to the API base the client already uses). */
+  PUBLIC_BASE_URL: optionalString('PUBLIC_BASE_URL', ''),
+  S3_ENDPOINT: optionalString('S3_ENDPOINT', ''),
+  S3_REGION: optionalString('S3_REGION', 'us-east-1'),
+  S3_BUCKET: optionalString('S3_BUCKET', ''),
+  S3_ACCESS_KEY_ID: optionalString('S3_ACCESS_KEY_ID', ''),
+  S3_SECRET_ACCESS_KEY: optionalString('S3_SECRET_ACCESS_KEY', ''),
+  S3_PATH_STYLE: optionalString('S3_PATH_STYLE', 'true'),
 
   /**
    * Check new passwords against the HaveIBeenPwned range API (k-anonymous:

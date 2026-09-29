@@ -11,6 +11,7 @@ import { setupSocket } from './socket/setupSocket';
 import { setRealtimeServer } from './lib/realtime';
 import { corsOriginCheck, parseOrigins } from './lib/corsPolicy';
 import { createLifecycle } from './lib/lifecycle';
+import { startAttachmentSweep } from './lib/attachmentSweep';
 import { log } from './lib/logger';
 
 /** Upper bound for any socket.io packet; the per-message ciphertext cap is enforced separately. */
@@ -43,6 +44,7 @@ async function main() {
 
   setupSocket(io);
   setRealtimeServer(io);
+  const stopSweep = startAttachmentSweep(); // T8.2: expired blobs go with their documents
 
   server.listen(config.PORT, () => {
     log.info(`Server running on http://localhost:${config.PORT}`);
@@ -55,6 +57,7 @@ async function main() {
         server.close((err) => (err ? reject(err) : resolve()));
       }),
     closeSockets: async () => {
+      stopSweep();
       io.close();
       if (pubSub) await Promise.all([pubSub.pub.quit(), pubSub.sub.quit()]);
     },

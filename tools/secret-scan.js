@@ -38,6 +38,7 @@ const ALLOWLIST = [
   /tools\/secret-scan\.js/, /secret-scan/, /^\s*(\/\/|#|\*)/, // comments
   /'x'\.repeat|'t'\.repeat|repeat\(/, // test fixtures
   /Generate one with/, /openssl rand/,
+  /AKIAIOSFODNN7EXAMPLE|wJalrXUtnFEMI\/K7MDENG\/bPxRfiCYEXAMPLEKEY/, // the AWS documentation's example credentials (SigV4 known-answer test, T8.2)
 ];
 
 // Files whose contents are public by design (documented in docs/AUDIT §0).
