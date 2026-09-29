@@ -547,6 +547,8 @@ Reactions; edit/delete with tombstone protocol messages ("delete for everyone" i
 
 ### PHASE 8' — Media · weeks 20–21 · `[PARITY]`
 
+*Spec tasks T8.1–T8.5 defined 2026-09-29 (spec §7d): attachment cipher and metadata stripping in the repository; blobs behind a local store or S3 with signed URLs; images and voice notes; three non-cryptographic MIT libraries for the native parts (D11); thumbnails, resumable upload, waveform, video and files deferred and recorded.*
+
 Per-attachment random key; encrypt client-side; upload the blob to S3-compatible storage with a signed URL and TTL; key travels inside the E2EE message; encrypted thumbnails; chunked upload with resume; **strip EXIF before encryption**; content-type validation after decryption. Voice notes on the same path with waveform + scrubbing.
 
 ---

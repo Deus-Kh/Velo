@@ -780,6 +780,26 @@ Written when Phase 6' closed; the roadmap (§7 Phase 7', §3 P2-10, §5.3) fixes
 
 **T7.9 status 2026-09-29: done** (one commit). §8.2 gains the content-kinds table (what the plaintext of a message may be, who may act, what is shown); §8.4 lists S29; the harness records actions it receives (`actionInbox`) and can send them on the group chain, and **S29** shows every kind crossing the pairwise session and the group chain authenticated, opaque on the wire, acked and deleted like text, never shown as a message, and surviving reordering on the group chain; the known-red registry pins 35 files. Roadmap §2 rows and `architecture.md` describe the phase as built. **Phase 7' is code-complete.** The gate (two devices: react / edit / delete / forward round-trip, a timer expiring on both, a block silencing both ways, an account deletion leaving nothing on the server, privacy defaults on a fresh account) is a human step.
 
+# 7d. PHASE 8' — MEDIA (~2 weeks) — added 2026-09-29
+
+Written when Phase 7' closed; the roadmap (§7 Phase 8') fixes the shape: a random key per attachment, encryption on the device, the ciphertext blob stored with a TTL by the server or an S3-compatible store behind a signed URL, the key inside the E2EE message, metadata stripped before encryption, content type validated after decryption. The server (or the bucket) holds opaque bytes and learns only size and timing.
+
+**Decisions taken here (D11):** media needs native code the app does not have, and JavaScript cannot provide: choosing a photo, reading and writing files, recording and playing audio. Three MIT libraries are added, none of them cryptographic (§0.3-6 is untouched): `react-native-image-picker` (choose and downscale a photo; the Android photo picker needs no permission), `react-native-blob-util` (read a picked or recorded file, keep media as files, write a decrypted voice note for playback), `react-native-audio-recorder-player` (record and play). The owner's rule against libraries where primitives suffice still holds for everything that *can* be written: the attachment cipher, the metadata stripper, the S3 request signing and the upload/download transport are written in the repository.
+
+**Deviations from the roadmap paragraph, recorded up front:** no encrypted thumbnail asset (there is no image decoder in JavaScript; the message carries dimensions, small images download automatically, larger ones on tap); single PUT with retry instead of chunked resumable upload (attachments are capped at 8 MiB); a duration and a progress bar instead of a waveform with scrubbing; video and generic files are deferred (a video needs streaming decryption and a document picker is another native dependency). Each is written into the spec's status when its task lands.
+
+| Task | Objective | Est | Notes |
+|---|---|---|---|
+| **T8.1** | Attachment crypto and metadata stripping in `packages/protocol` | 1.5d | `attachment/keys.ts` (random 32-byte key, HKDF "VeloAttachmentKeys" → cipher key ‖ MAC key ‖ nonce base; per-chunk nonce = base XOR index), `attachment/cipher.ts` (`attachmentEncrypt` / `attachmentDecrypt`: 64 KiB secretbox chunks ‖ HMAC-SHA256 trailer; SHA-256 digest of the blob in the message; digest → MAC → chunks, nothing derived from a blob that is not the sender's; cap 8 MiB), `attachment/metadata.ts` (`stripImageMetadata`: JPEG APP1/APP3–13/APP15/COM and PNG tEXt/zTXt/iTXt/eXIf/tIME dropped, colour segments kept, malformed input unchanged), content kind `attachment {blobId, key, digest, size, contentType, name?, width?, height?, durationMs?, caption?}` (shown as a message, neither control nor action), codes `ATTACHMENT_TOO_LARGE`, `ATTACHMENT_DIGEST_MISMATCH`, `ATTACHMENT_MAC_INVALID`, `ATTACHMENT_INVALID`. Frozen vector. DEVIATION-10. |
+| **T8.2** | Server: blob storage | 1.5d | `Attachment` model (blobId = 128-bit random capability, owner, size, expiresAt); `lib/blobStore.ts` with two stores behind one interface: `LocalBlobStore` (files under `BLOB_DIR`, served by `PUT/GET /blobs/:id` with HMAC-signed, expiring tokens; the default) and `S3BlobStore` (SigV4 presigned PUT/GET written in the repository, `S3_ENDPOINT/S3_REGION/S3_BUCKET/S3_ACCESS_KEY_ID/S3_SECRET_ACCESS_KEY`); routes `POST /attachments` (reserve: size ≤ 8 MiB → upload URL), `POST /attachments/:id/complete`, `POST /attachments/:id/download` (→ download URL); TTL `ATTACHMENT_TTL_DAYS` (30) with an hourly sweep of files and documents; per-user upload budget; metrics. Tests: the local store end to end with raw bytes, expiry, budgets; a SigV4 known-answer test. |
+| **T8.3** | Client: images | 3d | Pick (downscaled to ≤ 1600 px by the picker) → strip metadata → encrypt → reserve → PUT with progress and one retry → complete → `attachment` content over the session (1:1 and group) with the caption; receive: the message renders a placeholder with the dimensions, downloads automatically at ≤ 2 MiB or on tap, verifies digest and MAC, decrypts, stores the plaintext as a file sealed under the session master key (`media/mediaStore.ts`), renders from a data URI; full-screen viewer; forwarding forwards the reference; "delete for me", "delete for everyone", expiry and logout remove the local file. Android debug build verified after adding the two libraries. |
+| **T8.4** | Client: voice notes | 2d | Hold-to-record in the composer (`RECORD_AUDIO` permission), duration, cancel by release outside; the recording is read, encrypted and sent on the attachment path with `contentType: 'audio/mp4'` and `durationMs`; playback decrypts to a temporary file for the player and deletes it afterwards; duration and a progress bar in the bubble. |
+| **T8.5** | Harness S30, docs, gate | 1d | S30: the attachment reference travels only inside the session, the server sees opaque bytes, a swapped blob is refused by digest, a flipped byte by MAC, the key never appears on the wire; §8.2 attachment format and the content-kind row; DEVIATION-10; roadmap §2.2 rows; `architecture.md`. |
+
+**Order:** T8.1 → T8.2 → T8.3 → T8.4 → T8.5.
+
+**Gate (human, two devices):** a photo and a voice note round-trip between two phones over a real server; the bucket or `BLOB_DIR` holds nothing readable; the blob is gone after its TTL.
+
 # 8. REFERENCE
 
 ## 8.1 Normative ratchet algorithm (replaces v1 §8.1)
@@ -971,6 +991,7 @@ PHASE 3' ── T3.1 … T3.6           (T3.6 conditional; blocks nothing in six
 PHASE 4' ── T4.1 … T4.11          (T4.7 CI lands early, right after T2.4)
 PHASE 6' ── T6.1 ─► T6.2 ─► T6.3 ─► T6.4 ─► T6.5 ─► T6.6 ─► T6.7   (added 2026-09-28)
 PHASE 7' ── T7.1 ─► T7.2 ─► T7.3 ─► T7.4 ─► T7.5 ─► T7.6 ─► T7.7 ─► T7.8 ─► T7.9   (added 2026-09-28)
+PHASE 8' ── T8.1 ─► T8.2 ─► T8.3 ─► T8.4 ─► T8.5   (added 2026-09-29)
 ```
 
 ## 9.1 Suggested execution order
