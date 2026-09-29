@@ -25,6 +25,9 @@ import MessageBubble from '../components/MessageBubble';
 import { forwardMessage, summarizeReactions } from '../shared/chat/actions';
 import { formatTimer } from '../shared/chat/disappearing';
 import TimerSheet from '../components/TimerSheet';
+import ReportSheet from '../components/ReportSheet';
+import { useBlocksStore } from '../store/blocks.store';
+import { blockPeer, reportPeer, unblockPeer } from '../shared/chat/blocks';
 import StatusChip from '../components/StatusChip';
 import { conversationsApi } from '../shared/api/conversations.api';
 import { messagesApi } from '../shared/api/messages.api';
@@ -354,6 +357,9 @@ const { keyboardShown , keyboardHeight } = useKeyboard()
     setTimer,
   } = useChatE2EE(peerUserId);
   const [showTimerSheet, setShowTimerSheet] = useState(false);
+  const [showReportSheet, setShowReportSheet] = useState(false);
+  const [reportBusy, setReportBusy] = useState(false);
+  const peerBlocked = useBlocksStore((s) => (myUserId ? s.blockedByUser[String(myUserId)] : undefined)?.includes(peerUserId) ?? false);
 
   const [text, setText] = useState('');
   const [editTarget, setEditTarget] = useState<UIMessage | null>(null);
@@ -376,7 +382,7 @@ const { keyboardShown , keyboardHeight } = useKeyboard()
   const typingIndicatorTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const trimmedText = text.trim();
-  const canSend = socketReady && trimmedText.length > 0;
+  const canSend = socketReady && trimmedText.length > 0 && !peerBlocked;
   const conversationName = peerUsername ?? 'Secure chat';
   const messageListItems = buildMessageListItems(messages);
   const presenceMeta = getHeaderPresenceMeta({
@@ -397,6 +403,7 @@ const { keyboardShown , keyboardHeight } = useKeyboard()
     interfaceDensity === 'compact' ? 'min-h-[44px]' : 'min-h-[48px]';
   const healthPresentation = describeSessionHealth(sessionHealth, conversationName);
   const composerDisabledReason =
+    (peerBlocked ? 'You blocked this contact. Unblock from the chat actions to send again.' : null) ??
     healthPresentation?.composerDisabledReason ??
     (!socketReady ? 'Reconnect to send messages. Your draft stays here.' : null);
 
@@ -988,6 +995,32 @@ useEffect(() => {
           <Pressable
             onPress={() => {
               handleCloseComposerActions();
+              if (!myUserId) return;
+              const action = peerBlocked ? unblockPeer(String(myUserId), peerUserId) : blockPeer(String(myUserId), peerUserId);
+              action.catch((e) => console.warn('[ChatScreen] block change failed:', e));
+            }}
+            className="rounded-[18px] px-3 py-3 active:opacity-80"
+          >
+            <Text className={`text-[15px] font-medium ${peerBlocked ? 'text-text' : 'text-danger'}`}>{peerBlocked ? 'Unblock contact' : 'Block contact'}</Text>
+            <Text className="mt-1 text-[13px] leading-5 text-muted">
+              {peerBlocked ? 'Messages, presence and typing flow again.' : 'They can no longer message you or see you; they are not told. History stays on this device.'}
+            </Text>
+          </Pressable>
+
+          <Pressable
+            onPress={() => {
+              handleCloseComposerActions();
+              setShowReportSheet(true);
+            }}
+            className="rounded-[18px] px-3 py-3 active:opacity-80"
+          >
+            <Text className="text-[15px] font-medium text-text">Report contact</Text>
+            <Text className="mt-1 text-[13px] leading-5 text-muted">Send a reason and, if you want, a note. Your messages stay encrypted.</Text>
+          </Pressable>
+
+          <Pressable
+            onPress={() => {
+              handleCloseComposerActions();
               scrollToBottom();
             }}
             className="rounded-[18px] px-3 py-3 active:opacity-80"
@@ -1079,6 +1112,24 @@ useEffect(() => {
             );
           })()
         : null}
+
+      {showReportSheet ? (
+        <ReportSheet
+          name={conversationName}
+          busy={reportBusy}
+          onClose={() => setShowReportSheet(false)}
+          onSubmit={(reason, excerpt) => {
+            setReportBusy(true);
+            reportPeer({ reportedUserId: peerUserId, reason, excerpt })
+              .then(() => {
+                setShowReportSheet(false);
+                if (Platform.OS === 'android') ToastAndroid.show('Report sent', ToastAndroid.SHORT);
+              })
+              .catch((e) => console.warn('[ChatScreen] report failed:', e))
+              .finally(() => setReportBusy(false));
+          }}
+        />
+      ) : null}
 
       {showTimerSheet ? (
         <TimerSheet

@@ -16,6 +16,8 @@ import { saveStoredSession } from '../shared/auth/tokenStore';
 import { setAccessToken } from '../shared/auth/session';
 import { authApi } from '../shared/api/auth.api';
 import { DEFAULT_PRIVACY_SETTINGS, userApi, type MeResponse, type PrivacySettings } from '../shared/api/user.api';
+import BlockedContactsSheet from '../components/BlockedContactsSheet';
+import { useBlocksStore } from '../store/blocks.store';
 import {
   disablePushMessaging,
   getNotificationDeviceStatus,
@@ -283,6 +285,8 @@ export default function SettingsScreen() {
   /** T7.4: privacy toggles, mirrored from the server; a failed save reverts. */
   const [privacy, setPrivacy] = useState<PrivacySettings>(DEFAULT_PRIVACY_SETTINGS);
   const [privacyError, setPrivacyError] = useState<string | null>(null);
+  const [showBlocked, setShowBlocked] = useState(false);
+  const blockedCount = useBlocksStore((s) => (userId ? s.blockedByUser[String(userId)] : undefined)?.length ?? 0);
   const [profileLoading, setProfileLoading] = useState(true);
   const [editingField, setEditingField] = useState<EditableProfileField>(null);
   const [profileDraft, setProfileDraft] = useState<EditableProfile>({
@@ -854,6 +858,12 @@ export default function SettingsScreen() {
           </SettingsGroup>
           <SettingsGroup>
             <SettingsRow
+              title="Blocked contacts"
+              subtitle="They cannot message you, see your presence or typing, or reach you in groups."
+              value={String(blockedCount)}
+              onPress={() => setShowBlocked(true)}
+            />
+            <SettingsRow
               title="Trusted contacts"
               subtitle="Contacts you explicitly verified on this device."
               value={diagnosticsLoading ? 'Checking' : `${diagnostics?.trustedContactsCount ?? 0}`}
@@ -1187,6 +1197,7 @@ export default function SettingsScreen() {
         </View>
       </ScrollView>
 
+      {showBlocked && userId ? <BlockedContactsSheet myUserId={String(userId)} onClose={() => setShowBlocked(false)} /> : null}
     </View>
   );
 }

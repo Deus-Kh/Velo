@@ -28,6 +28,8 @@ import { ingestLiveGroupMessage, ingestLiveMessage } from '../shared/notificatio
 import { groupPeerKey, groupsApi, type GroupView } from '../shared/api/groups.api';
 import { ensureOwnSenderKey } from '../shared/chat/groupKeys';
 import { deleteGroupKeys } from '../shared/storage/senderKeyStore';
+import { useBlocksStore } from '../store/blocks.store';
+import { blockPeer, unblockPeer } from '../shared/chat/blocks';
 import { formatHandle, shortSecureId } from '../shared/utils/identity';
 
 type ChatOpenHandler = (chat: { peerUserId: string; peerUsername?: string }) => void;
@@ -243,6 +245,7 @@ export default function ChatListScreen({
   const togglePinnedConversation = useChatListStore((s) => s.togglePinnedConversation);
   const toggleArchivedConversation = useChatListStore((s) => s.toggleArchivedConversation);
   const activeChatPeerUserId = useAppUiStore((s) => s.activeChatPeerUserId);
+  const blockedIds = useBlocksStore((s) => (myUserId ? s.blockedByUser[String(myUserId)] : undefined) ?? []);
 
   const [q, setQ] = useState('');
   const [loading, setLoading] = useState(true);
@@ -285,9 +288,9 @@ export default function ChatListScreen({
   const activeConversations = useMemo(
     () =>
       sortedConversations.filter(
-        (item) => !archivedConversationIds.includes(item.conversationId),
+        (item) => !archivedConversationIds.includes(item.conversationId) && !blockedIds.includes(item.peerUserId), // T7.5
       ),
-    [archivedConversationIds, sortedConversations],
+    [archivedConversationIds, blockedIds, sortedConversations],
   );
   const archivedConversations = useMemo(
     () =>
@@ -1224,6 +1227,26 @@ export default function ChatListScreen({
               {archivedConversationIds.includes(selectedConversationAction.conversationId)
                 ? 'Return this chat to the main conversation list.'
                 : 'Move this chat out of the main list without deleting it.'}
+            </Text>
+          </Pressable>
+
+          <Pressable
+            onPress={() => {
+              const peer = selectedConversationAction.peerUserId;
+              handleCloseConversationActions();
+              if (!myUserId) return;
+              const action = blockedIds.includes(peer) ? unblockPeer(myUserId, peer) : blockPeer(myUserId, peer);
+              action.then(refreshConversationsSilently).catch((e) => console.warn('[ChatListScreen] block change failed:', e));
+            }}
+            className="rounded-[18px] px-3 py-3 active:opacity-80"
+          >
+            <Text className={`text-[15px] font-medium ${blockedIds.includes(selectedConversationAction.peerUserId) ? 'text-text' : 'text-danger'}`}>
+              {blockedIds.includes(selectedConversationAction.peerUserId) ? 'Unblock contact' : 'Block contact'}
+            </Text>
+            <Text className="mt-1 text-[13px] leading-5 text-muted">
+              {blockedIds.includes(selectedConversationAction.peerUserId)
+                ? 'Messages, presence and typing flow again.'
+                : 'They can no longer message you or see you; they are not told. History stays on this device.'}
             </Text>
           </Pressable>
 

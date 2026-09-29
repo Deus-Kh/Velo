@@ -6,6 +6,7 @@ import { receiveIncoming } from './incoming';
 import { reportDecryptFailure } from '../api/telemetry.api';
 import { publishControlContent } from '../socket/messaging';
 import { handleInboundAction } from './actions';
+import { isBlockedLocally } from '../../store/blocks.store';
 
 const SYNC_PAGE = 100;
 const MAX_PAGES = 20;
@@ -72,6 +73,10 @@ export async function ingestUndeliveredItems(params: {
   for (const it of items) {
     if (String(it.fromUserId) === String(myUserId) || it.protoVersion !== 4) continue;
     if (it.g1 || it.groupId) continue; // T6.3: a group copy; the group paths ingest it
+    if (isBlockedLocally(String(myUserId), peerUserId)) {
+      acked.push(it.serverMessageId); // T7.5: dropped and deleted, never decrypted
+      continue;
+    }
     const envelope = envelopeOf(it);
     if (!envelope) continue;
     try {

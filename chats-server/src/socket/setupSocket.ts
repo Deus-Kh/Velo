@@ -1,5 +1,7 @@
 import type { Server } from "socket.io";
 import { loadPrivacy, maskPresence } from '../lib/privacy';
+import { blockedEitherWay, isBlockedEither } from '../lib/blocks';
+import { Types } from 'mongoose';
 import jwt from "jsonwebtoken";
 import { config } from "../config";
 import { ConversationModel } from "../models/Conversation";
@@ -157,6 +159,7 @@ export function setupSocket(io: Server) {
         log.warn({ userId, peerUserId }, "[socket] presence:subscribe refused (no conversation)");
         return;
       }
+      if (await isBlockedEither(userId, peerUserId)) return; // T7.5: silent
 
       socket.join(`presence:${peerUserId}`);
       socket.emit("presence:update", await getPresencePayload(peerUserId));
@@ -177,6 +180,7 @@ export function setupSocket(io: Server) {
       if (!isValidObjectIdString(toUserId)) return;
       if (!(await haveConversation(userId, toUserId))) return;
       if (!(await loadPrivacy(userId)).typing) return; // T7.4: the typer's choice
+      if (await isBlockedEither(userId, toUserId)) return; // T7.5: silent
 
       io.to(toUserId).emit("typing:update", {
         fromUserId: userId,
@@ -217,6 +221,11 @@ export function setupSocket(io: Server) {
         }
         if (!(await UserModel.exists({ _id: dto.toUserId }))) {
           return ack?.({ ok: false, code: "NOT_FOUND", error: "Recipient not found" });
+        }
+        if (await isBlockedEither(userId, dto.toUserId)) {
+          // T7.5: a block is silent. Nothing is stored, delivered or pushed; the sender sees an ordinary ack.
+          metrics.messagesRejected.inc({ reason: 'blocked' });
+          return ack?.({ ok: true, serverMessageId: new Types.ObjectId().toString(), seq: null });
         }
         if (!isNonEmptyString(dto.clientMessageId, 3)) {
           log.warn({ from: userId }, "[socket] reject message: invalid clientMessageId");
@@ -482,7 +491,8 @@ export function setupSocket(io: Server) {
           return ack?.({ ok: false, code: "STALE_EPOCH", error: "Group membership changed", epoch: group.epoch });
         }
 
-        const recipients = group.members.map((m) => String(m.userId)).filter((id) => id !== userId);
+        const blockedPairs = await blockedEitherWay(userId); // T7.5: no copies between a blocked pair
+        const recipients = group.members.map((m) => String(m.userId)).filter((id) => id !== userId && !blockedPairs.has(id));
         const existing = await MessageModel.findOne({ fromUserId: userId, clientMessageId: dto.clientMessageId }).select('_id seq');
         if (existing) return ack?.({ ok: true, serverMessageId: String(existing._id), seq: (existing as any).seq ?? null, epoch: group.epoch });
 

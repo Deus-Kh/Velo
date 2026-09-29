@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { blockedByMe } from '../lib/blocks';
 import { ConversationModel } from '../models/Conversation';
 import { requireAuth, type AuthedRequest } from '../middleware/auth';
 import { makeConversationId } from '../utils/conversation';
@@ -8,6 +9,7 @@ export const conversationsRouter = Router();
 
 conversationsRouter.get('/', requireAuth, async (req: AuthedRequest, res) => {
   const me = String(req.userId);
+  const blocked = await blockedByMe(me); // T7.5: the blocker's list hides the pair
 
   const docs = await ConversationModel.find({ members: me })
     .populate('members', '_id username identitySignUpdatedAt identityDhUpdatedAt')
@@ -21,6 +23,7 @@ conversationsRouter.get('/', requireAuth, async (req: AuthedRequest, res) => {
         : null;
 
       if (!peer?._id) return null;
+      if (blocked.has(String(peer._id))) return null;
       
       let unreadCount = 0;
       if (doc.unreadCounts) {

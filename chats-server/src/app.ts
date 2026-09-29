@@ -16,6 +16,7 @@ import { usersRouter } from './routes/users.routes';
 import { messagesRouter } from './routes/messages.routes';
 import { keysRouter } from './routes/keys.routes';
 import { groupsRouter } from './routes/groups.routes';
+import { reportsRouter } from './routes/reports.routes';
 
 /**
  * Builds the Express application without binding a port or connecting to
@@ -46,6 +47,7 @@ export function createApp(): express.Express {
   app.use('/messages', messagesRouter);
   app.use('/telemetry', telemetryRouter);
   app.use('/groups', groupsRouter); // T6.3
+  app.use('/reports', reportsRouter); // T7.5
 
   // T4.6: Prometheus scrape, bearer-protected; 404 when METRICS_TOKEN is unset.
   app.get('/metrics', metricsHandler());

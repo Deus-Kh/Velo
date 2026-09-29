@@ -95,6 +95,16 @@ export const privacySchema = z
   .strict()
   .refine((v) => Object.keys(v).length > 0, { message: 'at least one setting is required' });
 
+/** T7.5: a report; only what the reporter wrote reaches the server. */
+export const reportSchema = z
+  .object({
+    reportedUserId: z.string().regex(/^[0-9a-fA-F]{24}$/, 'reportedUserId must be an id'),
+    reason: z.enum(['spam', 'abuse', 'impersonation', 'other']),
+    excerpt: z.string().max(2000).optional(),
+    groupId: z.string().regex(/^[0-9a-fA-F]{24}$/).optional(),
+  })
+  .strict();
+
 export const pushTokenSchema = z.object({
   token: z.string().trim().min(1, 'token is required').max(4096),
   platform: z.enum(['android', 'ios']),

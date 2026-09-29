@@ -4,6 +4,8 @@ import { UserModel, USERNAME_CI_COLLATION } from "../models/User";
 import { escapeRegex } from "../utils/regex";
 import { privacySchema, pushTokenSchema, updateMeSchema, validateBody } from "../utils/validation";
 import { normalizePrivacy, updatePrivacy, type PrivacySettings } from "../lib/privacy";
+import { blockUser, listBlocks, unblockUser } from "../lib/blocks";
+import { Types } from "mongoose";
 
 export const usersRouter = Router();
 
@@ -59,6 +61,28 @@ usersRouter.get("/me", requireAuth, async (req: AuthedRequest, res) => {
     publicKey: user.publicKey,
     privacy: normalizePrivacy(user.privacy),
   });
+});
+
+// T7.5: block list. Silent for the blocked side (lib/blocks.ts enforces it).
+usersRouter.get("/me/blocks", requireAuth, async (req: AuthedRequest, res) => {
+  return res.json({ items: await listBlocks(String(req.userId)) });
+});
+
+usersRouter.post("/:userId/block", requireAuth, async (req: AuthedRequest, res) => {
+  const userId = String(req.params.userId ?? "");
+  if (!Types.ObjectId.isValid(userId)) return res.status(400).json({ error: "Invalid user id", code: "BAD_ID" });
+  const r = await blockUser(String(req.userId), userId);
+  if (r === "SELF") return res.status(400).json({ error: "Cannot block yourself", code: "SELF" });
+  if (r === "NOT_FOUND") return res.status(404).json({ error: "User not found", code: "NOT_FOUND" });
+  return res.json({ ok: true });
+});
+
+usersRouter.delete("/:userId/block", requireAuth, async (req: AuthedRequest, res) => {
+  const userId = String(req.params.userId ?? "");
+  if (!Types.ObjectId.isValid(userId)) return res.status(400).json({ error: "Invalid user id", code: "BAD_ID" });
+  const removed = await unblockUser(String(req.userId), userId);
+  if (!removed) return res.status(404).json({ error: "Not blocked", code: "NOT_FOUND" });
+  return res.json({ ok: true });
 });
 
 // T7.4: privacy toggles. Read and partially update; the server enforces them (lib/privacy.ts).

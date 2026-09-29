@@ -26,6 +26,7 @@ import { useAppUiStore } from '../store/app-ui.store';
 import { cancelConversationNotifications } from '../shared/notifications/notifee';
 import { usePushHandlers } from '../shared/notifications/pushHandlers';
 import { useExpirySweeper } from '../shared/chat/useExpirySweeper';
+import { useBlocksSync } from '../shared/chat/blocks';
 import { Icon } from '../components/Icon';
 
 import { useColorScheme } from 'react-native';
@@ -142,6 +143,8 @@ export default function MainTabsScreen() {
   usePushHandlers(Boolean(userId));
   // T7.3: expired messages go when the app comes to the foreground.
   useExpirySweeper(userId);
+  // T7.5: the block list is mirrored locally so inbound copies are dropped at once.
+  useBlocksSync(userId);
 
   useEffect(() => {
     if (!pendingOpenChatPeerUserId || !userId) return;

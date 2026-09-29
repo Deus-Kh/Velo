@@ -10,6 +10,7 @@ import { loadSession } from '../storage/sessionStore';
 import { encryptAndPersist } from '../chat/ratchetAdapter';
 import { receiveIncoming } from '../chat/incoming';
 import { handleInboundAction } from '../chat/actions';
+import { isBlockedLocally } from '../../store/blocks.store';
 import { ensureV2Session } from '../crypto/sessionBootstrap';
 import { reportDecryptFailure } from '../api/telemetry.api';
 import { ProtocolError, protocolErrorCode, type ProtocolErrorCode, type RatchetSessionV2, encodeContent, decodeContent, isControlContent, textContent, type Content } from '@velo/protocol';
@@ -150,6 +151,11 @@ export async function subscribeToMessages(onMessage: (m: {
       }
       // T6.3: group copies are handled by the group paths (useGroupChat, the chat list), never here.
       if (msg.g1 || msg.groupId) {
+        return;
+      }
+      if (isBlockedLocally(myUserId, msg.fromUserId)) {
+        // T7.5: a blocked sender's copy (pre-block, or a server that missed the block) is dropped and deleted.
+        socket.emit('message:delivered', { serverMessageId: msg.serverMessageId }, () => {});
         return;
       }
 
