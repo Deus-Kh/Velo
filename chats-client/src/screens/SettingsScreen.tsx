@@ -15,7 +15,7 @@ import { wipeLocalStateForUser } from '../shared/storage/localWipe';
 import { saveStoredSession } from '../shared/auth/tokenStore';
 import { setAccessToken } from '../shared/auth/session';
 import { authApi } from '../shared/api/auth.api';
-import { userApi, type MeResponse } from '../shared/api/user.api';
+import { DEFAULT_PRIVACY_SETTINGS, userApi, type MeResponse, type PrivacySettings } from '../shared/api/user.api';
 import {
   disablePushMessaging,
   getNotificationDeviceStatus,
@@ -280,6 +280,9 @@ export default function SettingsScreen() {
   const [diagnostics, setDiagnostics] = useState<SecurityDiagnostics | null>(null);
   const [diagnosticsLoading, setDiagnosticsLoading] = useState(true);
   const [profile, setProfile] = useState<MeResponse | null>(null);
+  /** T7.4: privacy toggles, mirrored from the server; a failed save reverts. */
+  const [privacy, setPrivacy] = useState<PrivacySettings>(DEFAULT_PRIVACY_SETTINGS);
+  const [privacyError, setPrivacyError] = useState<string | null>(null);
   const [profileLoading, setProfileLoading] = useState(true);
   const [editingField, setEditingField] = useState<EditableProfileField>(null);
   const [profileDraft, setProfileDraft] = useState<EditableProfile>({
@@ -347,6 +350,22 @@ export default function SettingsScreen() {
     }
   }, [userId]);
 
+  const handlePrivacyToggle = useCallback(
+    async (key: keyof PrivacySettings, value: boolean) => {
+      const previous = privacy;
+      setPrivacy({ ...previous, [key]: value });
+      setPrivacyError(null);
+      try {
+        const res = await userApi.updatePrivacy({ [key]: value });
+        setPrivacy(res.data);
+      } catch (error: any) {
+        setPrivacy(previous);
+        setPrivacyError(error?.response?.data?.error || error?.message || 'Could not save the setting');
+      }
+    },
+    [privacy],
+  );
+
   const loadProfile = useCallback(async () => {
     if (!userId) {
       setProfile(null);
@@ -358,6 +377,7 @@ export default function SettingsScreen() {
     try {
       const res = await userApi.getMe();
       setProfile(res.data);
+      if (res.data.privacy) setPrivacy(res.data.privacy);
       setProfileDraft({
         username: res.data.username,
         email: res.data.email,
@@ -800,6 +820,38 @@ export default function SettingsScreen() {
             title="Privacy"
             description="Controls and explanations related to identity trust and secure communication."
           />
+          <SettingsGroup>
+            <SettingsRow
+              title="Show when I'm online"
+              subtitle="Off by default: contacts never see a live presence unless you allow it."
+              onPress={() => handlePrivacyToggle('online', !privacy.online)}
+              trailing={<SettingsToggle value={privacy.online} onValueChange={(v) => handlePrivacyToggle('online', v)} />}
+            />
+            <SettingsRow
+              title="Show last seen"
+              subtitle="Off by default: contacts see nothing about when you were last here."
+              onPress={() => handlePrivacyToggle('lastSeen', !privacy.lastSeen)}
+              trailing={<SettingsToggle value={privacy.lastSeen} onValueChange={(v) => handlePrivacyToggle('lastSeen', v)} />}
+            />
+            <SettingsRow
+              title="Send read receipts"
+              subtitle="Tell senders when you have read their messages. Your own unread counts are unaffected."
+              onPress={() => handlePrivacyToggle('readReceipts', !privacy.readReceipts)}
+              trailing={<SettingsToggle value={privacy.readReceipts} onValueChange={(v) => handlePrivacyToggle('readReceipts', v)} />}
+            />
+            <SettingsRow
+              title="Show typing"
+              subtitle="Let the other side see when you are typing."
+              onPress={() => handlePrivacyToggle('typing', !privacy.typing)}
+              trailing={<SettingsToggle value={privacy.typing} onValueChange={(v) => handlePrivacyToggle('typing', v)} />}
+              last={!privacyError}
+            />
+            {privacyError ? (
+              <View className="px-4 pb-3">
+                <Text className="text-xs text-danger">{privacyError}</Text>
+              </View>
+            ) : null}
+          </SettingsGroup>
           <SettingsGroup>
             <SettingsRow
               title="Trusted contacts"

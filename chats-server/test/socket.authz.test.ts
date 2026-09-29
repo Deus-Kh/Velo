@@ -145,10 +145,10 @@ describe('presence', () => {
     expect(await update).toBeNull();
   });
 
-  it('a conversation partner does', async () => {
-    const update = nextEvent<{ userId: string; online: boolean }>(sb, 'presence:update', 2000);
+  it('a conversation partner does, and sees only what the peer allows (T7.4: hidden by default)', async () => {
+    const update = nextEvent<{ userId: string; online: boolean; lastSeenAt: number | null }>(sb, 'presence:update', 2000);
     sb.emit('presence:subscribe', { peerUserId: A.userId });
-    expect(await update).toMatchObject({ userId: A.userId, online: true });
+    expect(await update).toEqual({ userId: A.userId, online: false, lastSeenAt: null });
   });
 });
 

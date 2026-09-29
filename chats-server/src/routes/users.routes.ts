@@ -2,7 +2,8 @@ import { Router } from "express";
 import { requireAuth, type AuthedRequest } from "../middleware/auth";
 import { UserModel, USERNAME_CI_COLLATION } from "../models/User";
 import { escapeRegex } from "../utils/regex";
-import { pushTokenSchema, updateMeSchema, validateBody } from "../utils/validation";
+import { privacySchema, pushTokenSchema, updateMeSchema, validateBody } from "../utils/validation";
+import { normalizePrivacy, updatePrivacy, type PrivacySettings } from "../lib/privacy";
 
 export const usersRouter = Router();
 
@@ -48,7 +49,7 @@ usersRouter.get(
 // (опционально) GET /users/me  (JWT)
 usersRouter.get("/me", requireAuth, async (req: AuthedRequest, res) => {
   const user = await UserModel.findById(req.userId).select(
-    "email username publicKey",
+    "email username publicKey privacy",
   );
   if (!user) return res.status(404).json({ error: "User not found" });
   return res.json({
@@ -56,7 +57,21 @@ usersRouter.get("/me", requireAuth, async (req: AuthedRequest, res) => {
     email: user.email,
     username: user.username,
     publicKey: user.publicKey,
+    privacy: normalizePrivacy(user.privacy),
   });
+});
+
+// T7.4: privacy toggles. Read and partially update; the server enforces them (lib/privacy.ts).
+usersRouter.get("/me/privacy", requireAuth, async (req: AuthedRequest, res) => {
+  const user = await UserModel.findById(req.userId).select("privacy").lean();
+  if (!user) return res.status(404).json({ error: "User not found" });
+  return res.json(normalizePrivacy(user.privacy));
+});
+
+usersRouter.patch("/me/privacy", requireAuth, validateBody(privacySchema), async (req: AuthedRequest, res) => {
+  const next = await updatePrivacy(String(req.userId), req.body as Partial<PrivacySettings>);
+  if (!next) return res.status(404).json({ error: "User not found" });
+  return res.json(next);
 });
 
 usersRouter.patch("/me", requireAuth, validateBody(updateMeSchema), async (req: AuthedRequest, res) => {

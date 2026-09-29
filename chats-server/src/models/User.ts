@@ -32,6 +32,19 @@ const UserSchema = new Schema(
     },
     identityChangedAt: { type: Date, default: null },
 
+    // T7.4: privacy toggles (P2-10). Defaults: no presence broadcast; read receipts and typing on.
+    privacy: {
+      type: new Schema(
+        {
+          readReceipts: { type: Boolean, default: true },
+          typing: { type: Boolean, default: true },
+          lastSeen: { type: Boolean, default: false },
+          online: { type: Boolean, default: false },
+        },
+        { _id: false },
+      ),
+      default: () => ({}),
+    },
     pushTokens: {
       type: [
         {

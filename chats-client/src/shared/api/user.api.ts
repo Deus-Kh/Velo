@@ -5,11 +5,21 @@ export interface PublicKeyResponse {
   userId: string;
   publicKey: string; // base64
 }
+/** T7.4: what peers may learn; enforced by the server. */
+export interface PrivacySettings {
+  readReceipts: boolean;
+  typing: boolean;
+  lastSeen: boolean;
+  online: boolean;
+}
+export const DEFAULT_PRIVACY_SETTINGS: PrivacySettings = { readReceipts: true, typing: true, lastSeen: false, online: false };
+
 export interface MeResponse {
   userId: string;
   username: string;
   email: string;
   publicKey?: string | null;
+  privacy?: PrivacySettings;
 }
 /** A search result. Deliberately carries no email (T1.6): other users' emails are never exposed. */
 export interface UserListItem {
@@ -51,4 +61,7 @@ export const userApi = {
     ),
     getUsers: (params?: { q?: string; limit?: number }) =>
     http.get<UsersListResponse>('/users', { params }),
+
+  getPrivacy: () => http.get<PrivacySettings>('/users/me/privacy'),
+  updatePrivacy: (patch: Partial<PrivacySettings>) => http.patch<PrivacySettings>('/users/me/privacy', patch),
 };

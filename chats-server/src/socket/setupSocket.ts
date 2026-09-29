@@ -1,4 +1,5 @@
 import type { Server } from "socket.io";
+import { loadPrivacy, maskPresence } from '../lib/privacy';
 import jwt from "jsonwebtoken";
 import { config } from "../config";
 import { ConversationModel } from "../models/Conversation";
@@ -84,11 +85,15 @@ function isValidObjectIdString(v: unknown): v is string {
 // T4.3 (P2-4): presence lives in services.presence (Redis in production, shared by every
 // process; memory in development and tests), never in this module's memory.
 async function getPresencePayload(userId: string) {
-  return {
-    userId,
-    online: await services.presence.isOnline(userId),
-    lastSeenAt: await services.presence.lastSeen(userId),
-  };
+  // T7.4: what peers may see is the user's choice; hidden by default.
+  return maskPresence(
+    {
+      userId,
+      online: await services.presence.isOnline(userId),
+      lastSeenAt: await services.presence.lastSeen(userId),
+    },
+    await loadPrivacy(userId),
+  );
 }
 
 async function emitPresence(io: Server, userId: string) {
@@ -171,6 +176,7 @@ export function setupSocket(io: Server) {
       const toUserId = String(dto?.toUserId ?? "");
       if (!isValidObjectIdString(toUserId)) return;
       if (!(await haveConversation(userId, toUserId))) return;
+      if (!(await loadPrivacy(userId)).typing) return; // T7.4: the typer's choice
 
       io.to(toUserId).emit("typing:update", {
         fromUserId: userId,
@@ -582,7 +588,8 @@ export function setupSocket(io: Server) {
           { $set: { [`unreadCounts.${userId}`]: 0 } },
         );
 
-        if (result.modifiedCount > 0) {
+        // T7.4: the messages are read either way; the sender is told only if the reader allows it.
+        if (result.modifiedCount > 0 && (await loadPrivacy(userId)).readReceipts) {
           io.to(peerUserId).emit('message:status-changed', {
             conversationId,
             status: 'read',

@@ -84,6 +84,17 @@ export const updateMeSchema = z.object({
   username: usernameSchema,
 });
 
+/** T7.4: a partial update of the privacy toggles; at least one field, nothing unknown. */
+export const privacySchema = z
+  .object({
+    readReceipts: z.boolean().optional(),
+    typing: z.boolean().optional(),
+    lastSeen: z.boolean().optional(),
+    online: z.boolean().optional(),
+  })
+  .strict()
+  .refine((v) => Object.keys(v).length > 0, { message: 'at least one setting is required' });
+
 export const pushTokenSchema = z.object({
   token: z.string().trim().min(1, 'token is required').max(4096),
   platform: z.enum(['android', 'ios']),

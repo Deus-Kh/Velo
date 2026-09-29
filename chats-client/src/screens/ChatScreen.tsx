@@ -178,7 +178,7 @@ function getHeaderPresenceMeta({
 
 function formatLastSeen(lastSeenAt: number | null) {
   if (!lastSeenAt) {
-    return 'last seen recently';
+    return 'end-to-end encrypted'; // T7.4: presence hidden by the peer (the default), so say nothing about it
   }
 
   const diffMs = Date.now() - lastSeenAt;
