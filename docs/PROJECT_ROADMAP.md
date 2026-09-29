@@ -150,7 +150,7 @@ What a user can actually do today: 1:1 text with replies, receipts, typing, pres
 | Reactions, edit, delete, forward | ✅ | ❌ | ✅ Phase 7' |
 | Images / video / files / voice notes | ✅ | ❌ | ✅ Phase 8' |
 | Disappearing messages | ✅ | ❌ | ✅ Phase 7' |
-| Avatars / profiles | ✅ encrypted | ⚠️ initials only | ✅ Phase 7' |
+| Avatars / profiles | ✅ encrypted | ✅ name + emoji/JPEG avatar over the session, server stores none; no photo picker yet (T7.7) | done (picker later) |
 | Groups | ✅ | ✅ create, add/remove/leave, roles, group chat screen, notifications (Phase 6') | done; media, disappearing, reactions per Phases 7'/8' |
 | Block / report | ✅ | ✅ silent server-side block list, reports in the reporter's words (T7.5) | done |
 | Account deletion | ✅ | ✅ password-gated full cascade, groups left with rotation, peers told, device wiped (T7.6) | done |
@@ -481,6 +481,8 @@ Extraction happens in T2.1. Secrets (`*.pem`, `*.keystore`, service-account JSON
 **7' progress — T7.5 done 2026-09-29** (one commit): silent, symmetric server-side blocks (messages, presence, typing, group copies), a local mirror that drops before decryption, reports in the reporter's own words. Next in order: T7.6 (account deletion).
 
 **7' progress — T7.6 done 2026-09-29** (one commit): account deletion with a password gate, a full server cascade verified by collection counts, group leave with rotation, peers told, and a full device wipe. Next in order: T7.7 (profile over the session).
+
+**7' progress — T7.7 done 2026-09-29** (one commit): display name and avatar travel over the session as content, sealed on the device, shown everywhere a contact appears; the server stores no profile. Avatars are emoji-on-colour today (no image picker shipped); JPEG is accepted on receive. Next in order: T7.8 (local search).
 
 **2b progress — T2.14 done 2026-09-28** (one commit, D7 = A): plaintext stored locally in sealed records, message keys never archived, history read from the device with the server asked only for newer messages, one-time migration of the old archive. **The known-red registry is empty: every scenario the harness owns is green.** Remaining in Phase 2: T2.12 (manual two-device checklist, owner).
 
