@@ -1,5 +1,13 @@
-import { describe, expect, it } from 'vitest';
-import { buildMessagePush, tokensToPrune } from '../src/push/firebase';
+import { describe, expect, it, vi } from 'vitest';
+
+// firebase.ts loads config.ts, which validates the environment at import
+// time; stub it so the test never depends on a developer's env file.
+vi.stubEnv('DOTENV_CONFIG_PATH', './definitely-missing.env');
+vi.stubEnv('MONGO_URI', 'mongodb://127.0.0.1:1/unused');
+vi.stubEnv('JWT_SECRET', 't'.repeat(48));
+vi.stubEnv('FIREBASE_SERVICE_ACCOUNT_PATH', './missing.json');
+
+const { buildMessagePush, tokensToPrune } = await import('../src/push/firebase');
 
 /**
  * T3.3 — push done right (P1-9, server side).

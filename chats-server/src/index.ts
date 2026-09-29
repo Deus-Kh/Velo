@@ -2,7 +2,7 @@ import http from 'http';
 import { Server } from 'socket.io';
 import { createAdapter } from '@socket.io/redis-adapter';
 import mongoose from 'mongoose';
-import { config } from './config';
+import { config, ENV_FILE } from './config';
 import { initRedis, closeRedis } from './redis';
 import { configureServices } from './lib/services';
 import { configureRateLimiters } from './middleware/rateLimit';
@@ -18,6 +18,7 @@ import { log } from './lib/logger';
 const SOCKET_MAX_HTTP_BUFFER_SIZE = 256 * 1024;
 
 async function main() {
+  log.info({ envFile: ENV_FILE ?? '(process environment only)', nodeEnv: config.NODE_ENV }, '[server] environment');
   if (!config.IS_PRODUCTION) {
     // T4.1: `npm start` runs the compiled build; the process manager sets NODE_ENV (T4.2).
     log.warn('[server] NODE_ENV is not "production" (' + config.NODE_ENV + '): development settings are in effect');

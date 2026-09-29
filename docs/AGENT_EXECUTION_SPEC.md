@@ -172,7 +172,7 @@ Commit format with required trailers `Fixes:`, `Wire format:`, `Breaking:`, `Tes
 
 ## 3.1 Setup
 ```bash
-cd chats-server && npm install && cp .env.example .env   # .env.example exists after T1.1
+cd chats-server && npm install && cp .env.development.example .env.development   # local MongoDB, no Redis; set JWT_SECRET (two environments since 2026-09-29: .env.development / .env.production, see README)
 npm run dev
 cd chats-client && npm install && (cd ios && pod install) && npm start
 npm run android   # or npm run ios (works after T1.2 + T1.16)

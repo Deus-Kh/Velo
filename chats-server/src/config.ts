@@ -1,15 +1,17 @@
 import dotenv from 'dotenv';
+import { resolveEnvFile } from './envFile';
 
-// DOTENV_CONFIG_PATH lets tests and CI point at a different file (or at a
-// nonexistent one to guarantee a clean environment). Default: ./.env in cwd.
-dotenv.config({ path: process.env.DOTENV_CONFIG_PATH || undefined, quiet: true });
+// Two environments: DOTENV_CONFIG_PATH (explicit) > .env.<NODE_ENV> > .env; see envFile.ts.
+export const ENV_FILE = resolveEnvFile(process.env.NODE_ENV, process.env.DOTENV_CONFIG_PATH);
+if (ENV_FILE) dotenv.config({ path: ENV_FILE, quiet: true });
 
 /**
  * Server configuration.
  *
  * Every secret is REQUIRED from the environment. There are deliberately no
  * fallbacks: a missing value must fail at boot, never silently at runtime.
- * Copy `.env.example` to `.env` and fill it in. Never commit `.env`.
+ * Locally: copy `.env.development.example` to `.env.development` (or
+ * `.env.example` to `.env.production`). Never commit either.
  */
 
 function required(name: string): string {
@@ -17,7 +19,7 @@ function required(name: string): string {
   if (!value || value.trim() === '') {
     throw new Error(
       `Missing required environment variable: ${name}. ` +
-        `Copy .env.example to .env and provide a value.`,
+        `Locally copy .env.development.example to .env.development and provide a value.`,
     );
   }
   return value.trim();

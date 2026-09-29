@@ -15,7 +15,12 @@ const FORBIDDEN_FILES = [
   /firebase-adminsdk.*\.json$/i,
   /(^|\/)secrets\//i,
 ];
-const ALLOWED_FILES = [/\.env\.example$/i, /(^|\/)debug\.keystore$/i];
+// Skipped entirely (binary, checked-in Android debug key).
+const ALLOWED_FILES = [/(^|\/)debug\.keystore$/i];
+// Env templates (.env.example, .env.<mode>.example) and the client's committed
+// development/test env carry only placeholders and localhost URLs by design:
+// the file-type rule is waived for them, their contents are still scanned.
+const ALLOWED_ENV_FILES = [/\.env(\.[a-z]+)?\.example$/i, /(^|\/)chats-client\/\.env\.(development|test)$/];
 
 const PATTERNS = [
   { name: 'MongoDB connection string with password', re: /mongodb(\+srv)?:\/\/[^\s"'/@]+:[^\s"'@]+@/i },
@@ -71,7 +76,7 @@ const files = scanAll ? trackedFiles() : stagedFiles();
 
 for (const file of files) {
   if (ALLOWED_FILES.some((re) => re.test(file))) continue;
-  if (FORBIDDEN_FILES.some((re) => re.test(file))) {
+  if (!ALLOWED_ENV_FILES.some((re) => re.test(file)) && FORBIDDEN_FILES.some((re) => re.test(file))) {
     findings.push({ file, line: 0, name: 'Forbidden file type' });
     continue;
   }

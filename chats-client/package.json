@@ -4,6 +4,7 @@
   "private": true,
   "scripts": {
     "android": "react-native run-android",
+    "dev:reverse": "adb reverse tcp:9999 tcp:9999",
     "ios": "react-native run-ios",
     "lint": "eslint .",
     "start": "react-native start",

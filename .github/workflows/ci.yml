@@ -115,7 +115,10 @@ jobs:
         working-directory: chats-client
       - name: Metro release bundle (module resolution smoke)
         working-directory: chats-client
-        run: npx react-native bundle --platform android --dev false --entry-file index.js --bundle-output /tmp/velo.bundle --reset-cache
+        # Jest reads the committed .env.test; a production-mode bundle needs .env.production (the example has valid https placeholders).
+        run: |
+          cp .env.production.example .env.production
+          npx react-native bundle --platform android --dev false --entry-file index.js --bundle-output /tmp/velo.bundle --reset-cache
 
   android:
     name: android debug build

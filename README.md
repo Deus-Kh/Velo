@@ -51,23 +51,25 @@ The hook refuses commits containing connection strings, private keys, signing pa
 ```bash
 cd chats-server
 npm install
-cp .env.example .env      # then fill in MONGO_URI, JWT_SECRET (>= 32 chars), FIREBASE_SERVICE_ACCOUNT_PATH
-npm run dev               # nodemon + ts-node, watches src/
+cp .env.development.example .env.development   # local MongoDB, no Redis; set JWT_SECRET (>= 32 chars)
+npm run dev               # nodemon + ts-node, watches src/; loads .env.development (NODE_ENV unset)
 npm run build             # tsc → dist/ (T4.1)
-NODE_ENV=production npm start   # runs dist/index.js; in production systemd does this (see deploy/README.md, T4.2)
+NODE_ENV=production npm start   # runs dist/index.js and loads .env.production; under systemd /etc/velo/server.env is used instead (deploy/README.md, T4.2)
 npm test                  # vitest: route and socket tests against an in-memory MongoDB
 ```
 
-The server refuses to start when a required variable is missing. Keep the Firebase service-account JSON and any keystore or certificate **outside** the repository (the example uses `../../velo-secrets/`).
+The server loads `DOTENV_CONFIG_PATH`, else `.env.<NODE_ENV>`, else `.env`, and logs which file it took at startup. It refuses to start when a required variable is missing. Keep the Firebase service-account JSON and any keystore or certificate **outside** the repository (the example uses `../../velo-secrets/`).
 
 ### 3. Client
 
 ```bash
 cd chats-client
 npm install
-cp .env.example .env      # API_URL and SOCKET_URL; https:// is mandatory in release builds
+# development: .env.development is committed (API_URL=http://localhost:9999) — nothing to copy
+# production:  cp .env.production.example .env.production   # real https:// host; mandatory in release builds
+npm run dev:reverse       # once per device/emulator: adb reverse tcp:9999 tcp:9999, so `localhost` is this computer
 npm start -- --reset-cache
-npm run android           # or: npm run ios (after `cd ios && pod install`)
+npm run android           # two devices attached? add --deviceId <serial> (see `adb devices`)
 npm test                  # jest unit tests
 ```
 
