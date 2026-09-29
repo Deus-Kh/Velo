@@ -51,7 +51,7 @@ const TABS: {
   { key: 'new-chat', label: 'New Chat', icon: { lib: 'Lucide',   name: 'user-round-search'} },
   { key: 'settings', label: 'Settings', icon: { lib: 'Lucide',   name: 'settings'} },
 ];
-const BACK_SWIPE_GESTURE_WIDTH_RATIO = 0.5;
+const BACK_SWIPE_EDGE_WIDTH = 24;
 const BACK_SWIPE_DISTANCE_TRIGGER = 110;
 const BACK_SWIPE_VELOCITY_TRIGGER = 900;
 const BACK_SWIPE_GESTURE_BOTTOM_INSET = 118;
@@ -187,23 +187,19 @@ export default function MainTabsScreen() {
     overlayTranslateX.value = withTiming(0, { duration: 240 });
   }, [activeChat, frame.width, overlayTranslateX]);
 
-  // Back swipe: the pan is attached to the chat overlay itself, so taps and
-  // the vertical scroll reach the chat's own views; hitSlop limits it to
-  // touches that begin in the left half between the header and the
-  // composer (an invisible strip on top of the chat used to do this and
-  // swallowed every tap in that half: play buttons, photos, incoming bubbles).
+  // Back swipe from the left edge. The pan lives on a thin invisible strip
+  // along the edge (below the header, above the composer). It used to cover
+  // the whole left half, which swallowed every tap there (play buttons,
+  // photos, incoming bubbles); a pan attached to the chat overlay itself was
+  // no better: in its waiting state it killed slightly moving taps, the
+  // vertical scroll and the reply swipe under it. The strip is the one place
+  // where touches may be eaten, and it is narrower than a bubble's padding.
   const overlayGesture = Gesture.Pan()
     .enabled(Boolean(activeChat))
-    .hitSlop({
-      left: 0,
-      width: frame.width * BACK_SWIPE_GESTURE_WIDTH_RATIO,
-      top: -(insets.top + BACK_SWIPE_GESTURE_TOP_INSET),
-      bottom: -(insets.bottom + BACK_SWIPE_GESTURE_BOTTOM_INSET),
-    })
     .activeOffsetX([12, 999])
     .failOffsetY([-14, 14])
-    .onBegin((event) => {
-      swipeStartedFromEdge.value = event.x <= frame.width * BACK_SWIPE_GESTURE_WIDTH_RATIO;
+    .onBegin(() => {
+      swipeStartedFromEdge.value = true;
     })
     .onUpdate((event) => {
       if (!swipeStartedFromEdge.value) return;
@@ -373,7 +369,6 @@ export default function MainTabsScreen() {
             style={dimAnimatedStyle}
           />
 
-          <GestureDetector gesture={overlayGesture}>
           <Animated.View className="absolute inset-0" style={overlayAnimatedStyle}>
             {activeChat.kind === 'group' ? (
               <GroupChatScreen groupId={activeChat.groupId} initialName={activeChat.name} jumpToMessageId={activeChat.jumpToMessageId} onClose={closeChat} />
@@ -392,8 +387,18 @@ export default function MainTabsScreen() {
               }
             />
             )}
+
+            <GestureDetector gesture={overlayGesture}>
+              <View
+                className="absolute left-0 bottom-0"
+                style={{
+                  top: insets.top + BACK_SWIPE_GESTURE_TOP_INSET,
+                  bottom: insets.bottom + BACK_SWIPE_GESTURE_BOTTOM_INSET,
+                  width: BACK_SWIPE_EDGE_WIDTH,
+                }}
+              />
+            </GestureDetector>
           </Animated.View>
-          </GestureDetector>
         </>
       ) : null}
     </View>
