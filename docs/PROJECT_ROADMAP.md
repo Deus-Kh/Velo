@@ -484,6 +484,8 @@ Extraction happens in T2.1. Secrets (`*.pem`, `*.keystore`, service-account JSON
 
 **7' progress — T7.7 done 2026-09-29** (one commit): display name and avatar travel over the session as content, sealed on the device, shown everywhere a contact appears; the server stores no profile. Avatars are emoji-on-colour today (no image picker shipped); JPEG is accepted on receive. Next in order: T7.8 (local search).
 
+**7' progress — T7.8 done 2026-09-29** (one commit): local search over the sealed store, in the chat list and inside each chat, with jump-to-message. Next in order: T7.9 (docs and gate).
+
 **2b progress — T2.14 done 2026-09-28** (one commit, D7 = A): plaintext stored locally in sealed records, message keys never archived, history read from the device with the server asked only for newer messages, one-time migration of the old archive. **The known-red registry is empty: every scenario the harness owns is green.** Remaining in Phase 2: T2.12 (manual two-device checklist, owner).
 
 **2b progress — T2.11 done 2026-09-28** (two commits): bootstrap persists only after the first message decrypts, bootstrap replay refused, glare converges on the lower user id without losing messages, a peer's local reset is adopted automatically. Next in order: T2.14.
