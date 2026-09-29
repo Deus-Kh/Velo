@@ -43,5 +43,5 @@ describe('S12 header.n = 10_000_000', () => {
     expect((r as Outcome).outcome).toBe('threw');
     expect((r as Outcome).code).toBe('TOO_MANY_SKIPPED');
     expect((r as Outcome).ms).toBeLessThan(50);
-  }, 15_000);
+  });
 });
