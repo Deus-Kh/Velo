@@ -474,6 +474,8 @@ Extraction happens in T2.1. Secrets (`*.pem`, `*.keystore`, service-account JSON
 
 **7' progress — T7.2 done 2026-09-28** (one commit): reactions, edits, "delete for everyone" (a request the other devices honour) and forwarding with provenance, in 1:1 chats and groups, applied on every inbound path and sent local-first over the session. Next in order: T7.3 (disappearing messages).
 
+**7' progress — T7.3 done 2026-09-29** (one commit): disappearing messages as a per-conversation timer agreed over the session (admins only in groups), expiry fixed when a record is stored, sweeper on open / every 30 s / foreground, system lines and a timer sheet. Next in order: T7.4 (privacy toggles; no presence broadcast by default).
+
 **2b progress — T2.14 done 2026-09-28** (one commit, D7 = A): plaintext stored locally in sealed records, message keys never archived, history read from the device with the server asked only for newer messages, one-time migration of the old archive. **The known-red registry is empty: every scenario the harness owns is green.** Remaining in Phase 2: T2.12 (manual two-device checklist, owner).
 
 **2b progress — T2.11 done 2026-09-28** (two commits): bootstrap persists only after the first message decrypts, bootstrap replay refused, glare converges on the lower user id without losing messages, a peer's local reset is adopted automatically. Next in order: T2.14.
