@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Image, Text, View } from 'react-native';
-import { Pressable as GHPressable } from 'react-native-gesture-handler';
+import { Image, Pressable, Text, View } from 'react-native';
 import { protocolErrorCode } from '@velo/protocol';
 import { AUTO_DOWNLOAD_BYTES, downloadAttachment, isImage } from '../shared/media/attachments';
 import { mediaDataUri } from '../shared/media/mediaStore';
@@ -13,8 +12,6 @@ import { isAudio } from '../shared/media/attachments';
  * T8.3: an attachment inside a bubble. On the device: shown. Not yet:
  * a placeholder with the dimensions, downloaded at once when small, on tap
  * otherwise; every integrity failure is shown in the security-warning tone.
- * Taps use gesture-handler's Pressable: inside the swipe-to-reply Swipeable a
- * nested React Native Pressable never receives them on Android.
  */
 const MAX_W = 240;
 const MAX_H = 320;
@@ -81,22 +78,21 @@ function ImageAttachment({ myUserId, meta, mine, onOpen }: { myUserId: string; m
 
   if (uri && isImage(meta)) {
     return (
-      <GHPressable onPress={() => onOpen?.(uri)} accessibilityLabel="Open the photo">
-        <View className="mb-1 overflow-hidden rounded-[14px]" style={{ width: frame.width, height: frame.height }}>
-          <Image source={{ uri }} style={{ width: frame.width, height: frame.height }} resizeMode="cover" accessibilityLabel="Photo" />
-        </View>
-      </GHPressable>
+      <Pressable onPress={() => onOpen?.(uri)} accessibilityLabel="Open the photo" className="mb-1 overflow-hidden rounded-[14px]" style={{ width: frame.width, height: frame.height }}>
+        <Image source={{ uri }} style={{ width: frame.width, height: frame.height }} resizeMode="cover" accessibilityLabel="Photo" />
+      </Pressable>
     );
   }
 
   return (
-    <GHPressable
+    <Pressable
       onPress={() => {
         if (progress === null && !uri) download();
       }}
       accessibilityLabel="Download the attachment"
+      className={`mb-1 items-center justify-center rounded-[14px] ${mine ? 'bg-white/15' : 'bg-black/10'}`}
+      style={{ width: frame.width, height: Math.min(frame.height, 160) }}
     >
-      <View className={`mb-1 items-center justify-center rounded-[14px] ${mine ? 'bg-white/15' : 'bg-black/10'}`} style={{ width: frame.width, height: Math.min(frame.height, 160) }}>
       {progress !== null ? (
         <>
           <Text className={`text-[13px] ${mine ? 'text-background' : 'text-text'}`}>{`Decrypting… ${Math.round(progress * 100)}%`}</Text>
@@ -112,7 +108,6 @@ function ImageAttachment({ myUserId, meta, mine, onOpen }: { myUserId: string; m
           <Text className={`mt-1 text-[12px] ${mine ? 'text-background/75' : 'text-muted'}`}>{`${formatBytes(meta.size)} · tap to download`}</Text>
         </>
       )}
-      </View>
-    </GHPressable>
+    </Pressable>
   );
 }

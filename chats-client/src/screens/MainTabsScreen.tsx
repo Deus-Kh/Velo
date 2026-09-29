@@ -55,6 +55,7 @@ const BACK_SWIPE_GESTURE_WIDTH_RATIO = 0.5;
 const BACK_SWIPE_DISTANCE_TRIGGER = 110;
 const BACK_SWIPE_VELOCITY_TRIGGER = 900;
 const BACK_SWIPE_GESTURE_BOTTOM_INSET = 118;
+const BACK_SWIPE_GESTURE_TOP_INSET = 76;
 
 
 function TabButton({
@@ -186,8 +187,19 @@ export default function MainTabsScreen() {
     overlayTranslateX.value = withTiming(0, { duration: 240 });
   }, [activeChat, frame.width, overlayTranslateX]);
 
+  // Back swipe: the pan is attached to the chat overlay itself, so taps and
+  // the vertical scroll reach the chat's own views; hitSlop limits it to
+  // touches that begin in the left half between the header and the
+  // composer (an invisible strip on top of the chat used to do this and
+  // swallowed every tap in that half: play buttons, photos, incoming bubbles).
   const overlayGesture = Gesture.Pan()
     .enabled(Boolean(activeChat))
+    .hitSlop({
+      left: 0,
+      width: frame.width * BACK_SWIPE_GESTURE_WIDTH_RATIO,
+      top: -(insets.top + BACK_SWIPE_GESTURE_TOP_INSET),
+      bottom: -(insets.bottom + BACK_SWIPE_GESTURE_BOTTOM_INSET),
+    })
     .activeOffsetX([12, 999])
     .failOffsetY([-14, 14])
     .onBegin((event) => {
@@ -361,6 +373,7 @@ export default function MainTabsScreen() {
             style={dimAnimatedStyle}
           />
 
+          <GestureDetector gesture={overlayGesture}>
           <Animated.View className="absolute inset-0" style={overlayAnimatedStyle}>
             {activeChat.kind === 'group' ? (
               <GroupChatScreen groupId={activeChat.groupId} initialName={activeChat.name} jumpToMessageId={activeChat.jumpToMessageId} onClose={closeChat} />
@@ -379,18 +392,8 @@ export default function MainTabsScreen() {
               }
             />
             )}
-
-            <GestureDetector gesture={overlayGesture}>
-              <View
-                className="absolute left-0 bottom-0"
-                style={{
-                  top: insets.top + 76,
-                  bottom: insets.bottom + BACK_SWIPE_GESTURE_BOTTOM_INSET,
-                  width: frame.width * BACK_SWIPE_GESTURE_WIDTH_RATIO,
-                }}
-              />
-            </GestureDetector>
           </Animated.View>
+          </GestureDetector>
         </>
       ) : null}
     </View>

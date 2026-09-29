@@ -238,6 +238,9 @@ export default function MessageBubble({
   return (
     <ReanimatedSwipeable
       ref={swipeableRef}
+      // reply is a swipe to the left only; a swipe to the right belongs to the
+      // chat's back gesture (MainTabsScreen), so the row must never claim it
+      dragOffsetFromLeftEdge={10_000}
       friction={1.25}
       overshootRight={false}
       overshootFriction={8}

@@ -494,7 +494,7 @@ Extraction happens in T2.1. Secrets (`*.pem`, `*.keystore`, service-account JSON
 
 **8' progress — T8.3 + T8.4 done 2026-09-29** (one commit): photos and voice notes over the attachment path, sealed media files on the device, the app's own Android audio module instead of a third library; Android debug build verified. Next in order: T8.5 (harness S30, docs, gate).
 
-**8' revision — T8.4 voice notes rebuilt 2026-09-29** after the first run on the owner's phone: attachment taps were swallowed by the swipe-to-reply gesture (gesture-handler Pressables now), the hold-to-record button could leave the microphone stuck (recorder is a state machine now), and the UI is Telegram-style: slide to cancel, slide up to lock, waveform carried in the content, play/pause, seek, speed. Details in the spec (T8.4 revision).
+**8' revision — T8.4 voice notes rebuilt 2026-09-29** after the first run on the owner's phone: taps on the left half of a chat were swallowed by the invisible back-swipe strip in MainTabsScreen (the pan now sits on the chat overlay with a hitSlop), the hold-to-record button could leave the microphone stuck (recorder is a state machine now), and the UI is Telegram-style: slide to cancel, slide up to lock, waveform carried in the content, play/pause, seek, speed. Details in the spec (T8.4 revision).
 
 **8' progress — T8.5 done 2026-09-29** (one commit): S30 over the harness, the blob format and the content-kind row in the spec, DEVIATION-10, architecture. **Phase 8' is code-complete.** Remaining human step: the two-phone media gate. Next per §11: Phase 12' (interface) or the owner's call.
 

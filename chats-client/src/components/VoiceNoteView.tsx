@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { StyleSheet, Text, View, type LayoutChangeEvent } from 'react-native';
-import { Pressable } from 'react-native-gesture-handler';
+import { Pressable, StyleSheet, Text, View, type LayoutChangeEvent } from 'react-native';
 import { protocolErrorCode } from '@velo/protocol';
 import { Icon } from './Icon';
 import { useThemeColors } from '../theme/useThemeColors';
@@ -28,10 +27,10 @@ import type { AttachmentMeta } from '../shared/storage/messageStore';
  * notes sent without one) that fills as the note plays and seeks on tap,
  * the elapsed / total time, and a speed toggle while playing.
  *
- * The buttons are gesture-handler Pressables: every bubble sits inside the
- * swipe-to-reply Swipeable, whose gesture detector swallows the taps of
- * nested React Native Pressables on Android (taps on the note did
- * nothing, while taps on plain text bubbles reached the bubble itself).
+ * Plain React Native Pressables: nested inside the bubble's own Pressable
+ * the innermost one takes the tap, so the message actions do not open on
+ * a play. (The taps that "did nothing" on the first device run were eaten
+ * by the invisible back-swipe strip in MainTabsScreen, not by the bubble.)
  */
 const BARS = 40;
 const BAR_WIDTH = 3;
