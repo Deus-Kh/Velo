@@ -18,6 +18,10 @@ import { authApi } from '../shared/api/auth.api';
 import { DEFAULT_PRIVACY_SETTINGS, userApi, type MeResponse, type PrivacySettings } from '../shared/api/user.api';
 import BlockedContactsSheet from '../components/BlockedContactsSheet';
 import DeleteAccountSheet from '../components/DeleteAccountSheet';
+import ProfileSheet from '../components/ProfileSheet';
+import Avatar from '../components/Avatar';
+import { useProfilesStore } from '../store/profiles.store';
+import { updateOwnProfile } from '../shared/chat/profile';
 import { useBlocksStore } from '../store/blocks.store';
 import {
   disablePushMessaging,
@@ -231,11 +235,7 @@ function AccountHero({
         Secure Profile
       </Text>
       <View className="mt-4 flex-row items-center">
-        <View className="h-14 w-14 items-center justify-center rounded-full bg-primary-soft">
-          <Text className="text-lg font-semibold text-primary">
-            {(profile?.username ?? userId ?? 'U').slice(0, 1).toUpperCase()}
-          </Text>
-        </View>
+        <Avatar name={profile?.username ?? userId ?? 'U'} profile={useProfilesStore.getState().own} size="lg" />
         <View className="ml-4 flex-1">
           <Text className="text-lg font-semibold text-text">
             {profile?.username || (userId ? `User ${maskUserId(userId)}` : 'Signed in on this device')}
@@ -288,6 +288,10 @@ export default function SettingsScreen() {
   const [privacyError, setPrivacyError] = useState<string | null>(null);
   const [showBlocked, setShowBlocked] = useState(false);
   const [showDeleteAccount, setShowDeleteAccount] = useState(false);
+  const ownProfile = useProfilesStore((s) => s.own);
+  const [showProfileSheet, setShowProfileSheet] = useState(false);
+  const [profileSheetBusy, setProfileSheetBusy] = useState(false);
+  const [profileSheetError, setProfileSheetError] = useState<string | null>(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const deleteAccount = useAuthStore((s) => s.deleteAccount);
@@ -826,6 +830,23 @@ export default function SettingsScreen() {
           {profileStatus ? <InfoNote>{profileStatus}</InfoNote> : null}
 
           <SectionEyebrow
+            title="Shared profile"
+            description="What contacts see for you. It travels over your encrypted sessions; the server stores none of it."
+          />
+          <SettingsGroup>
+            <SettingsRow
+              title="Name and avatar"
+              subtitle={ownProfile ? `${ownProfile.name}${ownProfile.avatar ? ' · avatar set' : ' · no avatar'}` : 'Not set: contacts see your username.'}
+              onPress={() => {
+                setProfileSheetError(null);
+                setShowProfileSheet(true);
+              }}
+              trailing={<Avatar name={ownProfile?.name || profile?.username || 'U'} profile={ownProfile} size="sm" />}
+              last
+            />
+          </SettingsGroup>
+
+          <SectionEyebrow
             title="Privacy"
             description="Controls and explanations related to identity trust and secure communication."
           />
@@ -1213,6 +1234,23 @@ export default function SettingsScreen() {
       </ScrollView>
 
       {showBlocked && userId ? <BlockedContactsSheet myUserId={String(userId)} onClose={() => setShowBlocked(false)} /> : null}
+      {showProfileSheet && userId ? (
+        <ProfileSheet
+          current={ownProfile}
+          fallbackName={profile?.username || ''}
+          busy={profileSheetBusy}
+          error={profileSheetError}
+          onClose={() => setShowProfileSheet(false)}
+          onSave={(name, avatar) => {
+            setProfileSheetBusy(true);
+            setProfileSheetError(null);
+            updateOwnProfile(String(userId), { name, avatar })
+              .then(() => setShowProfileSheet(false))
+              .catch((e: any) => setProfileSheetError(e?.message || 'Could not save the profile'))
+              .finally(() => setProfileSheetBusy(false));
+          }}
+        />
+      ) : null}
       {showDeleteAccount ? (
         <DeleteAccountSheet
           busy={deleteBusy}

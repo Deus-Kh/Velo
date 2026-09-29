@@ -30,6 +30,8 @@ import { ensureOwnSenderKey } from '../shared/chat/groupKeys';
 import { deleteGroupKeys } from '../shared/storage/senderKeyStore';
 import { useBlocksStore } from '../store/blocks.store';
 import { blockPeer, unblockPeer } from '../shared/chat/blocks';
+import Avatar from '../components/Avatar';
+import { useProfilesStore } from '../store/profiles.store';
 import { formatHandle, shortSecureId } from '../shared/utils/identity';
 
 type ChatOpenHandler = (chat: { peerUserId: string; peerUsername?: string }) => void;
@@ -246,6 +248,7 @@ export default function ChatListScreen({
   const toggleArchivedConversation = useChatListStore((s) => s.toggleArchivedConversation);
   const activeChatPeerUserId = useAppUiStore((s) => s.activeChatPeerUserId);
   const blockedIds = useBlocksStore((s) => (myUserId ? s.blockedByUser[String(myUserId)] : undefined) ?? []);
+  const profiles = useProfilesStore((s) => s.byUser); // T7.7
 
   const [q, setQ] = useState('');
   const [loading, setLoading] = useState(true);
@@ -905,20 +908,14 @@ export default function ChatListScreen({
                   } ${interfaceDensity === 'compact' ? 'p-3.5' : 'p-4'}`}
                 >
                   <View className="flex-row items-start">
-                    <View className={`mr-4 items-center justify-center rounded-full bg-primary-soft ${
-                      interfaceDensity === 'compact' ? 'h-12 w-12' : 'h-14 w-14'
-                    }`}>
-                      <Text className="text-lg font-semibold text-primary">
-                        {(item.item.peerUsername || '?').slice(0, 1).toUpperCase()}
-                      </Text>
-                    </View>
+                    <Avatar name={item.item.peerUsername || '?'} profile={profiles[item.item.peerUserId] ?? null} size={interfaceDensity === 'compact' ? 'md' : 'lg'} className="mr-4" />
 
                     <View className="flex-1">
                       <View className="flex-row items-start justify-between gap-3">
                         <View className="flex-1">
                           <View className="flex-row items-center gap-2">
                             <Text className="text-base font-semibold text-text">
-                              {item.item.peerUsername}
+                              {profiles[item.item.peerUserId]?.name?.trim() || item.item.peerUsername}
                             </Text>
                             {pinnedConversationIds.includes(item.item.conversationId) ? (
                               <View className="rounded-full border border-primary/25 bg-primary/10 px-2 py-0.5">
@@ -1000,13 +997,7 @@ export default function ChatListScreen({
               } ${interfaceDensity === 'compact' ? 'p-3.5' : 'p-4'}`}
             >
               <View className="flex-row items-start">
-                <View className={`mr-4 items-center justify-center rounded-full bg-primary-soft ${
-                  interfaceDensity === 'compact' ? 'h-12 w-12' : 'h-14 w-14'
-                }`}>
-                  <Text className="text-lg font-semibold text-primary">
-                    {(item.peerUsername || '?').slice(0, 1).toUpperCase()}
-                  </Text>
-                </View>
+                <Avatar name={item.peerUsername || '?'} profile={profiles[item.peerUserId] ?? null} size={interfaceDensity === 'compact' ? 'md' : 'lg'} className="mr-4" />
 
                 <View className="flex-1">
                   <View className="flex-row items-start justify-between gap-3">
@@ -1107,7 +1098,7 @@ export default function ChatListScreen({
                       <View className="flex-1">
                         <View className="flex-row items-center gap-2">
                           <Text className="text-base font-semibold text-text">
-                            {item.item.peerUsername}
+                            {profiles[item.item.peerUserId]?.name?.trim() || item.item.peerUsername}
                           </Text>
                           <View className="rounded-full border border-border bg-background-alt/55 px-2 py-0.5">
                             <Text className="text-[10px] font-semibold uppercase tracking-[0.8px] text-muted">
@@ -1155,13 +1146,7 @@ export default function ChatListScreen({
                 } ${interfaceDensity === 'compact' ? 'p-3.5' : 'p-4'}`}
               >
                 <View className="flex-row items-center">
-                  <View className={`mr-4 items-center justify-center rounded-full bg-primary-soft ${
-                    interfaceDensity === 'compact' ? 'h-12 w-12' : 'h-14 w-14'
-                  }`}>
-                    <Text className="text-lg font-semibold text-primary">
-                      {(item.item.username || '?').slice(0, 1).toUpperCase()}
-                    </Text>
-                  </View>
+                  <Avatar name={item.item.username || '?'} profile={profiles[item.item.userId] ?? null} size={interfaceDensity === 'compact' ? 'md' : 'lg'} className="mr-4" />
 
                   <View className="flex-1">
                     <Text className="text-base font-semibold text-text">{item.item.username}</Text>

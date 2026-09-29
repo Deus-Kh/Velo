@@ -28,6 +28,8 @@ import TimerSheet from '../components/TimerSheet';
 import ReportSheet from '../components/ReportSheet';
 import { useBlocksStore } from '../store/blocks.store';
 import { blockPeer, reportPeer, unblockPeer } from '../shared/chat/blocks';
+import Avatar from '../components/Avatar';
+import { useProfilesStore } from '../store/profiles.store';
 import StatusChip from '../components/StatusChip';
 import { conversationsApi } from '../shared/api/conversations.api';
 import { messagesApi } from '../shared/api/messages.api';
@@ -384,7 +386,8 @@ const { keyboardShown , keyboardHeight } = useKeyboard()
 
   const trimmedText = text.trim();
   const canSend = socketReady && trimmedText.length > 0 && !peerBlocked && !peerDeleted;
-  const conversationName = peerUsername ?? 'Secure chat';
+  const peerProfile = useProfilesStore((s) => s.byUser[peerUserId] ?? null);
+  const conversationName = peerProfile?.name?.trim() || peerUsername || 'Secure chat';
   const messageListItems = buildMessageListItems(messages);
   const presenceMeta = getHeaderPresenceMeta({
     peerTyping,
@@ -802,11 +805,7 @@ useEffect(() => {
               <Text className="text-2xl leading-none text-text">{'\u2039'}</Text>
             </Pressable>
 
-            <View className="mr-3 h-11 w-11 items-center justify-center rounded-full bg-primary-soft">
-              <Text className="text-base font-semibold text-primary">
-                {conversationName.slice(0, 1).toUpperCase()}
-              </Text>
-            </View>
+            <Avatar name={conversationName} profile={peerProfile} size="md" className="mr-3" />
 
             <View className="flex-1 pr-2">
               <Text className="text-[20px] font-semibold text-text">{conversationName}</Text>

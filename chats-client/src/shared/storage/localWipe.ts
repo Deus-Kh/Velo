@@ -27,6 +27,7 @@ const ASYNC_PREFIXES_MESSAGES = (userId: string) => [
   `sk:v1:${userId}:`, // T6.4 sender keys
   `skdist:v1:${userId}:`, // T6.4 distribution records
   `convset:v1:${userId}:`, // T7.3 conversation settings (timer)
+  `profile:v1:${userId}:`, // T7.7 profiles (ours and contacts')
   `bootstrap-seen:${userId}:`,
   `pending_messages_v1:${userId}`,
 ];

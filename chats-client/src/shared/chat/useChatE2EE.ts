@@ -23,6 +23,7 @@ import { listStoredMessages, upsertStoredMessage, type StoredMessage } from '../
 import { syncNewerFromServer } from './historySync';
 import { deleteForEveryone, deleteForMe, editMessage, reactToMessage, subscribeToMessagePatches, type ConversationTarget } from './actions';
 import { setDisappearingTimer, subscribeToTimerChanges, sweepExpiredMessages } from './disappearing';
+import { shareProfileWith } from './profile';
 import { CHAT_SWEEP_INTERVAL_MS } from './useExpirySweeper';
 import { loadConversationSettings, DEFAULT_CONVERSATION_SETTINGS, type ConversationSettings } from '../storage/conversationSettingsStore';
 import { classifyPendingMessageError, presentProtocolError } from './protocolErrors';
@@ -573,6 +574,8 @@ export function useChatE2EE(peerUserId: string) {
 
         unsubRef.current = unsubscribe;
         if (!cancelled) setSocketReady(true);
+        // T7.7: the peer gets our profile once per version, over this session.
+        shareProfileWith(String(myUserId), peerUserId).catch((e) => console.warn('[profile] share failed:', e));
         flushPendingForCurrentPeer().catch((e) => {
           console.warn('Failed to flush pending messages:', e);
         });

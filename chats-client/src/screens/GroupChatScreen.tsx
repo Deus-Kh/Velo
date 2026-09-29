@@ -21,6 +21,8 @@ import MessageActionsSheet from '../components/MessageActionsSheet';
 import MessageBubble from '../components/MessageBubble';
 import { forwardMessage, summarizeReactions } from '../shared/chat/actions';
 import { formatTimer } from '../shared/chat/disappearing';
+import Avatar from '../components/Avatar';
+import { useProfilesStore } from '../store/profiles.store';
 import TimerSheet from '../components/TimerSheet';
 import StatusChip from '../components/StatusChip';
 import { userApi, type UserListItem } from '../shared/api/user.api';
@@ -40,7 +42,9 @@ const messageListContentStyle = { paddingBottom: 20 };
 
 type MemberSheet = 'members' | 'add' | 'timer' | null;
 
-function memberName(m: GroupMember | undefined, userId: string): string {
+function memberName(m: GroupMember | undefined, userId: string, profiles?: Record<string, { name: string }>): string {
+  const shared = profiles?.[userId]?.name?.trim();
+  if (shared) return shared;
   return m?.username ? m.username : userId.slice(-6);
 }
 
@@ -54,6 +58,7 @@ export default function GroupChatScreen({ groupId, initialName, onClose }: { gro
   const interfaceDensity = useAppearanceStore((s) => s.interfaceDensity);
   const surfaceStyle = useAppearanceStore((s) => s.surfaceStyle);
   const { keyboardShown, keyboardHeight } = useKeyboard();
+  const profiles = useProfilesStore((s) => s.byUser);
   const { group, messages, loading, removed, waitingForKeys, securityWarning, timer, setTimer, send, addMembers, removeMember, react, edit, deleteEverywhere, deleteLocally } = useGroupChat(groupId);
 
   const [text, setText] = useState('');
@@ -188,7 +193,7 @@ export default function GroupChatScreen({ groupId, initialName, onClose }: { gro
               ) : null}
               {securityWarning ? (
                 <View className="mt-2">
-                  <StatusChip tone="danger" label={`Bad signature from ${memberName(membersById.get(securityWarning.fromUserId), securityWarning.fromUserId)}`} />
+                  <StatusChip tone="danger" label={`Bad signature from ${memberName(membersById.get(securityWarning.fromUserId), securityWarning.fromUserId, profiles)}`} />
                 </View>
               ) : null}
               {timer.timerSeconds ? (
@@ -249,7 +254,7 @@ export default function GroupChatScreen({ groupId, initialName, onClose }: { gro
               const showSender = !item.mine && (!newer || newer.senderUserId !== item.senderUserId);
               return (
                 <View>
-                  {showSender ? <SenderLabel name={memberName(membersById.get(item.senderUserId ?? ''), item.senderUserId ?? '')} /> : null}
+                  {showSender ? <SenderLabel name={memberName(membersById.get(item.senderUserId ?? ''), item.senderUserId ?? '', profiles)} /> : null}
                   <MessageBubble
                     text={item.text}
                     mine={item.mine}
@@ -340,12 +345,10 @@ export default function GroupChatScreen({ groupId, initialName, onClose }: { gro
                 const isMe = item.userId === String(myUserId);
                 return (
                   <View className="flex-row items-center py-2">
-                    <View className="mr-3 h-9 w-9 items-center justify-center rounded-full bg-primary-soft">
-                      <Text className="text-sm font-semibold text-primary">{memberName(item, item.userId).slice(0, 1).toUpperCase()}</Text>
-                    </View>
+                    <Avatar name={memberName(item, item.userId, profiles)} profile={profiles[item.userId] ?? null} size="sm" className="mr-3" />
                     <View className="flex-1">
                       <Text className="text-sm font-semibold text-text">
-                        {memberName(item, item.userId)}
+                        {memberName(item, item.userId, profiles)}
                         {isMe ? ' (you)' : ''}
                       </Text>
                       <Text className="text-xs text-muted">{item.username ? formatHandle(item.username) : item.userId}</Text>

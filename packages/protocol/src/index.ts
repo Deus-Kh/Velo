@@ -109,6 +109,8 @@ export {
   MAX_REACTION_LENGTH,
   MAX_MESSAGE_REF_LENGTH,
   MAX_TIMER_SECONDS,
+  MAX_PROFILE_NAME_LENGTH,
+  MAX_AVATAR_BASE64_LENGTH,
   type Content,
   type TextContent,
   type ControlContent,
@@ -118,6 +120,8 @@ export {
   type EditContent,
   type DeleteContent,
   type TimerContent,
+  type ProfileContent,
+  type ProfileAvatar,
   type SenderKeyDistributionContent,
   type SenderKeyRequestContent,
 } from './content/envelope';

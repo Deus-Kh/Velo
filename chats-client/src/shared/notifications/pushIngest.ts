@@ -5,6 +5,7 @@ import { loadStoredSession } from '../auth/tokenStore';
 import { ingestUndeliveredItems } from '../chat/historySync';
 import { ingestGroupItems } from '../chat/groupMessaging';
 import { groupsApi, type GroupView } from '../api/groups.api';
+import { loadPeerProfile } from '../storage/profileStore';
 import { makeConversationId } from '../utils/conversation';
 import type { StoredMessage } from '../storage/messageStore';
 import { useAppUiStore } from '../../store/app-ui.store';
@@ -73,7 +74,7 @@ async function notifyStored(params: { myUserId: string; peerUserId: string; mess
   if (!shouldNotifyFor({ appActive, chatOpenForPeer, inAppAlertsEnabled: preferences.inAppAlertsEnabled })) return;
 
   const savedContacts = useContactsStore.getState().savedContactsByUser[myUserId] ?? [];
-  let title = resolveSenderName({ peerUserId, savedContacts });
+  let title = (await loadPeerProfile(myUserId, peerUserId))?.name ?? resolveSenderName({ peerUserId, savedContacts }); // T7.7
   if (title === 'New message') title = resolveSenderName({ peerUserId, savedContacts, conversations: await conversationsForNames() });
 
   const conversationId = makeConversationId(myUserId, peerUserId);

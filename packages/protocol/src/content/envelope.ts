@@ -25,6 +25,9 @@ export const CONTENT_VERSION = 1;
 export const MAX_REACTION_LENGTH = 16; // UTF-16 units: one emoji with modifiers and joiners
 export const MAX_MESSAGE_REF_LENGTH = 128;
 export const MAX_TIMER_SECONDS = 365 * 24 * 60 * 60;
+export const MAX_PROFILE_NAME_LENGTH = 64;
+/** base64 of a JPEG of at most ~24 KB: well under the 64 KiB ciphertext cap with the envelope around it. */
+export const MAX_AVATAR_BASE64_LENGTH = 32_768;
 
 /** Names a message both sides know: its sender and the sender's client id (stable across the send/ack cycle). */
 export type MessageRef = { senderUserId: string; clientMessageId: string };
@@ -46,9 +49,12 @@ export type EditContent = { v: 1; kind: 'edit'; target: MessageRef; text: string
 export type DeleteContent = { v: 1; kind: 'delete'; target: MessageRef };
 /** The disappearing-message timer for this conversation from now on; null switches it off. */
 export type TimerContent = { v: 1; kind: 'timer'; seconds: number | null };
+/** T7.7: what a contact shows for us: a name and an avatar. Newer `updatedAt` wins on the receiver. */
+export type ProfileAvatar = { kind: 'emoji'; emoji: string; color: string } | { kind: 'jpeg'; data: string };
+export type ProfileContent = { v: 1; kind: 'profile'; name: string; avatar: ProfileAvatar | null; updatedAt: number };
 
 export type ControlContent = SenderKeyDistributionContent | SenderKeyRequestContent;
-export type ActionContent = ReactionContent | EditContent | DeleteContent | TimerContent;
+export type ActionContent = ReactionContent | EditContent | DeleteContent | TimerContent | ProfileContent;
 export type Content = TextContent | ControlContent | ActionContent;
 
 export function textContent(text: string, forwardedFrom?: { userId: string; createdAt: number }): TextContent {
@@ -68,6 +74,32 @@ function requireTimer(seconds: number | null): number | null {
   if (seconds === null) return null;
   if (!Number.isInteger(seconds) || seconds <= 0 || seconds > MAX_TIMER_SECONDS) throw malformed('timer', String(seconds));
   return seconds;
+}
+
+function requireProfileName(name: unknown): string {
+  if (typeof name !== 'string') throw malformed('profile.name');
+  const trimmed = name.trim();
+  if (trimmed.length === 0 || trimmed.length > MAX_PROFILE_NAME_LENGTH) throw malformed('profile.name');
+  return trimmed;
+}
+
+function requireAvatar(avatar: unknown): ProfileAvatar | null {
+  if (avatar === null || avatar === undefined) return null;
+  if (!isRecord(avatar)) throw malformed('profile.avatar');
+  if (avatar.kind === 'emoji') {
+    if (typeof avatar.emoji !== 'string' || typeof avatar.color !== 'string' || !/^#[0-9a-fA-F]{6}$/.test(avatar.color)) throw malformed('profile.avatar');
+    return { kind: 'emoji', emoji: requireEmoji(avatar.emoji), color: avatar.color.toLowerCase() };
+  }
+  if (avatar.kind === 'jpeg') {
+    if (typeof avatar.data !== 'string' || avatar.data.length === 0 || avatar.data.length > MAX_AVATAR_BASE64_LENGTH || !/^[A-Za-z0-9+/=]+$/.test(avatar.data)) throw malformed('profile.avatar');
+    return { kind: 'jpeg', data: avatar.data };
+  }
+  throw malformed('profile.avatar');
+}
+
+function requireUpdatedAt(v: unknown): number {
+  if (typeof v !== 'number' || !Number.isFinite(v) || v < 0) throw malformed('profile.updatedAt');
+  return v;
 }
 
 function requireEmoji(emoji: string): string {
@@ -97,6 +129,8 @@ export function encodeContent(content: Content): string {
       return JSON.stringify({ v: CONTENT_VERSION, kind: 'delete', target: requireRef(content.target, 'delete') });
     case 'timer':
       return JSON.stringify({ v: CONTENT_VERSION, kind: 'timer', seconds: requireTimer(content.seconds) });
+    case 'profile':
+      return JSON.stringify({ v: CONTENT_VERSION, kind: 'profile', name: requireProfileName(content.name), avatar: requireAvatar(content.avatar), updatedAt: requireUpdatedAt(content.updatedAt) });
     default:
       throw new ProtocolError('STORAGE_CORRUPTION', 'Unknown content kind', { what: 'content.kind' });
   }
@@ -176,6 +210,8 @@ export function decodeContent(plaintext: string): Content {
     case 'timer':
       if (parsed.seconds !== null && typeof parsed.seconds !== 'number') throw malformed('timer');
       return { v: CONTENT_VERSION, kind: 'timer', seconds: requireTimer(parsed.seconds as number | null) };
+    case 'profile':
+      return { v: CONTENT_VERSION, kind: 'profile', name: requireProfileName(parsed.name), avatar: requireAvatar(parsed.avatar), updatedAt: requireUpdatedAt(parsed.updatedAt) };
     default:
       // A kind this build does not know: a newer peer. Not text, not ours to act on.
       throw new ProtocolError('STORAGE_CORRUPTION', 'Unknown content kind', { what: 'content.kind', value: String(parsed.kind) });
@@ -189,5 +225,5 @@ export function isControlContent(content: Content): content is ControlContent {
 
 /** Message actions (T7.1): applied to the local store, never shown as a message of their own. */
 export function isActionContent(content: Content): content is ActionContent {
-  return content.kind === 'reaction' || content.kind === 'edit' || content.kind === 'delete' || content.kind === 'timer';
+  return content.kind === 'reaction' || content.kind === 'edit' || content.kind === 'delete' || content.kind === 'timer' || content.kind === 'profile';
 }

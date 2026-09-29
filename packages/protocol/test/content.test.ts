@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { protocolErrorCode } from '../src/errors';
-import { decodeContent, encodeContent, isActionContent, isControlContent, textContent, MAX_TIMER_SECONDS } from '../src/content/envelope';
+import { decodeContent, encodeContent, isActionContent, isControlContent, textContent, MAX_AVATAR_BASE64_LENGTH, MAX_TIMER_SECONDS } from '../src/content/envelope';
 import { groupDecrypt, groupDecryptContent, groupEncrypt, groupEncryptContent } from '../src/senderkey/message';
 import { senderKeyStateFromDistribution } from '../src/senderkey/state';
 import { createSenderKeyState, senderKeyDistributionMessage } from '../src/senderkey/state';
@@ -125,5 +125,46 @@ describe('T7.1 content kinds for message actions', () => {
     expect(r3.content).toEqual({ v: 1, kind: 'text', text: 'bare legacy text' });
     expect(groupDecrypt(r2.state, s3.message, ad).plaintext).toBe('bare legacy text');
     expect(r3.state.iteration).toBe(3);
+  });
+});
+
+/**
+ * T7.7 — a profile (name + avatar) travels as action content over the session.
+ */
+describe('T7.7 profile content', () => {
+  it('round-trips an emoji avatar, a jpeg avatar and no avatar; the name is trimmed; it is an action, not text', () => {
+    const emoji = { v: 1, kind: 'profile', name: '  Alice  ', avatar: { kind: 'emoji', emoji: '\u{1F98A}', color: '#FFAA00' }, updatedAt: 1_700_000_000_000 } as const;
+    const dec = decodeContent(encodeContent(emoji));
+    expect(dec).toEqual({ v: 1, kind: 'profile', name: 'Alice', avatar: { kind: 'emoji', emoji: '\u{1F98A}', color: '#ffaa00' }, updatedAt: 1_700_000_000_000 });
+    expect(isActionContent(dec)).toBe(true);
+    expect(isControlContent(dec)).toBe(false);
+    const jpeg = { v: 1, kind: 'profile', name: 'Bob', avatar: { kind: 'jpeg', data: 'AAAA'.repeat(100) }, updatedAt: 5 } as const;
+    expect(decodeContent(encodeContent(jpeg))).toEqual(jpeg);
+    const none = { v: 1, kind: 'profile', name: 'Carol', avatar: null, updatedAt: 0 } as const;
+    expect(decodeContent(encodeContent(none))).toEqual(none);
+  });
+
+  it('malformed profiles are typed refusals: empty or long name, bad colour, oversized or non-base64 jpeg, bad updatedAt', () => {
+    const bad = [
+      '{"v":1,"kind":"profile","name":"","avatar":null,"updatedAt":1}',
+      '{"v":1,"kind":"profile","name":"' + 'x'.repeat(65) + '","avatar":null,"updatedAt":1}',
+      '{"v":1,"kind":"profile","name":"a","avatar":{"kind":"emoji","emoji":"x","color":"red"},"updatedAt":1}',
+      '{"v":1,"kind":"profile","name":"a","avatar":{"kind":"emoji","emoji":"","color":"#000000"},"updatedAt":1}',
+      '{"v":1,"kind":"profile","name":"a","avatar":{"kind":"jpeg","data":"' + 'A'.repeat(MAX_AVATAR_BASE64_LENGTH + 1) + '"},"updatedAt":1}',
+      '{"v":1,"kind":"profile","name":"a","avatar":{"kind":"jpeg","data":"not base64!"},"updatedAt":1}',
+      '{"v":1,"kind":"profile","name":"a","avatar":{"kind":"png","data":"AAAA"},"updatedAt":1}',
+      '{"v":1,"kind":"profile","name":"a","avatar":null,"updatedAt":"now"}',
+      '{"v":1,"kind":"profile","name":"a","avatar":null,"updatedAt":-1}',
+    ];
+    for (const b of bad) {
+      let code: string | null = null;
+      try {
+        decodeContent(b);
+      } catch (e) {
+        code = protocolErrorCode(e);
+      }
+      expect(code, b.slice(0, 80)).toBe('STORAGE_CORRUPTION');
+    }
+    expect(() => encodeContent({ v: 1, kind: 'profile', name: ' ', avatar: null, updatedAt: 1 })).toThrow();
   });
 });

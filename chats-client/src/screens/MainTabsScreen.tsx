@@ -27,6 +27,7 @@ import { cancelConversationNotifications } from '../shared/notifications/notifee
 import { usePushHandlers } from '../shared/notifications/pushHandlers';
 import { useExpirySweeper } from '../shared/chat/useExpirySweeper';
 import { useBlocksSync } from '../shared/chat/blocks';
+import { useProfilesSync } from '../shared/chat/profile';
 import { Icon } from '../components/Icon';
 
 import { useColorScheme } from 'react-native';
@@ -145,6 +146,8 @@ export default function MainTabsScreen() {
   useExpirySweeper(userId);
   // T7.5: the block list is mirrored locally so inbound copies are dropped at once.
   useBlocksSync(userId);
+  // T7.7: profiles (ours and contacts') from the sealed store into memory.
+  useProfilesSync(userId);
 
   useEffect(() => {
     if (!pendingOpenChatPeerUserId || !userId) return;

@@ -10,6 +10,7 @@ import { distributeSenderKey, ensureOwnSenderKey, forgetDepartedMembers, handleC
 import { ingestGroupItems, sendGroupMessage, syncGroupFromServer } from './groupMessaging';
 import { deleteForEveryone, deleteForMe, editMessage, reactToMessage, subscribeToMessagePatches } from './actions';
 import { setDisappearingTimer, subscribeToTimerChanges, sweepExpiredMessages } from './disappearing';
+import { shareProfileWith } from './profile';
 import { CHAT_SWEEP_INTERVAL_MS } from './useExpirySweeper';
 import { loadConversationSettings, DEFAULT_CONVERSATION_SETTINGS, type ConversationSettings } from '../storage/conversationSettingsStore';
 import { subscribeToControlContent } from '../socket/messaging';
@@ -116,6 +117,8 @@ export function useGroupChat(groupId: string) {
         if (g) {
           await distributeSenderKey({ myUserId: String(myUserId), group: g });
           await sync();
+          // T7.7: members get our profile over their pairwise sessions (once per version each).
+          for (const m of g.members) if (m.userId !== String(myUserId)) shareProfileWith(String(myUserId), m.userId).catch((e) => console.warn('[profile] share failed:', e));
         }
       } catch (e) {
         console.warn('[groups] open failed:', e);

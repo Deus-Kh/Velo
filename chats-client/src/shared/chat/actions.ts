@@ -5,6 +5,7 @@ import { sendContent, sendMessageV2 } from '../socket/messaging';
 import { deleteStoredMessage, findStoredMessage, patchStoredMessage, upsertStoredMessage, type StoredMessage } from '../storage/messageStore';
 import { sendGroupContent, sendGroupMessage } from './groupMessaging';
 import { handleInboundTimer } from './disappearing';
+import { applyInboundProfile } from './profile';
 
 /**
  * Message actions (T7.2): reactions, edits, "delete for everyone" and
@@ -70,6 +71,7 @@ export async function applyActionContent(params: { myUserId: string; peerKey: st
   const { myUserId, peerKey, actorUserId, content } = params;
   const now = params.now ?? Date.now();
   if (content.kind === 'timer') return { applied: false, reason: 'timer is applied by the conversation settings (T7.3)' };
+  if (content.kind === 'profile') return { applied: false, reason: 'a profile is applied by chat/profile.ts (T7.7)' };
 
   const found = await findStoredMessage({ myUserId, peerUserId: peerKey, id: content.target.clientMessageId });
   if (!found) return { applied: false, reason: 'target not stored on this device' };
@@ -102,6 +104,10 @@ export async function applyActionContent(params: { myUserId: string; peerKey: st
 export async function handleInboundAction(params: { myUserId: string; peerKey: string; actorUserId: string; content: Content; groupAdminIds?: string[] | null }): Promise<void> {
   if (!isActionContent(params.content)) return;
   try {
+    if (params.content.kind === 'profile') {
+      await applyInboundProfile({ myUserId: params.myUserId, actorUserId: params.actorUserId, content: params.content }); // T7.7
+      return;
+    }
     if (params.content.kind === 'timer') {
       await handleInboundTimer({ myUserId: params.myUserId, peerKey: params.peerKey, actorUserId: params.actorUserId, content: params.content, groupAdminIds: params.groupAdminIds }); // T7.3
       return;
