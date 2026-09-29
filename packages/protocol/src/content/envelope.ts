@@ -35,6 +35,8 @@ export const MAX_ATTACHMENT_NAME_LENGTH = 255;
 export const MAX_CAPTION_LENGTH = 4000;
 export const MAX_IMAGE_DIMENSION = 16_384;
 export const MAX_ATTACHMENT_DURATION_MS = 24 * 60 * 60 * 1000;
+/** Voice-note waveform (base64): at most this many bytes, one 0..255 level per bar. */
+export const MAX_ATTACHMENT_WAVEFORM_BYTES = 64;
 
 /** Names a message both sides know: its sender and the sender's client id (stable across the send/ack cycle). */
 export type MessageRef = { senderUserId: string; clientMessageId: string };
@@ -79,6 +81,8 @@ export type AttachmentContent = {
   width?: number;
   height?: number;
   durationMs?: number;
+  /** base64, ≤ 64 bytes: loudness per bar, drawn in the voice bubble (T8.4) */
+  waveform?: string;
   caption?: string;
 };
 
@@ -143,6 +147,19 @@ function requireBase64Bytes(value: unknown, length: number, what: string): strin
   return normalizeB64(value);
 }
 
+function optionalBase64Bytes(value: unknown, maxLength: number, what: string): string | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (typeof value !== 'string' || value.length === 0 || value.length > maxLength * 2) throw malformed(what);
+  let bytes: Uint8Array;
+  try {
+    bytes = decodeBase64(normalizeB64(value));
+  } catch {
+    throw malformed(what);
+  }
+  if (bytes.length === 0 || bytes.length > maxLength) throw malformed(what);
+  return normalizeB64(value);
+}
+
 function optionalInt(value: unknown, max: number, what: string): number | undefined {
   if (value === undefined || value === null) return undefined;
   if (typeof value !== 'number' || !Number.isInteger(value) || value < 0 || value > max) throw malformed(what);
@@ -176,6 +193,8 @@ function requireAttachment(c: Record<string, unknown>): AttachmentContent {
   if (height !== undefined) out.height = height;
   const durationMs = optionalInt(c.durationMs, MAX_ATTACHMENT_DURATION_MS, 'attachment.durationMs');
   if (durationMs !== undefined) out.durationMs = durationMs;
+  const waveform = optionalBase64Bytes(c.waveform, MAX_ATTACHMENT_WAVEFORM_BYTES, 'attachment.waveform');
+  if (waveform !== undefined) out.waveform = waveform;
   const caption = optionalText(c.caption, MAX_CAPTION_LENGTH, 'attachment.caption');
   if (caption !== undefined) out.caption = caption;
   return out;

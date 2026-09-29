@@ -1,23 +1,60 @@
-import { useEffect, useRef, useState } from 'react';
-import { Pressable, Text, View } from 'react-native';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { StyleSheet, Text, View, type LayoutChangeEvent } from 'react-native';
+import { Pressable } from 'react-native-gesture-handler';
 import { protocolErrorCode } from '@velo/protocol';
-import { downloadAttachment, AUTO_DOWNLOAD_BYTES } from '../shared/media/attachments';
+import { Icon } from './Icon';
+import { useThemeColors } from '../theme/useThemeColors';
+import { AUTO_DOWNLOAD_BYTES, downloadAttachment } from '../shared/media/attachments';
 import { hasMedia } from '../shared/media/mediaStore';
-import { currentlyPlaying, formatDuration, playVoiceNote, stopPlayback, subscribeToPlayback } from '../shared/media/voiceNotes';
+import {
+  currentPlayback,
+  formatDuration,
+  nextPlaybackSpeed,
+  playbackSpeed,
+  playVoiceNote,
+  seekPlayback,
+  setPlaybackSpeed,
+  subscribeToPlayback,
+  togglePlayback,
+  type PlaybackSpeed,
+} from '../shared/media/voiceNotes';
+import { decodeWaveform, placeholderWaveform } from '../shared/media/waveform';
 import { presentProtocolError } from '../shared/chat/protocolErrors';
 import type { AttachmentMeta } from '../shared/storage/messageStore';
 
-const voiceNoteStyle = { width: 220 };
+/**
+ * T8.4: a voice note inside a bubble, Telegram-style: a round play/pause
+ * button, the waveform (from the message, or a stable placeholder for
+ * notes sent without one) that fills as the note plays and seeks on tap,
+ * the elapsed / total time, and a speed toggle while playing.
+ *
+ * The buttons are gesture-handler Pressables: every bubble sits inside the
+ * swipe-to-reply Swipeable, whose gesture detector swallows the taps of
+ * nested React Native Pressables on Android (taps on the note did
+ * nothing, while taps on plain text bubbles reached the bubble itself).
+ */
+const BARS = 40;
+const BAR_WIDTH = 3;
+const BAR_GAP = 2;
+const WAVE_HEIGHT = 28;
+const NOTE_WIDTH = 236;
 
-/** T8.4: a voice note inside a bubble: download if needed, play/stop, duration and a progress bar. */
+type Playback = { state: 'idle' | 'playing' | 'paused'; positionMs: number; durationMs: number };
+
 export default function VoiceNoteView({ myUserId, meta, mine }: { myUserId: string; meta: AttachmentMeta; mine: boolean }) {
+  const colors = useThemeColors();
   const [local, setLocal] = useState<boolean | null>(null);
   const [downloading, setDownloading] = useState<number | null>(null);
   const [error, setError] = useState<{ text: string; warning: boolean } | null>(null);
-  const [position, setPosition] = useState(0);
-  const [isPlaying, setIsPlaying] = useState(currentlyPlaying() === meta.blobId);
+  const [playback, setPlayback] = useState<Playback>(() => {
+    const c = currentPlayback();
+    return c && c.blobId === meta.blobId ? { state: c.state, positionMs: c.positionMs, durationMs: c.durationMs } : { state: 'idle', positionMs: 0, durationMs: meta.durationMs ?? 0 };
+  });
+  const [speed, setSpeed] = useState<PlaybackSpeed>(playbackSpeed());
+  const [waveWidth, setWaveWidth] = useState(0);
   const startedRef = useRef(false);
-  const duration = meta.durationMs ?? 0;
+  const heights = useMemo(() => decodeWaveform(meta.waveform, BARS) ?? placeholderWaveform(meta.blobId, BARS), [meta.waveform, meta.blobId]);
+  const duration = playback.durationMs > 0 ? playback.durationMs : (meta.durationMs ?? 0);
 
   useEffect(() => {
     let cancelled = false;
@@ -28,11 +65,11 @@ export default function VoiceNoteView({ myUserId, meta, mine }: { myUserId: stri
     });
     const unsub = subscribeToPlayback((e) => {
       if (e.blobId !== meta.blobId) {
-        setIsPlaying(false);
+        setPlayback((prev) => (prev.state === 'idle' ? prev : { state: 'idle', positionMs: 0, durationMs: prev.durationMs }));
         return;
       }
-      setIsPlaying(!e.ended);
-      setPosition(e.ended ? 0 : e.positionMs);
+      if (e.state === 'ended') setPlayback((prev) => ({ state: 'idle', positionMs: 0, durationMs: e.durationMs > 0 ? e.durationMs : prev.durationMs }));
+      else setPlayback({ state: e.state, positionMs: e.positionMs, durationMs: e.durationMs });
     });
     return () => {
       cancelled = true;
@@ -59,34 +96,100 @@ export default function VoiceNoteView({ myUserId, meta, mine }: { myUserId: stri
     }
   };
 
-  const toggle = async () => {
+  const onMainPress = async () => {
     if (!local) {
       if (downloading === null) download();
       return;
     }
+    setError(null);
     try {
-      if (isPlaying) await stopPlayback();
-      else await playVoiceNote(myUserId, meta);
+      await togglePlayback(myUserId, meta);
     } catch (e: any) {
       setError({ text: e?.message || 'Could not play', warning: false });
     }
   };
 
-  const tone = mine ? 'text-background' : 'text-text';
-  const fill = duration > 0 ? Math.min(1, position / duration) : 0;
+  const onSeek = async (e: { nativeEvent: { locationX?: number } }) => {
+    if (!local || waveWidth <= 0 || duration <= 0) return;
+    const x = e.nativeEvent.locationX ?? 0;
+    const fraction = Math.max(0, Math.min(1, x / waveWidth));
+    setError(null);
+    try {
+      if (playback.state === 'idle') await playVoiceNote(myUserId, meta, { startMs: fraction * duration });
+      else await seekPlayback({ fraction });
+    } catch (err: any) {
+      setError({ text: err?.message || 'Could not play', warning: false });
+    }
+  };
+
+  const onSpeed = async () => {
+    const next = nextPlaybackSpeed(speed);
+    setSpeed(next);
+    await setPlaybackSpeed(next);
+  };
+
+  const onWaveLayout = (e: LayoutChangeEvent) => {
+    const w = e.nativeEvent.layout.width;
+    if (w !== waveWidth) setWaveWidth(w);
+  };
+
+  const fill = duration > 0 ? Math.min(1, playback.positionMs / duration) : 0;
+  const active = playback.state !== 'idle';
+  const barColor = mine ? colors.background : colors.primary;
+  const label = error
+    ? error.text
+    : downloading !== null
+      ? `Decrypting… ${Math.round(downloading * 100)}%`
+      : active
+        ? `${formatDuration(playback.positionMs)} / ${formatDuration(duration)}`
+        : `${formatDuration(duration)}${local === false ? ' · tap to download' : ''}`;
+  const labelTone = error?.warning ? 'text-danger' : mine ? 'text-background/80' : 'text-muted';
+  const icon = !local ? 'download' : playback.state === 'playing' ? 'pause' : 'play';
+
   return (
-    <Pressable onPress={toggle} className={`mb-1 flex-row items-center rounded-[14px] px-3 py-2 ${mine ? 'bg-white/15' : 'bg-black/10'}`} style={voiceNoteStyle}>
-      <View className={`mr-3 h-9 w-9 items-center justify-center rounded-full ${mine ? 'bg-white/30' : 'bg-primary/20'}`}>
-        <Text className={`text-[16px] ${tone}`}>{downloading !== null ? '…' : isPlaying ? '■' : '▶'}</Text>
-      </View>
-      <View className="flex-1">
-        <View className="h-1.5 overflow-hidden rounded-full bg-black/20">
-          <View className="h-full bg-primary" style={{ width: `${Math.round((downloading !== null ? downloading : fill) * 100)}%` }} />
+    <View className="mb-1 flex-row items-center" style={{ width: NOTE_WIDTH }}>
+      <Pressable
+        onPress={onMainPress}
+        accessibilityLabel={!local ? 'Download the voice message' : playback.state === 'playing' ? 'Pause' : 'Play the voice message'}
+        hitSlop={6}
+      >
+        <View className={`h-11 w-11 items-center justify-center rounded-full ${mine ? 'bg-background' : 'bg-primary'}`}>
+          {downloading !== null ? (
+            <Text className={`text-[14px] font-semibold ${mine ? 'text-primary' : 'text-background'}`}>…</Text>
+          ) : (
+            <Icon lib="Lucide" name={icon} size={20} color={mine ? colors.primary : colors.background} />
+          )}
         </View>
-        <Text className={`mt-1 text-[11px] ${mine ? 'text-background/75' : 'text-muted'}`}>
-          {error ? error.text : downloading !== null ? 'Decrypting…' : `${formatDuration(isPlaying ? position : duration)}${local === false ? ' · tap to download' : ''}`}
-        </Text>
+      </Pressable>
+
+      <View className="ml-3 flex-1">
+        <Pressable onPress={onSeek} disabled={!local} accessibilityLabel="Seek inside the voice message">
+          <View className="flex-row items-end" style={{ height: WAVE_HEIGHT }} onLayout={onWaveLayout}>
+            {heights.map((h, i) => {
+              const played = fill > 0 && i / BARS < fill;
+              const dynamic = { height: Math.max(3, Math.round(h * WAVE_HEIGHT)), backgroundColor: barColor, opacity: played ? 1 : active ? 0.35 : 0.55 };
+              return <View key={i} style={[i < BARS - 1 ? styles.bar : styles.lastBar, dynamic]} />;
+            })}
+          </View>
+        </Pressable>
+        <View className="mt-1 flex-row items-center">
+          <Text className={`text-[12px] tabular-nums ${labelTone}`} numberOfLines={1}>
+            {label}
+          </Text>
+          {active ? (
+            <Pressable onPress={onSpeed} accessibilityLabel="Playback speed" hitSlop={6}>
+              <View className={`ml-2 rounded-full px-1.5 py-0.5 ${mine ? 'bg-background/20' : 'bg-primary/15'}`}>
+                <Text className={`text-[11px] font-semibold ${mine ? 'text-background' : 'text-primary'}`}>{`${speed}x`}</Text>
+              </View>
+            </Pressable>
+          ) : null}
+        </View>
       </View>
-    </Pressable>
+    </View>
   );
 }
+
+const styles = StyleSheet.create({
+  bar: { width: BAR_WIDTH, borderRadius: 2, marginRight: BAR_GAP },
+  lastBar: { width: BAR_WIDTH, borderRadius: 2 },
+});

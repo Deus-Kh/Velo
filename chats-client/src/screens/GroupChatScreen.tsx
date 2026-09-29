@@ -26,7 +26,7 @@ import SearchInChatSheet from '../components/SearchInChatSheet';
 import AttachmentView from '../components/AttachmentView';
 import ImageViewer from '../components/ImageViewer';
 import { pickImage, sendAttachmentMessage, uploadAttachment } from '../shared/media/attachments';
-import RecordButton from '../components/RecordButton';
+import VoiceComposer from '../components/VoiceComposer';
 import { uploadVoiceNote, type Recording } from '../shared/media/voiceNotes';
 import { useProfilesStore } from '../store/profiles.store';
 import TimerSheet from '../components/TimerSheet';
@@ -210,6 +210,8 @@ export default function GroupChatScreen({ groupId, initialName, jumpToMessageId,
 
   const composerSurfaceClass = surfaceStyle === 'glass' ? 'bg-surface/82' : 'bg-surface-elevated';
   const buttonSizeClass = interfaceDensity === 'compact' ? 'h-10 w-10' : 'h-11 w-11';
+
+  const showMic = text.trim().length === 0 && Boolean(group) && !removed && !editTarget;
 
   return (
     <KeyboardAvoidingView
@@ -558,7 +560,16 @@ export default function GroupChatScreen({ groupId, initialName, jumpToMessageId,
             </View>
           </View>
         ) : null}
-        <View className="flex-row items-center gap-2.5">
+        <VoiceComposer
+          active={showMic}
+          disabled={Boolean(uploadState)}
+          sizeClass={buttonSizeClass}
+          surfaceClass={composerSurfaceClass}
+          onRecorded={onVoiceNote}
+          onError={(m) => {
+            if (Platform.OS === 'android') ToastAndroid.show(m, ToastAndroid.SHORT);
+          }}
+        >
           <Pressable
             onPress={onSendPhoto}
             disabled={!group || removed || Boolean(uploadState)}
@@ -584,17 +595,7 @@ export default function GroupChatScreen({ groupId, initialName, jumpToMessageId,
               textAlignVertical="top"
             />
           </View>
-          {text.trim().length === 0 && group && !removed && !editTarget ? (
-            <RecordButton
-              sizeClass={buttonSizeClass}
-              surfaceClass={composerSurfaceClass}
-              disabled={Boolean(uploadState)}
-              onRecorded={onVoiceNote}
-              onError={(m) => {
-                if (Platform.OS === 'android') ToastAndroid.show(m, ToastAndroid.SHORT);
-              }}
-            />
-          ) : (
+          {showMic ? null : (
             <Pressable
               onPress={onSend}
               disabled={!canSend}
@@ -603,7 +604,7 @@ export default function GroupChatScreen({ groupId, initialName, jumpToMessageId,
               <Text className={`text-lg font-semibold ${canSend ? 'text-background' : 'text-muted'}`}>{'↑'}</Text>
             </Pressable>
           )}
-        </View>
+        </VoiceComposer>
       </View>
     </KeyboardAvoidingView>
   );

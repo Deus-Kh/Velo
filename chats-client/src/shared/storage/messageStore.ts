@@ -58,6 +58,8 @@ export type AttachmentMeta = {
   width?: number;
   height?: number;
   durationMs?: number;
+  /** voice notes: base64 loudness per bar (T8.4) */
+  waveform?: string;
 };
 
 const PREFIX = 'msg:v1';

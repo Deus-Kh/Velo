@@ -33,7 +33,7 @@ import SearchInChatSheet from '../components/SearchInChatSheet';
 import AttachmentView from '../components/AttachmentView';
 import ImageViewer from '../components/ImageViewer';
 import { pickImage, sendAttachmentMessage, uploadAttachment } from '../shared/media/attachments';
-import RecordButton from '../components/RecordButton';
+import VoiceComposer from '../components/VoiceComposer';
 import { uploadVoiceNote, type Recording } from '../shared/media/voiceNotes';
 import { useProfilesStore } from '../store/profiles.store';
 import StatusChip from '../components/StatusChip';
@@ -865,6 +865,8 @@ useEffect(() => {
     </View>
   ) : null;
 
+  const showMic = trimmedText.length === 0 && socketReady && !peerBlocked && !peerDeleted && !editTarget;
+
   return (
     <KeyboardAvoidingView
       className="flex-1 bg-background"
@@ -1351,7 +1353,16 @@ useEffect(() => {
           </Text>
         ) : null}
 
-        <View className="flex-row items-center gap-2.5">
+        <VoiceComposer
+          active={showMic}
+          disabled={Boolean(uploadState)}
+          sizeClass={composerButtonSizeClass}
+          surfaceClass={composerSurfaceClass}
+          onRecorded={handleVoiceNote}
+          onError={(m) => {
+            if (Platform.OS === 'android') ToastAndroid.show(m, ToastAndroid.SHORT);
+          }}
+        >
           <Pressable
             onPress={handleOpenComposerActions}
             className={`${composerButtonSizeClass} items-center justify-center rounded-full border border-border ${composerSurfaceClass} active:opacity-80`}
@@ -1383,17 +1394,7 @@ useEffect(() => {
             />
           </View>
 
-          {trimmedText.length === 0 && socketReady && !peerBlocked && !peerDeleted && !editTarget ? (
-            <RecordButton
-              sizeClass={composerButtonSizeClass}
-              surfaceClass={composerSurfaceClass}
-              disabled={Boolean(uploadState)}
-              onRecorded={handleVoiceNote}
-              onError={(m) => {
-                if (Platform.OS === 'android') ToastAndroid.show(m, ToastAndroid.SHORT);
-              }}
-            />
-          ) : (
+          {showMic ? null : (
             <Pressable
               onPress={onSend}
               disabled={!canSend}
@@ -1404,7 +1405,7 @@ useEffect(() => {
               <SendIcon color={canSend ? '#04131E' : '#94A3B8'} />
             </Pressable>
           )}
-        </View>
+        </VoiceComposer>
       </View>
     </KeyboardAvoidingView>
   );

@@ -51,6 +51,8 @@ export type UploadParams = {
   width?: number;
   height?: number;
   durationMs?: number;
+  /** voice notes: base64 waveform, ≤ 64 bytes */
+  waveform?: string;
   name?: string;
   caption?: string;
   onProgress?: ProgressFn;
@@ -84,6 +86,7 @@ export async function uploadAttachment(p: UploadParams): Promise<AttachmentConte
   if (p.width) content.width = p.width;
   if (p.height) content.height = p.height;
   if (p.durationMs) content.durationMs = p.durationMs;
+  if (p.waveform) content.waveform = p.waveform;
   if (p.name) content.name = p.name;
   if (p.caption?.trim()) content.caption = p.caption.trim();
   key.fill(0);
@@ -111,6 +114,7 @@ export function metaOf(content: AttachmentContent): AttachmentMeta {
   if (content.width !== undefined) meta.width = content.width;
   if (content.height !== undefined) meta.height = content.height;
   if (content.durationMs !== undefined) meta.durationMs = content.durationMs;
+  if (content.waveform !== undefined) meta.waveform = content.waveform;
   if (content.name !== undefined) meta.name = content.name;
   return meta;
 }
@@ -120,6 +124,7 @@ export function contentOf(meta: AttachmentMeta, caption?: string | null): Attach
   if (meta.width !== undefined) c.width = meta.width;
   if (meta.height !== undefined) c.height = meta.height;
   if (meta.durationMs !== undefined) c.durationMs = meta.durationMs;
+  if (meta.waveform !== undefined) c.waveform = meta.waveform;
   if (meta.name !== undefined) c.name = meta.name;
   if (caption?.trim()) c.caption = caption.trim();
   return c;

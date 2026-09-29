@@ -116,6 +116,7 @@ export {
   MAX_CAPTION_LENGTH,
   MAX_IMAGE_DIMENSION,
   MAX_ATTACHMENT_DURATION_MS,
+  MAX_ATTACHMENT_WAVEFORM_BYTES,
   type Content,
   type TextContent,
   type ControlContent,

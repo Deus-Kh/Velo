@@ -177,6 +177,15 @@ describe('T8.1 attachment content', () => {
     for (const b of bad) expect(codeOf(() => decodeContent('{' + b + '}')), b.slice(0, 60)).toBe('STORAGE_CORRUPTION');
     expect(() => encodeContent({ v: 1, kind: 'attachment', blobId: 'b', key: 'short', digest, size: 1, contentType: 'image/png' })).toThrow();
   });
+
+  it('a voice note may carry a waveform of 1..64 bytes; empty, oversized or non-base64 waveforms are refused', () => {
+    const waveform = encodeBase64(bytes(48, 9));
+    const note = { v: 1, kind: 'attachment', blobId: 'w', key, digest, size: 10, contentType: 'audio/mp4', durationMs: 3000, waveform } as const;
+    expect(decodeContent(encodeContent(note))).toEqual(note);
+    expect(decodeContent(encodeContent({ ...note, waveform: encodeBase64(bytes(64, 2)) }))).toMatchObject({ waveform: encodeBase64(bytes(64, 2)) });
+    const base = `"v":1,"kind":"attachment","blobId":"b","key":"${key}","digest":"${digest}","size":10,"contentType":"audio/mp4"`;
+    for (const w of ['""', '"not base64!!"', `"${encodeBase64(bytes(65))}"`, '[1,2,3]', '7']) expect(codeOf(() => decodeContent('{' + base + ',"waveform":' + w + '}')), w.slice(0, 30)).toBe('STORAGE_CORRUPTION');
+  });
 });
 
 describe('T8.1 frozen vector', () => {

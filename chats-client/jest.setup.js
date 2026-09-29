@@ -86,6 +86,7 @@ jest.mock('react-native-blob-util', () => {
       files.delete(p);
       for (const k of [...files.keys()]) if (k.startsWith(p + '/')) files.delete(k);
     }),
+    ls: jest.fn(async (dir) => [...files.keys()].filter((k) => k.startsWith(dir + '/')).map((k) => k.slice(dir.length + 1)).filter((n) => !n.includes('/'))),
     stat: jest.fn(async (p) => ({ size: (files.get(p) || '').length })),
   };
   return { __esModule: true, default: { fs, __reset: () => files.clear() }, ReactNativeBlobUtil: { fs } };
@@ -95,8 +96,12 @@ jest.mock('react-native-blob-util', () => {
   const { NativeModules } = require('react-native');
   NativeModules.VeloAudio = {
     startRecording: jest.fn(async (path) => path),
-    stopRecording: jest.fn(async () => ''),
+    stopRecording: jest.fn(async () => ({ path: '', durationMs: 0 })),
     startPlaying: jest.fn(async () => 0),
+    pausePlaying: jest.fn(async () => 0),
+    resumePlaying: jest.fn(async () => undefined),
+    seekTo: jest.fn(async () => undefined),
+    setPlaybackSpeed: jest.fn(async () => undefined),
     stopPlaying: jest.fn(async () => undefined),
     addListener: jest.fn(),
     removeListeners: jest.fn(),
