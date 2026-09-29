@@ -22,6 +22,7 @@ import MessageBubble from '../components/MessageBubble';
 import { forwardMessage, summarizeReactions } from '../shared/chat/actions';
 import { formatTimer } from '../shared/chat/disappearing';
 import Avatar from '../components/Avatar';
+import SearchInChatSheet from '../components/SearchInChatSheet';
 import { useProfilesStore } from '../store/profiles.store';
 import TimerSheet from '../components/TimerSheet';
 import StatusChip from '../components/StatusChip';
@@ -40,7 +41,7 @@ import { formatHandle } from '../shared/utils/identity';
  */
 const messageListContentStyle = { paddingBottom: 20 };
 
-type MemberSheet = 'members' | 'add' | 'timer' | null;
+type MemberSheet = 'members' | 'add' | 'timer' | 'search' | null;
 
 function memberName(m: GroupMember | undefined, userId: string, profiles?: Record<string, { name: string }>): string {
   const shared = profiles?.[userId]?.name?.trim();
@@ -52,7 +53,7 @@ function SenderLabel({ name }: { name: string }) {
   return <Text className="mb-0.5 ml-3 text-[11px] font-semibold text-primary">{name}</Text>;
 }
 
-export default function GroupChatScreen({ groupId, initialName, onClose }: { groupId: string; initialName?: string; onClose: () => void }) {
+export default function GroupChatScreen({ groupId, initialName, jumpToMessageId, onClose }: { groupId: string; initialName?: string; jumpToMessageId?: string; onClose: () => void }) {
   const myUserId = useAuthStore((s) => s.userId);
   const insets = useSafeAreaInsets();
   const interfaceDensity = useAppearanceStore((s) => s.interfaceDensity);
@@ -64,6 +65,7 @@ export default function GroupChatScreen({ groupId, initialName, onClose }: { gro
   const [text, setText] = useState('');
   const [sheet, setSheet] = useState<MemberSheet>(null);
   const [selected, setSelected] = useState<GroupUIMessage | null>(null);
+  const [jumpTarget, setJumpTarget] = useState<string | null>(jumpToMessageId ?? null);
   const [editTarget, setEditTarget] = useState<GroupUIMessage | null>(null);
   const [forwardTarget, setForwardTarget] = useState<GroupUIMessage | null>(null);
   const [memberQuery, setMemberQuery] = useState('');
@@ -79,6 +81,14 @@ export default function GroupChatScreen({ groupId, initialName, onClose }: { gro
   const hasNavigationButtons = insets.bottom >= 40;
   const canSend = text.trim().length > 0 && Boolean(group);
   const reversed = useMemo(() => [...messages].reverse(), [messages]);
+
+  // T7.8: jump to a message from search once it is in the list (the group list holds the newest page).
+  useEffect(() => {
+    if (!jumpTarget || loading) return;
+    const idx = reversed.findIndex((m) => m.id === jumpTarget);
+    if (idx >= 0) setTimeout(() => flatListRef.current?.scrollToIndex({ index: idx, animated: true, viewPosition: 0.5 }), 80);
+    setJumpTarget(null);
+  }, [jumpTarget, loading, reversed]);
 
   useEffect(() => {
     const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
@@ -202,6 +212,15 @@ export default function GroupChatScreen({ groupId, initialName, onClose }: { gro
                 </View>
               ) : null}
             </View>
+
+            <Pressable
+              onPress={() => setSheet('search')}
+              className={`mr-2 rounded-full border border-border px-3 ${interfaceDensity === 'compact' ? 'py-1.5' : 'py-2'} active:opacity-80 ${
+                surfaceStyle === 'glass' ? 'bg-background-alt/60' : 'bg-background-alt'
+              }`}
+            >
+              <Text className="text-sm font-semibold text-text">{'\u2315'}</Text>
+            </Pressable>
 
             <Pressable
               onPress={() => setSheet('members')}
@@ -388,6 +407,19 @@ export default function GroupChatScreen({ groupId, initialName, onClose }: { gro
             </Pressable>
           </View>
         </BottomSheetPanel>
+      ) : null}
+
+      {sheet === 'search' && myUserId ? (
+        <SearchInChatSheet
+          myUserId={String(myUserId)}
+          peerKey={groupPeerKey(groupId)}
+          senderName={(userId, mine) => (mine ? 'You' : memberName(membersById.get(userId ?? ''), userId ?? '', profiles))}
+          onClose={() => setSheet(null)}
+          onJump={(hit) => {
+            setSheet(null);
+            setJumpTarget(hit.message.id);
+          }}
+        />
       ) : null}
 
       {sheet === 'timer' ? (

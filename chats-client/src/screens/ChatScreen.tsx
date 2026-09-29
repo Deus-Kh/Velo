@@ -29,6 +29,7 @@ import ReportSheet from '../components/ReportSheet';
 import { useBlocksStore } from '../store/blocks.store';
 import { blockPeer, reportPeer, unblockPeer } from '../shared/chat/blocks';
 import Avatar from '../components/Avatar';
+import SearchInChatSheet from '../components/SearchInChatSheet';
 import { useProfilesStore } from '../store/profiles.store';
 import StatusChip from '../components/StatusChip';
 import { conversationsApi } from '../shared/api/conversations.api';
@@ -324,11 +325,14 @@ function SendIcon({
 export default function ChatScreen({
   peerUserId,
   peerUsername,
+  jumpToMessageId,
   onClose,
   onVerify,
 }: {
   peerUserId: string;
   peerUsername?: string;
+  /** T7.8: a message to scroll to once history is loaded (from search). */
+  jumpToMessageId?: string;
   onClose: () => void;
   onVerify: () => void;
 }) {
@@ -361,6 +365,9 @@ const { keyboardShown , keyboardHeight } = useKeyboard()
   } = useChatE2EE(peerUserId);
   const [showTimerSheet, setShowTimerSheet] = useState(false);
   const [showReportSheet, setShowReportSheet] = useState(false);
+  const [showSearchSheet, setShowSearchSheet] = useState(false);
+  const [jumpTarget, setJumpTarget] = useState<string | null>(jumpToMessageId ?? null);
+  const jumpAttemptsRef = useRef(0);
   const [reportBusy, setReportBusy] = useState(false);
   const peerBlocked = useBlocksStore((s) => (myUserId ? s.blockedByUser[String(myUserId)] : undefined)?.includes(peerUserId) ?? false);
 
@@ -746,6 +753,27 @@ useEffect(() => {
     }
   }, [selectedMessageAction]);
 
+  // T7.8: jump to a message from search: scroll if loaded, otherwise page older history until it appears (bounded).
+  useEffect(() => {
+    if (!jumpTarget || historyLoading) return;
+    const idx = messageListItems.findIndex((item) => item.type === 'message' && item.message.id === jumpTarget);
+    if (idx >= 0) {
+      setTimeout(() => flatListRef.current?.scrollToIndex({ index: idx, animated: true, viewPosition: 0.5 }), 80);
+      setJumpTarget(null);
+      jumpAttemptsRef.current = 0;
+      return;
+    }
+    if (hasMore && !loadingMore && jumpAttemptsRef.current < 20) {
+      jumpAttemptsRef.current += 1;
+      loadMore();
+      return;
+    }
+    if (!loadingMore) {
+      setJumpTarget(null);
+      jumpAttemptsRef.current = 0;
+    }
+  }, [hasMore, historyLoading, jumpTarget, loadMore, loadingMore, messageListItems]);
+
   const handleEndReached = useCallback(() => {
     if (hasMore && !loadingMore && !historyLoading) {
       loadMore();
@@ -1035,6 +1063,17 @@ useEffect(() => {
           <Pressable
             onPress={() => {
               handleCloseComposerActions();
+              setShowSearchSheet(true);
+            }}
+            className="rounded-[18px] px-3 py-3 active:opacity-80"
+          >
+            <Text className="text-[15px] font-medium text-text">Search in chat</Text>
+            <Text className="mt-1 text-[13px] leading-5 text-muted">Find a message stored on this device and jump to it.</Text>
+          </Pressable>
+
+          <Pressable
+            onPress={() => {
+              handleCloseComposerActions();
               setShowTimerSheet(true);
             }}
             className="rounded-[18px] px-3 py-3 active:opacity-80"
@@ -1113,6 +1152,20 @@ useEffect(() => {
             );
           })()
         : null}
+
+      {showSearchSheet && myUserId ? (
+        <SearchInChatSheet
+          myUserId={String(myUserId)}
+          peerKey={peerUserId}
+          senderName={(_userId, mine) => (mine ? 'You' : conversationName)}
+          onClose={() => setShowSearchSheet(false)}
+          onJump={(hit) => {
+            setShowSearchSheet(false);
+            jumpAttemptsRef.current = 0;
+            setJumpTarget(hit.message.id);
+          }}
+        />
+      ) : null}
 
       {showReportSheet ? (
         <ReportSheet

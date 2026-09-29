@@ -38,8 +38,8 @@ import { useColorScheme } from 'react-native';
 type TabKey = 'chats' | 'new-chat' | 'settings';
 
 type ActiveChat =
-  | { kind: 'peer'; peerUserId: string; peerUsername?: string }
-  | { kind: 'group'; groupId: string; name?: string };
+  | { kind: 'peer'; peerUserId: string; peerUsername?: string; jumpToMessageId?: string }
+  | { kind: 'group'; groupId: string; name?: string; jumpToMessageId?: string };
 
 
 const TABS: {
@@ -119,7 +119,7 @@ export default function MainTabsScreen() {
   const overlayTranslateX = useSharedValue(frame.width);
   const swipeStartedFromEdge = useSharedValue(false);
 
-  const openChat = useCallback((chat: { peerUserId: string; peerUsername?: string }) => {
+  const openChat = useCallback((chat: { peerUserId: string; peerUsername?: string; jumpToMessageId?: string }) => {
     if (userId) {
       recordRecentContact(userId, chat.peerUserId);
       const conversationId = [userId, chat.peerUserId].sort().join(':');
@@ -132,7 +132,7 @@ export default function MainTabsScreen() {
   }, [recordRecentContact, setActiveChatPeerUserId, userId]);
 
   // T6.4: a group occupies the same overlay; its "peer" slot is group:<id> (notifications, store).
-  const openGroup = useCallback((group: { groupId: string; name?: string }) => {
+  const openGroup = useCallback((group: { groupId: string; name?: string; jumpToMessageId?: string }) => {
     cancelConversationNotifications(groupPeerKey(group.groupId)).catch((error) => {
       console.warn('[notifications] failed to clear group notifications:', error);
     });
@@ -363,11 +363,12 @@ export default function MainTabsScreen() {
 
           <Animated.View className="absolute inset-0" style={overlayAnimatedStyle}>
             {activeChat.kind === 'group' ? (
-              <GroupChatScreen groupId={activeChat.groupId} initialName={activeChat.name} onClose={closeChat} />
+              <GroupChatScreen groupId={activeChat.groupId} initialName={activeChat.name} jumpToMessageId={activeChat.jumpToMessageId} onClose={closeChat} />
             ) : (
             <ChatScreen
               peerUserId={activeChat.peerUserId}
               peerUsername={activeChat.peerUsername}
+              jumpToMessageId={activeChat.jumpToMessageId}
               onClose={closeChat}
               onVerify={() =>
                 navigation.navigate('VerifyContact', {

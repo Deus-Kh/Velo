@@ -31,11 +31,12 @@ import { deleteGroupKeys } from '../shared/storage/senderKeyStore';
 import { useBlocksStore } from '../store/blocks.store';
 import { blockPeer, unblockPeer } from '../shared/chat/blocks';
 import Avatar from '../components/Avatar';
+import { searchStoredMessages, type SearchHit } from '../shared/storage/messageStore';
 import { useProfilesStore } from '../store/profiles.store';
 import { formatHandle, shortSecureId } from '../shared/utils/identity';
 
-type ChatOpenHandler = (chat: { peerUserId: string; peerUsername?: string }) => void;
-type GroupOpenHandler = (group: { groupId: string; name?: string }) => void;
+type ChatOpenHandler = (chat: { peerUserId: string; peerUsername?: string; jumpToMessageId?: string }) => void;
+type GroupOpenHandler = (group: { groupId: string; name?: string; jumpToMessageId?: string }) => void;
 
 type SelectedConversationAction = {
   conversationId: string;
@@ -47,7 +48,8 @@ type SelectedConversationAction = {
 type SearchResultListItem =
   | { type: 'section'; id: string; label: string }
   | { type: 'conversation'; id: string; item: ConversationListItem }
-  | { type: 'user'; id: string; item: UserListItem };
+  | { type: 'user'; id: string; item: UserListItem }
+  | { type: 'message'; id: string; hit: SearchHit; title: string };
 
 type HomeListItem =
   | { type: 'section'; id: string; label: string }
@@ -249,6 +251,7 @@ export default function ChatListScreen({
   const activeChatPeerUserId = useAppUiStore((s) => s.activeChatPeerUserId);
   const blockedIds = useBlocksStore((s) => (myUserId ? s.blockedByUser[String(myUserId)] : undefined) ?? []);
   const profiles = useProfilesStore((s) => s.byUser); // T7.7
+  const [messageHits, setMessageHits] = useState<SearchHit[]>([]); // T7.8
 
   const [q, setQ] = useState('');
   const [loading, setLoading] = useState(true);
@@ -347,6 +350,27 @@ export default function ChatListScreen({
     const existingPeerIds = new Set(sortedConversations.map((item) => item.peerUserId));
     return searchItems.filter((item) => !existingPeerIds.has(item.userId));
   }, [searchItems, sortedConversations]);
+  // T7.8: the local store is searched alongside contacts (debounced; sealed records are decrypted on the fly).
+  useEffect(() => {
+    if (!showingSearch || !canSearch || !myUserId) {
+      setMessageHits([]);
+      return;
+    }
+    let cancelled = false;
+    const handle = setTimeout(async () => {
+      try {
+        const hits = await searchStoredMessages({ myUserId: String(myUserId), query: trimmedQuery, maxResults: 30 });
+        if (!cancelled) setMessageHits(hits);
+      } catch (e) {
+        console.warn('[ChatListScreen] message search failed:', e);
+      }
+    }, 250);
+    return () => {
+      cancelled = true;
+      clearTimeout(handle);
+    };
+  }, [canSearch, myUserId, showingSearch, trimmedQuery]);
+
   const searchResultItems = useMemo(() => {
     const items: SearchResultListItem[] = [];
 
@@ -382,8 +406,19 @@ export default function ChatListScreen({
       });
     }
 
+    if (messageHits.length > 0) {
+      items.push({ type: 'section', id: 'section-messages', label: 'Messages' });
+      for (const hit of messageHits) {
+        const isGroup = hit.peerKey.startsWith('group:');
+        const title = isGroup
+          ? groups.find((g) => 'group:' + g.groupId === hit.peerKey)?.name ?? 'Group'
+          : profiles[hit.peerKey]?.name?.trim() || sortedConversations.find((c) => c.peerUserId === hit.peerKey)?.peerUsername || hit.peerKey;
+        items.push({ type: 'message', id: `message-${hit.peerKey}-${hit.message.id}`, hit, title });
+      }
+    }
+
     return items;
-  }, [matchingConversations, matchingSearchContacts]);
+  }, [groups, matchingConversations, matchingSearchContacts, messageHits, profiles, sortedConversations]);
   const showInitialConversationSkeleton = loading && !showingSearch && conversations.length === 0;
   const showInlineSearchLoading = loading && showingSearch;
   const shouldAllowArchiveReveal =
@@ -1071,6 +1106,27 @@ export default function ChatListScreen({
           renderItem={({ item }) => (
             item.type === 'section' ? (
               <SectionEyebrow title={item.label} compact />
+            ) : item.type === 'message' ? (
+              <Pressable
+                onPress={() => {
+                  const { hit } = item;
+                  if (hit.peerKey.startsWith('group:')) onOpenGroup({ groupId: hit.peerKey.slice('group:'.length), name: item.title, jumpToMessageId: hit.message.id });
+                  else onOpenChat({ peerUserId: hit.peerKey, peerUsername: sortedConversations.find((c) => c.peerUserId === hit.peerKey)?.peerUsername, jumpToMessageId: hit.message.id });
+                }}
+                className={`mb-3 rounded-[22px] border border-border active:opacity-80 ${
+                  surfaceStyle === 'glass' ? 'bg-surface/82' : 'bg-surface-elevated'
+                } ${interfaceDensity === 'compact' ? 'p-3.5' : 'p-4'}`}
+              >
+                <View className="flex-row items-center justify-between gap-3">
+                  <Text className="flex-1 text-base font-semibold text-text" numberOfLines={1}>
+                    {item.title}
+                  </Text>
+                  <Text className="text-xs font-medium text-muted">{formatConversationTime(item.hit.message.createdAt)}</Text>
+                </View>
+                <Text className="mt-1 text-sm leading-6 text-muted" numberOfLines={2}>
+                  {item.hit.snippet}
+                </Text>
+              </Pressable>
             ) : item.type === 'conversation' ? (
               <Pressable
                 onPress={() =>
@@ -1085,13 +1141,7 @@ export default function ChatListScreen({
                 } ${interfaceDensity === 'compact' ? 'p-3.5' : 'p-4'}`}
               >
                 <View className="flex-row items-start">
-                  <View className={`mr-4 items-center justify-center rounded-full bg-primary-soft ${
-                    interfaceDensity === 'compact' ? 'h-12 w-12' : 'h-14 w-14'
-                  }`}>
-                    <Text className="text-lg font-semibold text-primary">
-                      {(item.item.peerUsername || '?').slice(0, 1).toUpperCase()}
-                    </Text>
-                  </View>
+                  <Avatar name={item.item.peerUsername || '?'} profile={profiles[item.item.peerUserId] ?? null} size={interfaceDensity === 'compact' ? 'md' : 'lg'} className="mr-4" />
 
                   <View className="flex-1">
                     <View className="flex-row items-start justify-between gap-3">

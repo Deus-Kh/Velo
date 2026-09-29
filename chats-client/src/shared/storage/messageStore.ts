@@ -170,6 +170,64 @@ export async function deleteStoredMessagesForPair(params: { myUserId: string; pe
   if (keys.length) await AsyncStorage.multiRemove(keys);
 }
 
+/** T7.8: a search hit: the conversation slot, the record, and a snippet around the first match. */
+export type SearchHit = { peerKey: string; message: StoredMessage; snippet: string };
+
+function snippetAround(text: string, query: string, radius = 40): string {
+  const at = text.toLowerCase().indexOf(query);
+  if (at < 0) return text.slice(0, radius * 2);
+  const start = Math.max(0, at - radius);
+  const end = Math.min(text.length, at + query.length + radius);
+  return (start > 0 ? '…' : '') + text.slice(start, end).replace(/\s+/g, ' ') + (end < text.length ? '…' : '');
+}
+
+/**
+ * T7.8: local search (D7 = A: a linear scan of sealed records). Scoped to
+ * one conversation slot or the whole account; only the newest
+ * `perConversation` records of each conversation are decrypted; tombstones
+ * and system lines never match. Newest hits first, capped at `maxResults`.
+ */
+export async function searchStoredMessages(params: { myUserId: string; query: string; peerUserId?: string | null; perConversation?: number; maxResults?: number }): Promise<SearchHit[]> {
+  const q = params.query.trim().toLowerCase();
+  if (!q) return [];
+  const perConversation = params.perConversation ?? 2000;
+  const maxResults = params.maxResults ?? 50;
+  const userPrefix = storedMessagesPrefixForUser(params.myUserId);
+  const scopePrefix = params.peerUserId ? pairPrefix(params.myUserId, params.peerUserId) : userPrefix;
+  const keys = (await AsyncStorage.getAllKeys()).filter((k) => k.startsWith(scopePrefix));
+  if (keys.length === 0) return [];
+
+  // Group by conversation slot (the segment before the 15-digit time), newest keys first per slot.
+  const bySlot = new Map<string, string[]>();
+  for (const k of keys) {
+    const rest = k.slice(userPrefix.length);
+    const m = /^(.*):(\d{15}):/.exec(rest);
+    if (!m) continue;
+    const slot = m[1]!;
+    const list = bySlot.get(slot) ?? [];
+    list.push(k);
+    bySlot.set(slot, list);
+  }
+  const selected: Array<{ slot: string; key: string }> = [];
+  for (const [slot, list] of bySlot) {
+    list.sort().reverse();
+    for (const key of list.slice(0, perConversation)) selected.push({ slot, key });
+  }
+  if (selected.length === 0) return [];
+
+  const mk = await getOrCreateSessionMasterKey(params.myUserId);
+  const rows = await AsyncStorage.multiGet(selected.map((s) => s.key));
+  const hits: SearchHit[] = [];
+  rows.forEach(([, raw], i) => {
+    const m = openJson<StoredMessage>(mk, raw);
+    if (!m || typeof m.text !== 'string' || m.deletedAt || m.system) return;
+    if (!m.text.toLowerCase().includes(q)) return;
+    hits.push({ peerKey: selected[i]!.slot, message: m, snippet: snippetAround(m.text, q) });
+  });
+  hits.sort((a, b) => b.message.createdAt - a.message.createdAt);
+  return hits.slice(0, maxResults);
+}
+
 /** Prefix for a logout wipe of every conversation of a user. */
 export function storedMessagesPrefixForUser(myUserId: string): string {
   return `${PREFIX}:${myUserId}:`;
