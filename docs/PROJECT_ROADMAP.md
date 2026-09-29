@@ -152,7 +152,7 @@ What a user can actually do today: 1:1 text with replies, receipts, typing, pres
 | Disappearing messages | ✅ | ❌ | ✅ Phase 7' |
 | Avatars / profiles | ✅ encrypted | ⚠️ initials only | ✅ Phase 7' |
 | Groups | ✅ | ✅ create, add/remove/leave, roles, group chat screen, notifications (Phase 6') | done; media, disappearing, reactions per Phases 7'/8' |
-| Block / report | ✅ | ❌ | ✅ Phase 7' |
+| Block / report | ✅ | ✅ silent server-side block list, reports in the reporter's words (T7.5) | done |
 | Account deletion | ✅ | ❌ | ✅ Phase 7' **(legally required)** |
 | Local history survives reinstall | ✅ backup/transfer | ❌ everything becomes `[Encrypted]` | ⚠️ local DB (T2.14); backup deferred |
 | Search in chat | ✅ | ❌ | ⚠️ if local DB lands early |
@@ -477,6 +477,8 @@ Extraction happens in T2.1. Secrets (`*.pem`, `*.keystore`, service-account JSON
 **7' progress — T7.3 done 2026-09-29** (one commit): disappearing messages as a per-conversation timer agreed over the session (admins only in groups), expiry fixed when a record is stored, sweeper on open / every 30 s / foreground, system lines and a timer sheet. Next in order: T7.4 (privacy toggles; no presence broadcast by default).
 
 **7' progress — T7.4 done 2026-09-29** (one commit): privacy toggles enforced server-side; a fresh account broadcasts no presence; P2-10 closed. Next in order: T7.5 (block and report).
+
+**7' progress — T7.5 done 2026-09-29** (one commit): silent, symmetric server-side blocks (messages, presence, typing, group copies), a local mirror that drops before decryption, reports in the reporter's own words. Next in order: T7.6 (account deletion).
 
 **2b progress — T2.14 done 2026-09-28** (one commit, D7 = A): plaintext stored locally in sealed records, message keys never archived, history read from the device with the server asked only for newer messages, one-time migration of the old archive. **The known-red registry is empty: every scenario the harness owns is green.** Remaining in Phase 2: T2.12 (manual two-device checklist, owner).
 
