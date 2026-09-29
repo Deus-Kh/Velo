@@ -1,5 +1,8 @@
 import { ProtocolError } from '../errors';
 import type { SenderKeyDistributionMessage } from '../senderkey/state';
+import { normalizeB64 } from '../primitives/base64';
+import { decodeBase64 } from 'tweetnacl-util';
+import { ATTACHMENT_KEY_BYTES, MAX_ATTACHMENT_BYTES } from '../attachment/keys';
 
 /**
  * Content envelope (T6.2, extended in T7.1): what the plaintext of a
@@ -28,6 +31,10 @@ export const MAX_TIMER_SECONDS = 365 * 24 * 60 * 60;
 export const MAX_PROFILE_NAME_LENGTH = 64;
 /** base64 of a JPEG of at most ~24 KB: well under the 64 KiB ciphertext cap with the envelope around it. */
 export const MAX_AVATAR_BASE64_LENGTH = 32_768;
+export const MAX_ATTACHMENT_NAME_LENGTH = 255;
+export const MAX_CAPTION_LENGTH = 4000;
+export const MAX_IMAGE_DIMENSION = 16_384;
+export const MAX_ATTACHMENT_DURATION_MS = 24 * 60 * 60 * 1000;
 
 /** Names a message both sides know: its sender and the sender's client id (stable across the send/ack cycle). */
 export type MessageRef = { senderUserId: string; clientMessageId: string };
@@ -52,10 +59,32 @@ export type TimerContent = { v: 1; kind: 'timer'; seconds: number | null };
 /** T7.7: what a contact shows for us: a name and an avatar. Newer `updatedAt` wins on the receiver. */
 export type ProfileAvatar = { kind: 'emoji'; emoji: string; color: string } | { kind: 'jpeg'; data: string };
 export type ProfileContent = { v: 1; kind: 'profile'; name: string; avatar: ProfileAvatar | null; updatedAt: number };
+/**
+ * T8.1: a message that is an attachment. The blob (attachment/cipher.ts)
+ * lives on the server under `blobId`; the key and the digest travel only
+ * here, inside the session. Shown as a message, never applied as an action.
+ */
+export type AttachmentContent = {
+  v: 1;
+  kind: 'attachment';
+  blobId: string;
+  /** base64, 32 bytes */
+  key: string;
+  /** base64, 32 bytes: SHA-256 of the blob */
+  digest: string;
+  /** plaintext bytes */
+  size: number;
+  contentType: string;
+  name?: string;
+  width?: number;
+  height?: number;
+  durationMs?: number;
+  caption?: string;
+};
 
 export type ControlContent = SenderKeyDistributionContent | SenderKeyRequestContent;
 export type ActionContent = ReactionContent | EditContent | DeleteContent | TimerContent | ProfileContent;
-export type Content = TextContent | ControlContent | ActionContent;
+export type Content = TextContent | ControlContent | ActionContent | AttachmentContent;
 
 export function textContent(text: string, forwardedFrom?: { userId: string; createdAt: number }): TextContent {
   return forwardedFrom ? { v: CONTENT_VERSION, kind: 'text', text, forwardedFrom } : { v: CONTENT_VERSION, kind: 'text', text };
@@ -102,6 +131,56 @@ function requireUpdatedAt(v: unknown): number {
   return v;
 }
 
+function requireBase64Bytes(value: unknown, length: number, what: string): string {
+  if (typeof value !== 'string' || value.length === 0) throw malformed(what);
+  let bytes: Uint8Array;
+  try {
+    bytes = decodeBase64(normalizeB64(value));
+  } catch {
+    throw malformed(what);
+  }
+  if (bytes.length !== length) throw malformed(what);
+  return normalizeB64(value);
+}
+
+function optionalInt(value: unknown, max: number, what: string): number | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (typeof value !== 'number' || !Number.isInteger(value) || value < 0 || value > max) throw malformed(what);
+  return value;
+}
+
+function optionalText(value: unknown, max: number, what: string): string | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (typeof value !== 'string' || value.length > max) throw malformed(what);
+  return value;
+}
+
+function requireAttachment(c: Record<string, unknown>): AttachmentContent {
+  if (typeof c.blobId !== 'string' || c.blobId.length === 0 || c.blobId.length > MAX_MESSAGE_REF_LENGTH) throw malformed('attachment.blobId');
+  if (typeof c.size !== 'number' || !Number.isInteger(c.size) || c.size < 0 || c.size > MAX_ATTACHMENT_BYTES) throw malformed('attachment.size');
+  if (typeof c.contentType !== 'string' || !/^[a-z0-9.+-]+\/[a-z0-9.+-]+$/i.test(c.contentType) || c.contentType.length > 128) throw malformed('attachment.contentType');
+  const out: AttachmentContent = {
+    v: CONTENT_VERSION,
+    kind: 'attachment',
+    blobId: c.blobId,
+    key: requireBase64Bytes(c.key, ATTACHMENT_KEY_BYTES, 'attachment.key'),
+    digest: requireBase64Bytes(c.digest, 32, 'attachment.digest'),
+    size: c.size,
+    contentType: c.contentType.toLowerCase(),
+  };
+  const name = optionalText(c.name, MAX_ATTACHMENT_NAME_LENGTH, 'attachment.name');
+  if (name !== undefined) out.name = name;
+  const width = optionalInt(c.width, MAX_IMAGE_DIMENSION, 'attachment.width');
+  if (width !== undefined) out.width = width;
+  const height = optionalInt(c.height, MAX_IMAGE_DIMENSION, 'attachment.height');
+  if (height !== undefined) out.height = height;
+  const durationMs = optionalInt(c.durationMs, MAX_ATTACHMENT_DURATION_MS, 'attachment.durationMs');
+  if (durationMs !== undefined) out.durationMs = durationMs;
+  const caption = optionalText(c.caption, MAX_CAPTION_LENGTH, 'attachment.caption');
+  if (caption !== undefined) out.caption = caption;
+  return out;
+}
+
 function requireEmoji(emoji: string): string {
   if (typeof emoji !== 'string' || emoji.length === 0 || emoji.length > MAX_REACTION_LENGTH || /\s/.test(emoji)) throw malformed('reaction');
   return emoji;
@@ -131,6 +210,8 @@ export function encodeContent(content: Content): string {
       return JSON.stringify({ v: CONTENT_VERSION, kind: 'timer', seconds: requireTimer(content.seconds) });
     case 'profile':
       return JSON.stringify({ v: CONTENT_VERSION, kind: 'profile', name: requireProfileName(content.name), avatar: requireAvatar(content.avatar), updatedAt: requireUpdatedAt(content.updatedAt) });
+    case 'attachment':
+      return JSON.stringify(requireAttachment(content as unknown as Record<string, unknown>));
     default:
       throw new ProtocolError('STORAGE_CORRUPTION', 'Unknown content kind', { what: 'content.kind' });
   }
@@ -212,6 +293,8 @@ export function decodeContent(plaintext: string): Content {
       return { v: CONTENT_VERSION, kind: 'timer', seconds: requireTimer(parsed.seconds as number | null) };
     case 'profile':
       return { v: CONTENT_VERSION, kind: 'profile', name: requireProfileName(parsed.name), avatar: requireAvatar(parsed.avatar), updatedAt: requireUpdatedAt(parsed.updatedAt) };
+    case 'attachment':
+      return requireAttachment(parsed);
     default:
       // A kind this build does not know: a newer peer. Not text, not ours to act on.
       throw new ProtocolError('STORAGE_CORRUPTION', 'Unknown content kind', { what: 'content.kind', value: String(parsed.kind) });
@@ -221,6 +304,11 @@ export function decodeContent(plaintext: string): Content {
 /** Sender-key traffic (T6.2): handled by the group key lifecycle, never shown. */
 export function isControlContent(content: Content): content is ControlContent {
   return content.kind === 'skdm' || content.kind === 'skdm-request';
+}
+
+/** T8.1: a message that is an attachment (shown like text; the blob is fetched and decrypted on demand). */
+export function isAttachmentContent(content: Content): content is AttachmentContent {
+  return content.kind === 'attachment';
 }
 
 /** Message actions (T7.1): applied to the local store, never shown as a message of their own. */

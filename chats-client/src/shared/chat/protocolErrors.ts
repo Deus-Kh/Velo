@@ -35,6 +35,11 @@ const TABLE: Record<ProtocolErrorCode, (peerName: string) => ProtocolErrorPresen
   SENDER_KEY_MISSING: (peer) => ({ userMessage: 'Waiting for ' + peer + '\u2019s group key\u2026', recoverable: true, action: 'auto-retry', securityWarning: false }),
   SENDER_KEY_STALE: (peer) => ({ userMessage: 'Group key from ' + peer + ' is out of date', recoverable: true, action: 'auto-retry', securityWarning: false }),
   SENDER_KEY_SIGNATURE_INVALID: (peer) => ({ userMessage: 'Security warning: a group message claiming to be from ' + peer + ' was not signed by them', recoverable: false, action: 'verify', securityWarning: true }),
+  // Phase 8' (T8.1)
+  ATTACHMENT_TOO_LARGE: () => ({ userMessage: 'This file is too large to send (8 MB max)', recoverable: false, action: 'none', securityWarning: false }),
+  ATTACHMENT_DIGEST_MISMATCH: () => ({ userMessage: 'Security warning: the downloaded file is not the one that was sent', recoverable: false, action: 'none', securityWarning: true }),
+  ATTACHMENT_MAC_INVALID: () => ({ userMessage: 'Security warning: the downloaded file was modified', recoverable: false, action: 'none', securityWarning: true }),
+  ATTACHMENT_INVALID: () => ({ userMessage: 'This attachment could not be opened', recoverable: false, action: 'none', securityWarning: false }),
 };
 
 export function presentProtocolError(code: ProtocolErrorCode, peerName = 'this contact'): ProtocolErrorPresentation {
@@ -78,6 +83,10 @@ export function classifyPendingMessageError(error: unknown): PendingMessageError
       case 'SENDER_KEY_STALE':
         return 'no_session';
       case 'SENDER_KEY_SIGNATURE_INVALID':
+      case 'ATTACHMENT_TOO_LARGE':
+      case 'ATTACHMENT_DIGEST_MISMATCH':
+      case 'ATTACHMENT_MAC_INVALID':
+      case 'ATTACHMENT_INVALID':
         return 'decrypt_failed';
     }
   }

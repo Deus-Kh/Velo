@@ -62,13 +62,14 @@ describe('ProtocolError', () => {
     expect(protocolErrorCode(new Error('x'))).toBeNull();
   });
 
-  it('lists exactly the seventeen spec codes', () => {
+  it('lists exactly the twenty-one spec codes', () => {
     expect([...PROTOCOL_ERROR_CODES].sort()).toEqual(
       [
         'MISSING_BOOTSTRAP', 'NO_SESSION', 'STALE_SESSION', 'DECRYPT_FAILED', 'REPLAY_DETECTED',
         'UNKNOWN_OLD_MESSAGE', 'SEND_FAILED', 'STORAGE_CORRUPTION', 'TOO_MANY_SKIPPED', 'HEADER_TAMPERED',
         'INVALID_KEY_LENGTH', 'SESSION_RESET_REQUIRED', 'IDENTITY_MISMATCH', 'IDENTITY_BINDING_INVALID',
         'SENDER_KEY_MISSING', 'SENDER_KEY_STALE', 'SENDER_KEY_SIGNATURE_INVALID',
+        'ATTACHMENT_TOO_LARGE', 'ATTACHMENT_DIGEST_MISMATCH', 'ATTACHMENT_MAC_INVALID', 'ATTACHMENT_INVALID',
       ].sort(),
     );
   });

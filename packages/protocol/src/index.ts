@@ -105,12 +105,17 @@ export {
   textContent,
   isControlContent,
   isActionContent,
+  isAttachmentContent,
   CONTENT_VERSION,
   MAX_REACTION_LENGTH,
   MAX_MESSAGE_REF_LENGTH,
   MAX_TIMER_SECONDS,
   MAX_PROFILE_NAME_LENGTH,
   MAX_AVATAR_BASE64_LENGTH,
+  MAX_ATTACHMENT_NAME_LENGTH,
+  MAX_CAPTION_LENGTH,
+  MAX_IMAGE_DIMENSION,
+  MAX_ATTACHMENT_DURATION_MS,
   type Content,
   type TextContent,
   type ControlContent,
@@ -122,6 +127,7 @@ export {
   type TimerContent,
   type ProfileContent,
   type ProfileAvatar,
+  type AttachmentContent,
   type SenderKeyDistributionContent,
   type SenderKeyRequestContent,
 } from './content/envelope';
@@ -148,3 +154,17 @@ export {
   type GroupDecryptResult,
   type GroupDecryptContentResult,
 } from './senderkey/message';
+
+// Phase 8' (T8.1): attachments
+export {
+  ATTACHMENT_KEY_BYTES,
+  ATTACHMENT_CHUNK_BYTES,
+  ATTACHMENT_MAC_BYTES,
+  MAX_ATTACHMENT_BYTES,
+  generateAttachmentKey,
+  expandAttachmentKey,
+  chunkNonce,
+  type ExpandedAttachmentKeys,
+} from './attachment/keys';
+export { attachmentEncrypt, attachmentDecrypt, type EncryptedAttachment } from './attachment/cipher';
+export { stripImageMetadata, type StripResult } from './attachment/metadata';

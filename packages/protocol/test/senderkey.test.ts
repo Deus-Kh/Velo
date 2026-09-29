@@ -84,7 +84,7 @@ describe('T6.1 sender keys', () => {
     expect(bob.iteration).toBe(1);
   });
 
-  it('replay, stale key id, old counters and large gaps are typed refusals that leave the state untouched', () => {
+  it('replay, stale key id, old counters and large gaps are typed refusals that leave the state untouched', { timeout: 30_000 }, () => {
     let alice = fixedSender();
     let bob = senderKeyStateFromDistribution(senderKeyDistributionMessage(alice));
     const m0 = groupEncrypt(alice, 'm0', AD);

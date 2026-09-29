@@ -16,9 +16,9 @@ describe('presentProtocolError', () => {
     expect(presentProtocolError('INVALID_KEY_LENGTH', 'Ani').userMessage).toBe('Invalid key data from Ani');
   });
 
-  it('marks exactly the three security-warning codes and keeps replay silent', () => {
+  it('marks exactly the five security-warning codes and keeps replay silent', () => {
     const warnings = PROTOCOL_ERROR_CODES.filter((c) => presentProtocolError(c).securityWarning).sort();
-    expect(warnings).toEqual(['HEADER_TAMPERED', 'IDENTITY_MISMATCH', 'SENDER_KEY_SIGNATURE_INVALID']);
+    expect([...warnings].sort()).toEqual(['ATTACHMENT_DIGEST_MISMATCH', 'ATTACHMENT_MAC_INVALID', 'HEADER_TAMPERED', 'IDENTITY_MISMATCH', 'SENDER_KEY_SIGNATURE_INVALID']); // T8.1 adds the two attachment integrity failures
     expect(presentProtocolError('REPLAY_DETECTED').userMessage).toBeNull();
     expect(presentProtocolError('REPLAY_DETECTED').action).toBe('log');
   });

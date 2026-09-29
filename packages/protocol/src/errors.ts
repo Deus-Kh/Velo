@@ -27,7 +27,12 @@ export type ProtocolErrorCode =
   // Phase 6' groups (T6.1)
   | 'SENDER_KEY_MISSING'
   | 'SENDER_KEY_STALE'
-  | 'SENDER_KEY_SIGNATURE_INVALID';
+  | 'SENDER_KEY_SIGNATURE_INVALID'
+  // Phase 8' attachments (T8.1)
+  | 'ATTACHMENT_TOO_LARGE'
+  | 'ATTACHMENT_DIGEST_MISMATCH'
+  | 'ATTACHMENT_MAC_INVALID'
+  | 'ATTACHMENT_INVALID';
 
 export const PROTOCOL_ERROR_CODES: readonly ProtocolErrorCode[] = [
   'MISSING_BOOTSTRAP',
@@ -47,6 +52,10 @@ export const PROTOCOL_ERROR_CODES: readonly ProtocolErrorCode[] = [
   'SENDER_KEY_MISSING',
   'SENDER_KEY_STALE',
   'SENDER_KEY_SIGNATURE_INVALID',
+  'ATTACHMENT_TOO_LARGE',
+  'ATTACHMENT_DIGEST_MISMATCH',
+  'ATTACHMENT_MAC_INVALID',
+  'ATTACHMENT_INVALID',
 ];
 
 /** Scalars only, so key material cannot be attached by accident. */
