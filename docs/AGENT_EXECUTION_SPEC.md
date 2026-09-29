@@ -778,6 +778,8 @@ Written when Phase 6' closed; the roadmap (§7 Phase 7', §3 P2-10, §5.3) fixes
 
 **T7.8 status 2026-09-29: done** (one commit). Search is a linear scan of the sealed store (D7 = A): the newest 2000 records of each conversation (or of the one conversation in scope) are decrypted under the session master key and matched case-insensitively; tombstones and system lines never match; hits come newest first with a snippet around the match, capped at 50. The chat list's search box now also searches messages (debounced, a "Messages" section beside contacts) and a hit opens the chat or group and jumps to the message; both chats have a "Search in chat" sheet. A jump pages older history until the message is loaded (bounded to 20 pages). Nothing leaves the device. Jest: cross-conversation results, case, snippet, scope, account isolation, window and cap.
 
+**T7.9 status 2026-09-29: done** (one commit). §8.2 gains the content-kinds table (what the plaintext of a message may be, who may act, what is shown); §8.4 lists S29; the harness records actions it receives (`actionInbox`) and can send them on the group chain, and **S29** shows every kind crossing the pairwise session and the group chain authenticated, opaque on the wire, acked and deleted like text, never shown as a message, and surviving reordering on the group chain; the known-red registry pins 35 files. Roadmap §2 rows and `architecture.md` describe the phase as built. **Phase 7' is code-complete.** The gate (two devices: react / edit / delete / forward round-trip, a timer expiring on both, a block silencing both ways, an account deletion leaving nothing on the server, privacy defaults on a fresh account) is a human step.
+
 # 8. REFERENCE
 
 ## 8.1 Normative ratchet algorithm (replaces v1 §8.1)
@@ -887,6 +889,18 @@ Every bump: update this table, the server validator, `Message.ts`, and the clien
 
 **Group messages (Phase 6', T6.1–T6.5)** travel in their own format, carried by the same Message document (`g1` instead of `v4`, one copy per recipient, `conversationId = group:<id>`), so the pairwise version above is unaffected:
 
+**Content kinds (Phase 7', T7.1–T7.7)** are what the *plaintext* of a pairwise message or a group message is: a versioned JSON envelope (`content/envelope.ts`), so everything below is authenticated by the session and opaque to the server. Anything that is not a v1 envelope reads as legacy bare text.
+
+| Kind | Fields | Who may act | Shown as |
+|---|---|---|---|
+| `text` | `text`, optional `forwardedFrom {userId, createdAt}` | anyone | a message (with "Forwarded") |
+| `skdm` / `skdm-request` | `groupId`, `skdm` | group members only (checked on receive) | nothing: sender-key lifecycle (T6.2) |
+| `reaction` | `target {senderUserId, clientMessageId}`, `emoji` (≤ 16 units), `remove?` | anyone in the conversation; one per sender per message | a chip under the target |
+| `edit` | `target`, `text` | the target's sender only | the new text, marked "edited" |
+| `delete` | `target` | the target's sender only | a tombstone (a *request*; a copy may have been read) |
+| `timer` | `seconds \| null` (≤ 1 year) | either side of a 1:1; admins in a group | a system line; new records get `expiresAt` |
+| `profile` | `name` (≤ 64), `avatar` (emoji+colour or JPEG ≤ 32 KiB base64), `updatedAt` | the sender, about itself; newest wins | name and avatar wherever the sender appears |
+
 | Format | Status | Envelope | Introduced |
 |---|---|---|---|
 | `group v1` | **current** | `{v: 1, keyId, iteration, ciphertext, signature}`: ciphertext = secretbox under a message key derived from the sender's chain (`KDF_CK`, `WhisperMessageKeys` expansion, derived nonce); signature = Ed25519 by the sender's per-group signing key over `u8 v ‖ u32 keyId ‖ u32 iteration ‖ u32 len ‖ groupId ‖ u32 len ‖ senderUserId ‖ ciphertext`. The sender's state `{keyId, iteration, chainKey, signingPublicKey, deviceId: 0}` reaches each member as `{kind:'skdm'}` content inside the pairwise ratchet (T6.2); `{kind:'skdm-request'}` asks for it. One keyId per membership epoch (T6.5). The server sees group, sender, epoch and three opaque fields. Per-message forward secrecy, no post-compromise security inside an epoch: DEVIATION-9. | T6.1–T6.5, 2026-09-28 |
@@ -914,7 +928,7 @@ Every bump: update this table, the server validator, `Message.ts`, and the clien
 The two bold codes are the security-warning class and must look different from technical errors.
 
 ## 8.4 Scenario catalog
-Canonical list in T2.4 (S01–S28) and T6.6 (G01–G06: in order, out of order across senders, forged sender, late joiner, removed member, rotation redistributes). Each scenario file states the checklist row it automates, the defect it covers, and expected state before and after the fix. Implemented in `packages/protocol/test/scenarios/` (2026-09-28); the red set is pinned by `knownRed.test.ts` (34 files) and must be updated in the same commit as any fix that flips a scenario.
+Canonical list in T2.4 (S01–S28), T6.6 (G01–G06: in order, out of order across senders, forged sender, late joiner, removed member, rotation redistributes) and T7.9 (S29: actions, timer and profile over the pairwise session and the group chain). Each scenario file states the checklist row it automates, the defect it covers, and expected state before and after the fix. Implemented in `packages/protocol/test/scenarios/` (2026-09-28/29); the red set is pinned by `knownRed.test.ts` (35 files) and must be updated in the same commit as any fix that flips a scenario.
 
 ## 8.5 Deviation register
 

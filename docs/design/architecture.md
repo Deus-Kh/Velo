@@ -91,6 +91,15 @@ message decrypts; glare converges on the lower user id with a decrypt-only
 secondary session for in-flight messages; a peer's local reset is adopted
 when its new packet decrypts (T2.11).
 
+**Content kinds (Phase 7').** The plaintext of any message is a versioned
+envelope (`content/envelope.ts`): text (with forward provenance), the
+sender-key traffic of groups, and message actions (reaction, edit, delete
+request, disappearing timer, profile). Actions are authenticated by the
+session like text, opaque to the server, applied to the device's sealed
+store by one path (`chat/actions.ts`) with the rule that only a message's
+sender may edit or delete it, and never shown as messages. Profiles (name,
+avatar) reach each contact this way too; the server stores none.
+
 **Groups (Phase 6').** Per-user Sender Keys: each member keeps one
 symmetric chain and one Ed25519 signing key per group and membership
 epoch; a message is encrypted once under the sender's chain and signed
@@ -152,9 +161,19 @@ post-compromise security inside an epoch (DEVIATION-9, as Signal).
 ## 6. Known limits (deliberate, recorded)
 
 - Android only; iOS parked (T1.16).
-- One device per account; no media, calls, backup of history (Phases
-  7'–8'). Groups: `deviceId` is always 0 in the distribution record, so
+- One device per account; no media, calls, backup of history (Phase 8'
+  and later). Groups: `deviceId` is always 0 in the distribution record, so
   multi-device changes nothing in the format.
+- Profiles: no photo picker ships (emoji-on-colour avatars; a JPEG is
+  accepted and shown when received). Local search is a linear scan of the
+  sealed store, bounded to the newest 2000 records per conversation.
+- "Delete for everyone" is a request the other devices honour; a copy may
+  already have been read. A block is silent: the blocked user is not told,
+  and its pre-block copies still on the server are dropped on the
+  recipient's device.
+- Privacy: online and last-seen are hidden unless the user opts in; read
+  receipts are the reader's choice. An access token issued before an
+  account deletion stays valid until it expires but identifies nobody.
 - Groups: no post-compromise security inside a membership epoch; copies in
   flight from a member removed before they are opened are lost; the server
   learns the group's membership, sender and timing of every message

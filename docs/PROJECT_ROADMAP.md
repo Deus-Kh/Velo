@@ -136,7 +136,7 @@ What a user can actually do today: 1:1 text with replies, receipts, typing, pres
 | Post-quantum handshake | ✅ | ❌ | ❌ | ❌ | ⚠️ readiness only (T3.5) |
 | Encrypted backup w/ PIN escrow | ✅ | ✅ | — | ❌ | ❌ deferred |
 | E2EE calls | ✅ | ✅ | ✅ | ❌ | ❌ deferred |
-| Disappearing messages | ✅ | ✅ | ✅ | ❌ | ✅ Phase 7' |
+| Disappearing messages | ✅ | ✅ | ✅ | ✅ per-conversation timer agreed over the session, expiry fixed at store time, sweeper (T7.3) | done |
 | Verified against reference impl. | n/a | n/a | n/a | ✅ X3DH, KDFs, message keys, fingerprint byte-identical to libsignal 0.103 (T2.15, green since T2.9) | done |
 
 ### 2.2 Product parity
@@ -147,9 +147,9 @@ What a user can actually do today: 1:1 text with replies, receipts, typing, pres
 | Read receipts / typing / presence | ✅ with toggles (no presence) | ✅ toggles for read receipts, typing, last seen, online; presence off by default; relationship check (T1.7, T7.4) | done |
 | Push notifications | ✅ data-only, decrypted on device | ✅ data-only wake-up, fetched and decrypted on the device, rendered with the local contact name and an honest preview toggle (T3.3, Android); iOS parked | done (Android) |
 | iOS build | ✅ | ❌ cannot connect | ⏸ T1.16 deferred by owner (2026-09-28): Android only for now |
-| Reactions, edit, delete, forward | ✅ | ❌ | ✅ Phase 7' |
+| Reactions, edit, delete, forward | ✅ | ✅ as content over the session; delete for everyone is a request (T7.2) | done |
 | Images / video / files / voice notes | ✅ | ❌ | ✅ Phase 8' |
-| Disappearing messages | ✅ | ❌ | ✅ Phase 7' |
+| Disappearing messages | ✅ | ✅ off / 1 h / 1 d / 1 w, admins in groups (T7.3) | done |
 | Avatars / profiles | ✅ encrypted | ✅ name + emoji/JPEG avatar over the session, server stores none; no photo picker yet (T7.7) | done (picker later) |
 | Groups | ✅ | ✅ create, add/remove/leave, roles, group chat screen, notifications (Phase 6') | done; media, disappearing, reactions per Phases 7'/8' |
 | Block / report | ✅ | ✅ silent server-side block list, reports in the reporter's words (T7.5) | done |
@@ -486,6 +486,8 @@ Extraction happens in T2.1. Secrets (`*.pem`, `*.keystore`, service-account JSON
 
 **7' progress — T7.8 done 2026-09-29** (one commit): local search over the sealed store, in the chat list and inside each chat, with jump-to-message. Next in order: T7.9 (docs and gate).
 
+**7' progress — T7.9 done 2026-09-29** (one commit): content-kinds table, S29 over the harness, parity rows, architecture. **Phase 7' is code-complete.** Remaining human step: the two-device gate. Next per §11: Phase 8' (media) or the owner's call.
+
 **2b progress — T2.14 done 2026-09-28** (one commit, D7 = A): plaintext stored locally in sealed records, message keys never archived, history read from the device with the server asked only for newer messages, one-time migration of the old archive. **The known-red registry is empty: every scenario the harness owns is green.** Remaining in Phase 2: T2.12 (manual two-device checklist, owner).
 
 **2b progress — T2.11 done 2026-09-28** (two commits): bootstrap persists only after the first message decrypts, bootstrap replay refused, glare converges on the lower user id without losing messages, a peer's local reset is adopted automatically. Next in order: T2.14.
@@ -539,7 +541,7 @@ Document: Sender Keys give no forward secrecy within an epoch; distribution beco
 
 ### PHASE 7' — Product completeness · weeks 18–19 · `[PARITY]`
 
-*Spec tasks T7.1–T7.9 defined 2026-09-28 (spec §7c): actions and timers as content kinds over the session; privacy toggles, blocks and account deletion as the only new server state; local search last (first cut).*
+*Spec tasks T7.1–T7.9 defined 2026-09-28 (spec §7c): actions and timers as content kinds over the session; privacy toggles, blocks and account deletion as the only new server state; local search last (first cut).* **Done 2026-09-29 (T7.1–T7.9).** Deviations from the paragraph below: no photo picker yet (avatars are emoji-on-colour, JPEG accepted), search scans the sealed store rather than an SQLCipher DB (D7 = A).
 
 Reactions; edit/delete with tombstone protocol messages ("delete for everyone" is a request, say so); forward with provenance; disappearing messages (per-conversation timer; local DB makes it trivial); block/report with a server-side block list; **account deletion** (cascade + key destruction, GDPR Art. 17); privacy toggles (read receipts, typing, last-seen) and the option to remove "online" broadcast; encrypted avatars via a profile key shared over the ratchet; local search over the SQLCipher DB.
 

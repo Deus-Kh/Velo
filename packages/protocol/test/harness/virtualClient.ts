@@ -9,7 +9,7 @@ import { x3dhInitiate, x3dhRespond, type X3DHInitPacket } from '../../src/handsh
 import { rotateSignedPreKeySet, selectSignedPreKey, signSignedPreKey, type SignedPreKeyRecord, type SignedPreKeySet } from '../../src/handshake/signedPrekey';
 import { normalizeB64 } from '../../src/primitives/base64';
 import { ratchetDecrypt, ratchetEncrypt, type MessageEnvelope, type MessageHeader } from '../../src/ratchet/message';
-import { decodeContent, encodeContent, isControlContent, textContent, type Content } from '../../src/content/envelope';
+import { decodeContent, encodeContent, isActionContent, isControlContent, textContent, type ActionContent, type Content } from '../../src/content/envelope';
 import type { AssociatedData } from '../../src/ratchet/envelope';
 import { glareWinner, initInitiatorSession, initResponderSession, sessionHasReceived } from '../../src/ratchet/session';
 import type { RatchetSessionV2 } from '../../src/types/session';
@@ -64,6 +64,8 @@ export class VirtualClient {
   readonly controlInbox: Array<{ fromUserId: string; content: Content; serverMessageId: string }> = [];
   /** T6.4: group messages this client opened. */
   readonly groupInbox: ReceivedGroupMessage[] = [];
+  /** T7.1–T7.7: actions (reaction, edit, delete, timer, profile) received over a pairwise session or a group chain; the app's store layer applies them. */
+  readonly actionInbox: Array<{ fromUserId: string; groupId: string | null; content: ActionContent; serverMessageId: string }> = [];
   /** T6.4: sender-key traffic this client sent over pairwise sessions (assertions only). */
   readonly distributionsSent: Array<{ to: string; groupId: string; keyId: number }> = [];
   readonly keyRequestsSent: Array<{ to: string; groupId: string }> = [];
@@ -437,7 +439,8 @@ export class VirtualClient {
       return plaintext;
     }
     if (content.kind !== 'text') {
-      // T7.1: an action (reaction, edit, delete, timer) is applied by the app's store layer (T7.2); the harness acks it.
+      // T7.1: an action (reaction, edit, delete, timer, profile) is applied by the app's store layer (T7.2+); the harness records and acks it.
+      if (isActionContent(content)) this.actionInbox.push({ fromUserId: peerUserId, groupId: null, content, serverMessageId: dto.serverMessageId });
       this.server.ackDelivered(this.userId, dto.serverMessageId);
       return plaintext;
     }
@@ -577,19 +580,29 @@ export class VirtualClient {
 
   /** groupMessaging.sendGroupMessage: distribute to whoever lacks our key, encrypt, group:send, store locally. */
   sendGroup(groupId: string, text: string): GroupSendResult {
+    const { result, createdAt } = this.sendGroupEnvelope(groupId, textContent(text));
+    if (result.ok) this.storeMessage(FakeServer.groupConversationId(groupId), { direction: 'out', text, createdAt, seq: result.seq, serverMessageId: result.serverMessageId });
+    return result;
+  }
+
+  /** T7.2: an action on the group chain (groupMessaging.sendGroupContent); nothing stored as a message. */
+  sendGroupContent(groupId: string, content: Content): GroupSendResult {
+    return this.sendGroupEnvelope(groupId, content).result;
+  }
+
+  private sendGroupEnvelope(groupId: string, content: Content): { result: GroupSendResult; createdAt: number } {
     if (!this.network) throw new Error('client not attached to a network');
     const group = this.server.getGroup(this.userId, groupId);
     if (!group) throw new Error(this.userId + ' is not a member of ' + groupId);
     this.distributeSenderKey(groupId);
     const state = this.ensureOwnSenderKey(groupId, group.epoch);
-    const step = groupEncryptContent(state, textContent(text), { groupId, senderUserId: this.userId }); // T7.1 envelope
+    const step = groupEncryptContent(state, content, { groupId, senderUserId: this.userId }); // T7.1 envelope
     this.store.setJson('sk-own:' + groupId, { epoch: group.epoch, state: step.state });
     this.msgCounter += 1;
     const clientMessageId = this.userId + '-' + randomUUID();
     const createdAt = Date.now() + this.clockSkewMs + this.msgCounter;
     const result = this.network.sendGroup(this.userId, { groupId, clientMessageId, createdAt, epoch: group.epoch, g1: step.message });
-    if (result.ok) this.storeMessage(FakeServer.groupConversationId(groupId), { direction: 'out', text, createdAt, seq: result.seq, serverMessageId: result.serverMessageId });
-    return result;
+    return { result, createdAt };
   }
 
   /**
@@ -620,7 +633,8 @@ export class VirtualClient {
     }
     this.store.setJson('sk-peer:' + copy.groupId + ':' + copy.fromUserId, step.state);
     if (step.content.kind !== 'text') {
-      this.server.ackDelivered(this.userId, copy.serverMessageId); // T7.1: actions are the store layer's (T7.2)
+      if (isActionContent(step.content)) this.actionInbox.push({ fromUserId: copy.fromUserId, groupId: copy.groupId, content: step.content, serverMessageId: copy.serverMessageId });
+      this.server.ackDelivered(this.userId, copy.serverMessageId); // T7.1: actions are the store layer's (T7.2+)
       return null;
     }
     const text = step.content.text;
