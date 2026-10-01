@@ -32,7 +32,7 @@ import Avatar from '../components/Avatar';
 import SearchInChatSheet from '../components/SearchInChatSheet';
 import AttachmentView from '../components/AttachmentView';
 import ImageViewer from '../components/ImageViewer';
-import { pickImage, sendAttachmentMessage, uploadAttachment } from '../shared/media/attachments';
+import { isAudio, pickImage, sendAttachmentMessage, uploadAttachment } from '../shared/media/attachments';
 import VoiceComposer from '../components/VoiceComposer';
 import { uploadVoiceNote, type Recording } from '../shared/media/voiceNotes';
 import { useProfilesStore } from '../store/profiles.store';
@@ -1013,6 +1013,7 @@ useEffect(() => {
                     deleted={Boolean(item.message.deletedAt)}
                     forwarded={Boolean(item.message.forwardedFrom)}
                     attachment={item.message.attachment && myUserId ? <AttachmentView myUserId={String(myUserId)} meta={item.message.attachment} mine={item.message.mine} onOpen={setViewerUri} /> : undefined}
+                    attachmentMetaInline={Boolean(item.message.attachment && isAudio(item.message.attachment))}
                     replyPreview={replyPreview}
                     onReplyPreviewPress={
                       replyPreview?.targetMessageId

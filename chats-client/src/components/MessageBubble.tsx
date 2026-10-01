@@ -71,6 +71,7 @@ export default function MessageBubble({
   deleted,
   forwarded,
   attachment,
+  attachmentMetaInline,
 }: {
   text: string;
   mine: boolean;
@@ -83,6 +84,8 @@ export default function MessageBubble({
   forwarded?: boolean;
   /** T8.3: rendered above the text (the caption). */
   attachment?: React.ReactNode;
+  /** T8.4: a voice note takes the time and status on its own last line instead of a row below. */
+  attachmentMetaInline?: boolean;
   replyPreview?: {
     title: string;
     text: string;
@@ -114,6 +117,7 @@ export default function MessageBubble({
   const replyPreviewTitleTone = mine ? 'text-white' : 'text-primary';
   const replyPreviewTextTone = mine ? 'text-white/82' : 'text-muted';
   const replySwipeTriggeredRef = useRef(false);
+  const inlineMeta = Boolean(attachmentMetaInline && attachment && !text && !deleted && showMeta);
 
   const metaNode = showMeta ? (
     <View className="flex-row items-center">
@@ -198,7 +202,16 @@ export default function MessageBubble({
           {forwarded && !deleted ? (
             <Text className={`mb-0.5 text-[11px] font-semibold ${mine ? 'text-background/70' : 'text-primary'}`}>{'\u21AA'} Forwarded</Text>
           ) : null}
-          {!deleted && attachment ? attachment : null}
+          {!deleted && attachment ? (
+            inlineMeta ? (
+              <View className="flex-row items-end">
+                {attachment}
+                <View className="ml-2 pb-0.5">{metaNode}</View>
+              </View>
+            ) : (
+              attachment
+            )
+          ) : null}
           {deleted ? (
             <Text className={`text-[15px] italic leading-[21px] ${mine ? 'text-background/75' : 'text-muted'}`}>This message was deleted</Text>
           ) : text || !attachment ? (
@@ -207,7 +220,7 @@ export default function MessageBubble({
             </Text>
           ) : null}
 
-          {showMeta ? (
+          {showMeta && !inlineMeta ? (
             <View className="mt-1 flex-row items-center self-end">
               {metaNode}
             </View>

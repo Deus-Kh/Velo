@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Pressable, StyleSheet, Text, View, type LayoutChangeEvent } from 'react-native';
+import { Pressable, StyleSheet, Text, View, useWindowDimensions, type LayoutChangeEvent } from 'react-native';
 import { protocolErrorCode } from '@velo/protocol';
 import { Icon } from './Icon';
 import { useThemeColors } from '../theme/useThemeColors';
@@ -36,12 +36,18 @@ const BARS = 40;
 const BAR_WIDTH = 3;
 const BAR_GAP = 2;
 const WAVE_HEIGHT = 28;
-const NOTE_WIDTH = 236;
+/** The bubble is at most 80 % of the screen; px-4 padding and the inline time take the rest. */
+const NOTE_MAX_WIDTH = 236;
+const NOTE_MIN_WIDTH = 176;
+const BUBBLE_PADDING = 32;
+const INLINE_META_WIDTH = 72;
 
 type Playback = { state: 'idle' | 'playing' | 'paused'; positionMs: number; durationMs: number };
 
 export default function VoiceNoteView({ myUserId, meta, mine }: { myUserId: string; meta: AttachmentMeta; mine: boolean }) {
   const colors = useThemeColors();
+  const { width: windowWidth } = useWindowDimensions();
+  const noteWidth = Math.min(NOTE_MAX_WIDTH, Math.max(NOTE_MIN_WIDTH, Math.round(windowWidth * 0.8) - BUBBLE_PADDING - INLINE_META_WIDTH));
   const [local, setLocal] = useState<boolean | null>(null);
   const [downloading, setDownloading] = useState<number | null>(null);
   const [error, setError] = useState<{ text: string; warning: boolean } | null>(null);
@@ -146,7 +152,7 @@ export default function VoiceNoteView({ myUserId, meta, mine }: { myUserId: stri
   const icon = !local ? 'download' : playback.state === 'playing' ? 'pause' : 'play';
 
   return (
-    <View className="mb-1 flex-row items-center" style={{ width: NOTE_WIDTH }}>
+    <View className="flex-row items-center" style={{ width: noteWidth }}>
       <Pressable
         onPress={onMainPress}
         accessibilityLabel={!local ? 'Download the voice message' : playback.state === 'playing' ? 'Pause' : 'Play the voice message'}
@@ -162,8 +168,9 @@ export default function VoiceNoteView({ myUserId, meta, mine }: { myUserId: stri
       </Pressable>
 
       <View className="ml-3 flex-1">
-        <Pressable onPress={onSeek} disabled={!local} accessibilityLabel="Seek inside the voice message">
-          <View className="flex-row items-end" style={{ height: WAVE_HEIGHT }} onLayout={onWaveLayout}>
+        <Pressable onPress={onSeek} disabled={!local} accessibilityLabel="Seek inside the voice message" onLayout={onWaveLayout}>
+          {/* pointerEvents none: the tap must target the Pressable itself, so that locationX is measured from its left edge and not from the 3 px bar under the finger */}
+          <View pointerEvents="none" className="flex-row items-end" style={{ height: WAVE_HEIGHT }}>
             {heights.map((h, i) => {
               const played = fill > 0 && i / BARS < fill;
               const dynamic = { height: Math.max(3, Math.round(h * WAVE_HEIGHT)), backgroundColor: barColor, opacity: played ? 1 : active ? 0.35 : 0.55 };
@@ -176,9 +183,9 @@ export default function VoiceNoteView({ myUserId, meta, mine }: { myUserId: stri
             {label}
           </Text>
           {active ? (
-            <Pressable onPress={onSpeed} accessibilityLabel="Playback speed" hitSlop={6}>
-              <View className={`ml-2 rounded-full px-1.5 py-0.5 ${mine ? 'bg-background/20' : 'bg-primary/15'}`}>
-                <Text className={`text-[11px] font-semibold ${mine ? 'text-background' : 'text-primary'}`}>{`${speed}x`}</Text>
+            <Pressable onPress={onSpeed} accessibilityLabel="Playback speed" accessibilityRole="button" hitSlop={8}>
+              <View className={`ml-2.5 h-7 min-w-[44px] items-center justify-center rounded-full px-2.5 ${mine ? 'bg-background/20' : 'bg-primary/15'}`}>
+                <Text className={`text-[13px] font-bold ${mine ? 'text-background' : 'text-primary'}`}>{`${speed}×`}</Text>
               </View>
             </Pressable>
           ) : null}

@@ -39,6 +39,8 @@ class VeloAudioModule(private val reactContext: ReactApplicationContext) : React
   private var recordStartedAt: Long = 0
   private var player: MediaPlayer? = null
   private var playbackSpeed: Float = 1.0f
+  /** startPlaying with a start position: the player starts when that seek lands (seekTo is asynchronous). */
+  private var startAfterSeek = false
   private val handler = Handler(Looper.getMainLooper())
   private var recordTicker: Runnable? = null
   private var playTicker: Runnable? = null
@@ -142,6 +144,21 @@ class VeloAudioModule(private val reactContext: ReactApplicationContext) : React
     emit("VeloAudio.playTick", params)
   }
 
+  private fun seek(p: MediaPlayer, positionMs: Int) {
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) p.seekTo(max(0, positionMs).toLong(), MediaPlayer.SEEK_CLOSEST)
+    else p.seekTo(max(0, positionMs))
+  }
+
+  /** Apply the speed (which also starts a paused player on API 23+), make sure it plays, and tick. */
+  private fun beginPlayback(p: MediaPlayer) {
+    if (playbackSpeed != 1.0f && Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+      try { p.playbackParams = p.playbackParams.setSpeed(playbackSpeed) } catch (_: Exception) {}
+    }
+    if (!p.isPlaying) p.start()
+    startTicker()
+    tick(p, "playing")
+  }
+
   private fun startTicker() {
     playTicker?.let { handler.removeCallbacks(it) }
     val ticker = object : Runnable {
@@ -179,16 +196,23 @@ class VeloAudioModule(private val reactContext: ReactApplicationContext) : React
         }
         true
       }
-      p.prepare()
-      if (startMs > 0) p.seekTo(startMs.toInt())
-      player = p
-      if (playbackSpeed != 1.0f && Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-        // setPlaybackParams with a non-zero speed also starts the player
-        try { p.playbackParams = p.playbackParams.setSpeed(playbackSpeed) } catch (_: Exception) {}
+      p.setOnSeekCompleteListener { mp ->
+        if (player !== mp) return@setOnSeekCompleteListener
+        if (startAfterSeek) {
+          startAfterSeek = false
+          try { beginPlayback(mp) } catch (_: Exception) {}
+        } else {
+          tick(mp, if (mp.isPlaying) "playing" else "paused")
+        }
       }
-      if (!p.isPlaying) p.start()
-      startTicker()
-      tick(p, "playing")
+      p.prepare()
+      player = p
+      if (startMs > 0) {
+        startAfterSeek = true
+        seek(p, startMs.toInt()) // beginPlayback runs from the seek-complete listener
+      } else {
+        beginPlayback(p)
+      }
       promise.resolve(p.duration.toDouble())
     } catch (e: Exception) {
       stopPlayerQuietly()
@@ -236,8 +260,7 @@ class VeloAudioModule(private val reactContext: ReactApplicationContext) : React
       return
     }
     try {
-      p.seekTo(max(0, positionMs.toInt()))
-      tick(p, if (p.isPlaying) "playing" else "paused")
+      seek(p, positionMs.toInt()) // the seek-complete listener ticks the new position
       promise.resolve(null)
     } catch (e: Exception) {
       promise.reject("E_PLAY", e.message ?: "Could not seek", e)
@@ -260,6 +283,7 @@ class VeloAudioModule(private val reactContext: ReactApplicationContext) : React
   }
 
   private fun stopPlayerQuietly() {
+    startAfterSeek = false
     playTicker?.let { handler.removeCallbacks(it) }
     playTicker = null
     val p = player ?: return

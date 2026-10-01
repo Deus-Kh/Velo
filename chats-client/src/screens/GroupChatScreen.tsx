@@ -25,7 +25,7 @@ import Avatar from '../components/Avatar';
 import SearchInChatSheet from '../components/SearchInChatSheet';
 import AttachmentView from '../components/AttachmentView';
 import ImageViewer from '../components/ImageViewer';
-import { pickImage, sendAttachmentMessage, uploadAttachment } from '../shared/media/attachments';
+import { isAudio, pickImage, sendAttachmentMessage, uploadAttachment } from '../shared/media/attachments';
 import VoiceComposer from '../components/VoiceComposer';
 import { uploadVoiceNote, type Recording } from '../shared/media/voiceNotes';
 import { useProfilesStore } from '../store/profiles.store';
@@ -332,6 +332,7 @@ export default function GroupChatScreen({ groupId, initialName, jumpToMessageId,
                     deleted={Boolean(item.deletedAt)}
                     forwarded={Boolean(item.forwardedFrom)}
                     attachment={item.attachment && myUserId ? <AttachmentView myUserId={String(myUserId)} meta={item.attachment} mine={item.mine} onOpen={setViewerUri} /> : undefined}
+                    attachmentMetaInline={Boolean(item.attachment && isAudio(item.attachment))}
                     onPress={() => setSelected(item)}
                   />
                 </View>

@@ -494,7 +494,7 @@ Extraction happens in T2.1. Secrets (`*.pem`, `*.keystore`, service-account JSON
 
 **8' progress — T8.3 + T8.4 done 2026-09-29** (one commit): photos and voice notes over the attachment path, sealed media files on the device, the app's own Android audio module instead of a third library; Android debug build verified. Next in order: T8.5 (harness S30, docs, gate).
 
-**8' revision — T8.4 voice notes rebuilt 2026-09-29** after the first run on the owner's phone: taps on the left half of a chat were swallowed by the invisible back-swipe strip in MainTabsScreen (the strip is now a 24 dp edge; a pan over the whole chat broke finger taps and scrolling), the hold-to-record button could leave the microphone stuck (recorder is a state machine now), and the UI is Telegram-style: slide to cancel, slide up to lock, waveform carried in the content, play/pause, seek, speed. Details in the spec (T8.4 revision).
+**8' revision — T8.4 voice notes rebuilt 2026-09-29** after the first run on the owner's phone: taps on the left half of a chat were swallowed by the invisible back-swipe strip in MainTabsScreen (the pan now sits on the chat overlay with correct activation offsets; the inherited `activeOffsetX([12, 999])` activated on any movement), the hold-to-record button could leave the microphone stuck (recorder is a state machine now), and the UI is Telegram-style: slide to cancel, slide up to lock, waveform carried in the content, play/pause, seek, speed. Details in the spec (T8.4 revision).
 
 **8' progress — T8.5 done 2026-09-29** (one commit): S30 over the harness, the blob format and the content-kind row in the spec, DEVIATION-10, architecture. **Phase 8' is code-complete.** Remaining human step: the two-phone media gate. Next per §11: Phase 12' (interface) or the owner's call.
 
@@ -565,7 +565,56 @@ Per-attachment random key; encrypt client-side; upload the blob to S3-compatible
 
 ## 8. PHASE 12' — INTERFACE · weeks 22–23 · `[CORE]`
 
-Confirmation dialogs on every destructive action; accessibility labels and roles on every control, dynamic type at 200%, contrast ≥ 4.5:1 in both themes; onboarding that explains E2EE in one screen; offline composing enabled (the queue already exists); chat list keeps rendering during refresh and fetches once; read vs delivered distinguishable; archive reachable from the row menu; `FlashList` for the message list; i18n scaffold with en/ru/hy and RTL check; haptics vocabulary; profile on a low-end Android; screen lock + `FLAG_SECURE` if time permits. Design tokens and the unified row primitive from `design/UI_INTERFACE_ROADMAP.md` §3.5.
+Confirmation dialogs on every destructive action; accessibility labels and roles on every control, dynamic type at 200%, contrast ≥ 4.5:1 in both themes; onboarding that explains E2EE in one screen; loading states and skeletons on every screen that waits for the network or the sealed store (today only the chat list has a skeleton): chat history, group members, search, profile and settings screens, media download and upload progress, with no blank screen and no layout jump when data arrives; registration: a second "repeat password" field checked before submit, a clear verdict on the password (meets the policy or not, and why: too short, too weak, found in a breach) shown from the first character rather than only after the server answers, and an unmistakable failure state when the account cannot be created (server refusal, username taken, network down) instead of a silent or generic error; offline composing enabled (the queue already exists); chat list keeps rendering during refresh and fetches once; read vs delivered distinguishable; archive reachable from the row menu; `FlashList` for the message list; i18n scaffold with en/ru/hy and RTL check; haptics vocabulary; profile on a low-end Android; screen lock + `FLAG_SECURE` if time permits. Design tokens and the unified row primitive from `design/UI_INTERFACE_ROADMAP.md` §3.5.
+
+### 8.1 Device review findings (2026-10-01)
+
+Observed on a real Android phone (account Test2, chat with Test1): chat list, 1:1 chat, settings. Login, registration, new chat and group screens were not opened. Items A1–A5 are defects and should land **before** Phase 12' as one small task; B1–B6 are design work for Phase 12' itself; C1 is the refactor that makes B possible.
+
+#### A — Defects (fix now, ~1–1.5 days)
+
+**A1 · Chat list preview says "(Encrypted message)" although the plaintext is on the device.**
+Cause: the row shows `lastMessagePreview` from `GET /conversations`; the server can only store a constant (`setupSocket.ts:316` writes `'(Encrypted message)'`, `Conversation.ts:21` defaults to `'(Message)'`). Since T2.14 the plaintext lives in the sealed local store, so the preview must come from there.
+How:
+1. Add a sealed per-user summary index to `storage/messageStore.ts`: `conversationSummary {peerUserId → {id, mine, kind, text, createdAt, deletedAt?}}`, updated inside `upsertStoredMessage`, `patchStoredMessage` (edit, delete for everyone) and `deleteStoredMessage` / `deleteStoredMessagesForPair` / expiry (recompute from `listStoredMessages(limit 1)` when the latest record is removed). Same for groups in the group store.
+2. Add `getConversationSummaries(myUserId)` and use it in `ChatListScreen.getConversationPreview`: text for text messages ("You: " prefix when `mine`), `📷 Photo` / caption, `🎤 Voice message · 0:12`, `Message deleted`, `Disappearing messages set to 1 h` for timer lines. Fall back to nothing (not "Encrypted conversation ready") when the device has no record.
+3. Refresh the row from the same patch bus the chat hooks already use (T7.2), so a new, edited, deleted or expired message updates the list without a refetch.
+4. Server: stop writing `lastMessagePreview` (remove the field from `Conversation`, from `GET /conversations` and from the socket notice). It never carried information and its presence suggests the server knows content.
+5. Respect the notification preview toggle only for notifications; the in-app list always shows the local text (it never leaves the device).
+Test: Jest over the summary index (insert, edit, delete-for-everyone, delete-for-me of the latest, expiry of the latest, group); manual: send, edit and delete on the peer, the row follows each time.
+
+**A2 · Own voice notes flash a "download" icon when a chat opens.**
+Cause: `VoiceNoteView.tsx:45` starts with `local = null` while `hasMedia()` checks the sealed media store, and line 146 maps every falsy `local` (including `null` = "not checked yet") to the `download` icon. `AttachmentView.tsx` has the same three-state shape.
+How: treat `null` as its own state: render the play icon dimmed and disabled (or a small spinner) until the check returns; show `download` only when `local === false`. Same in `AttachmentView` (image placeholder with the stored dimensions, no download badge while checking). For outgoing attachments, mark them local at send time so the check is instant.
+Test: component test with a deferred `hasMedia` → no `download` icon before it resolves.
+
+**A3 · A reply to a voice note or photo shows an empty quote ("You" with no text).**
+Cause: `ChatScreen.tsx:302` builds the quote with `buildReplySnippet(match.text)`; an attachment message has an empty `text`. Same call sites at 1184, 1303, 1335. (Group chats have no replies yet; when they get them they use the same helper.)
+How: one shared `describeMessageForQuote(message)` in `shared/chat/` that returns the snippet by kind: text → the text; photo → `📷 Photo` or the caption; voice → `🎤 Voice message · 0:02`; tombstone → `Message deleted`; forwarded → keeps the text. Use it everywhere a quote, the reply bar, the edit bar, the action sheet header, the notification body and the chat-list preview (A1) need a one-line description.
+Test: unit test per kind.
+
+**A4 · Copy still mentions search by email.**
+`ChatListScreen.tsx:854` ("Try a different username or email…"), `NewChatScreen.tsx:519` (placeholder "Search by username or email"), `NewChatScreen.tsx:749`. Search has matched usernames only since T1.6. Replace with "username"; grep the client for other `email` wording outside settings and registration.
+
+**A5 · Registration (already listed above, pulled forward).** A "Repeat password" field validated on the client before submit; a pass/fail verdict under the password from the first character (length, zxcvbn ≥ 3 against email and username using the existing `newPasswordRules`/`estimatePasswordStrength`), with the breach check result shown when the server reports it; a visible failure banner for network errors and server refusals (`toApiError` already carries field errors; make sure a network failure produces a human message, not an empty one). Verify on the device with the server stopped.
+
+#### B — Design work (Phase 12')
+
+**B1 · Chat list rows are cards and too tall** (4–5 chats per screen; Signal/Telegram fit 9–10). Replace the card with a flat row of ~72 dp: avatar 48 dp, name + time on line 1, one-line preview (A1) + unread badge on line 2, hairline divider. Remove the "Secure channel ready" chip and the "Open conversation" label (`ChatListScreen.tsx:995–997`, `1082–1084`); show only exceptional states (`Public key missing`, identity changed, blocked) as a small coloured icon or a muted line. Build it as the unified row primitive (`design/UI_INTERFACE_ROADMAP.md` §3.5) and reuse it for groups, search results, forward picker and new chat.
+
+**B2 · "Log out" is a primary button in the chat-list header** (`ChatListScreen.tsx:783`). Move it to Settings → Account, at the bottom, next to "Log out and erase local data"; both behind the existing confirmation. The chat-list header keeps the title, a search icon and a "new chat / new group" action.
+
+**B3 · Outgoing bubbles are a large saturated teal surface** (voice notes especially). Introduce bubble tokens per theme: outgoing = accent at reduced saturation (or a dark teal with light text in the dark theme), incoming = elevated surface; waveform and play button take the contrast colour. Check ≥ 4.5:1 for text and timestamps in both themes. Voice and photo bubbles keep a fixed max width (~75 % of the screen) instead of stretching edge to edge.
+
+**B4 · Settings are verbose and contain rows that do nothing.** "Verification flow — In chats" and "Security explanations — Enabled" (`SettingsScreen.tsx:898`, `903`) look tappable but are static: remove them or turn them into real actions (e.g. "How verification works" opening a short explainer). Drop the paragraph under every section header (keep one line where it carries a promise, e.g. "the server stores none of it"); drop the page subtitle. Every row that shows a chevron must navigate; rows without an action have no chevron and no "Edit"/"Current" label. "Trusted contacts 1" gets a chevron and a list, or loses the count.
+
+**B5 · Switch contrast.** `SettingsScreen.tsx:204` uses a white thumb on `#CBD5E1` when off, nearly invisible on the dark surface, and a dark thumb on cyan when on. Take colours from theme tokens: off = muted track with a light thumb that contrasts with the panel, on = accent track with a white thumb; same in the light theme.
+
+**B6 · Chat header.** Keep "end-to-end encrypted" only until the contact is verified, then show a small verified mark; when the peer allows presence/last seen, that line shows it instead. "Verify" becomes an item in the chat menu once verified.
+
+#### C — Code health that B depends on
+
+**C1 · Split the three oversized screens before the redesign:** `ChatScreen.tsx` (1412 lines), `ChatListScreen.tsx` (1312), `SettingsScreen.tsx` (1271). Extract: `ChatList` row + list hooks (`useConversationList`, `useGroupList`); chat `MessageList`, `Composer`, `ReplyBar`/`EditBar`, header; settings sections as one component each. `GroupChatScreen` should reuse the chat pieces instead of duplicating them. No behaviour change; land it as its own commit before B1–B4.
 
 ---
 
