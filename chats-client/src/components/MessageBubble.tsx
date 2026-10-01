@@ -1,6 +1,5 @@
-import type React from 'react';
+import React, { useRef, isValidElement } from 'react';
 import { Pressable, Text, View } from 'react-native';
-import { useRef } from 'react';
 import ReanimatedSwipeable, {
   SwipeDirection,
   type SwipeableMethods,
@@ -203,11 +202,9 @@ export default function MessageBubble({
             <Text className={`mb-0.5 text-[11px] font-semibold ${mine ? 'text-background/70' : 'text-primary'}`}>{'\u21AA'} Forwarded</Text>
           ) : null}
           {!deleted && attachment ? (
-            inlineMeta ? (
-              <View className="flex-row items-end">
-                {attachment}
-                <View className="ml-2 pb-0.5">{metaNode}</View>
-              </View>
+            inlineMeta && isValidElement<{ trailing?: React.ReactNode }>(attachment) ? (
+              // the voice note draws the time at the end of its duration line, so the waveform keeps the full width
+              React.cloneElement(attachment, { trailing: metaNode })
             ) : (
               attachment
             )

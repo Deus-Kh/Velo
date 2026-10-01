@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Pressable, StyleSheet, Text, View, useWindowDimensions, type LayoutChangeEvent } from 'react-native';
 import { protocolErrorCode } from '@velo/protocol';
 import { Icon } from './Icon';
@@ -38,18 +38,28 @@ const MIN_BARS = 16;
 const BAR_WIDTH = 3;
 const BAR_GAP = 2;
 const WAVE_HEIGHT = 28;
-/** The bubble is at most 80 % of the screen; px-4 padding and the inline time take the rest. */
-const NOTE_MAX_WIDTH = 236;
-const NOTE_MIN_WIDTH = 176;
+/** The note fills the bubble: at most 80 % of the screen less the bubble's horizontal padding. */
+const NOTE_MAX_WIDTH = 300;
+const NOTE_MIN_WIDTH = 200;
 const BUBBLE_PADDING = 32;
-const INLINE_META_WIDTH = 72;
 
 type Playback = { state: 'idle' | 'playing' | 'paused'; positionMs: number; durationMs: number };
 
-export default function VoiceNoteView({ myUserId, meta, mine }: { myUserId: string; meta: AttachmentMeta; mine: boolean }) {
+export default function VoiceNoteView({
+  myUserId,
+  meta,
+  mine,
+  trailing,
+}: {
+  myUserId: string;
+  meta: AttachmentMeta;
+  mine: boolean;
+  /** The message time and status, placed at the end of the duration line (MessageBubble passes it). */
+  trailing?: ReactNode;
+}) {
   const colors = useThemeColors();
   const { width: windowWidth } = useWindowDimensions();
-  const noteWidth = Math.min(NOTE_MAX_WIDTH, Math.max(NOTE_MIN_WIDTH, Math.round(windowWidth * 0.8) - BUBBLE_PADDING - INLINE_META_WIDTH));
+  const noteWidth = Math.min(NOTE_MAX_WIDTH, Math.max(NOTE_MIN_WIDTH, Math.round(windowWidth * 0.8) - BUBBLE_PADDING));
   const [local, setLocal] = useState<boolean | null>(null);
   const [downloading, setDownloading] = useState<number | null>(null);
   const [error, setError] = useState<{ text: string; warning: boolean } | null>(null);
@@ -182,7 +192,7 @@ export default function VoiceNoteView({ myUserId, meta, mine }: { myUserId: stri
           </View>
         </Pressable>
         <View className="mt-1 flex-row items-center">
-          <Text className={`text-[12px] tabular-nums ${labelTone}`} numberOfLines={1}>
+          <Text className={`shrink text-[12px] tabular-nums ${labelTone}`} numberOfLines={1}>
             {label}
           </Text>
           {active ? (
@@ -192,6 +202,7 @@ export default function VoiceNoteView({ myUserId, meta, mine }: { myUserId: stri
               </View>
             </Pressable>
           ) : null}
+          {trailing ? <View className="ml-auto pl-2">{trailing}</View> : null}
         </View>
       </View>
     </View>
