@@ -32,7 +32,9 @@ import type { AttachmentMeta } from '../shared/storage/messageStore';
  * a play. (The taps that "did nothing" on the first device run were eaten
  * by the invisible back-swipe strip in MainTabsScreen, not by the bubble.)
  */
-const BARS = 40;
+/** Bars are fitted to the measured width (3 dp bar, 2 dp gap); 40 is the pre-layout guess. */
+const DEFAULT_BARS = 40;
+const MIN_BARS = 16;
 const BAR_WIDTH = 3;
 const BAR_GAP = 2;
 const WAVE_HEIGHT = 28;
@@ -58,7 +60,8 @@ export default function VoiceNoteView({ myUserId, meta, mine }: { myUserId: stri
   const [speed, setSpeed] = useState<PlaybackSpeed>(playbackSpeed());
   const [waveWidth, setWaveWidth] = useState(0);
   const startedRef = useRef(false);
-  const heights = useMemo(() => decodeWaveform(meta.waveform, BARS) ?? placeholderWaveform(meta.blobId, BARS), [meta.waveform, meta.blobId]);
+  const bars = waveWidth > 0 ? Math.max(MIN_BARS, Math.floor((waveWidth + BAR_GAP) / (BAR_WIDTH + BAR_GAP))) : DEFAULT_BARS;
+  const heights = useMemo(() => decodeWaveform(meta.waveform, bars) ?? placeholderWaveform(meta.blobId, bars), [meta.waveform, meta.blobId, bars]);
   const duration = playback.durationMs > 0 ? playback.durationMs : (meta.durationMs ?? 0);
 
   useEffect(() => {
@@ -170,11 +173,11 @@ export default function VoiceNoteView({ myUserId, meta, mine }: { myUserId: stri
       <View className="ml-3 flex-1">
         <Pressable onPress={onSeek} disabled={!local} accessibilityLabel="Seek inside the voice message" onLayout={onWaveLayout}>
           {/* pointerEvents none: the tap must target the Pressable itself, so that locationX is measured from its left edge and not from the 3 px bar under the finger */}
-          <View pointerEvents="none" className="flex-row items-end" style={{ height: WAVE_HEIGHT }}>
+          <View pointerEvents="none" className="flex-row items-end overflow-hidden" style={{ height: WAVE_HEIGHT }}>
             {heights.map((h, i) => {
-              const played = fill > 0 && i / BARS < fill;
+              const played = fill > 0 && i / bars < fill;
               const dynamic = { height: Math.max(3, Math.round(h * WAVE_HEIGHT)), backgroundColor: barColor, opacity: played ? 1 : active ? 0.35 : 0.55 };
-              return <View key={i} style={[i < BARS - 1 ? styles.bar : styles.lastBar, dynamic]} />;
+              return <View key={i} style={[i < bars - 1 ? styles.bar : styles.lastBar, dynamic]} />;
             })}
           </View>
         </Pressable>
