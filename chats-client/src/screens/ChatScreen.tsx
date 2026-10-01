@@ -33,6 +33,7 @@ import SearchInChatSheet from '../components/SearchInChatSheet';
 import AttachmentView from '../components/AttachmentView';
 import ImageViewer from '../components/ImageViewer';
 import { isAudio, pickImage, sendAttachmentMessage, uploadAttachment } from '../shared/media/attachments';
+import { describeMessageForQuote } from '../shared/chat/describeMessage';
 import VoiceComposer from '../components/VoiceComposer';
 import { uploadVoiceNote, type Recording } from '../shared/media/voiceNotes';
 import { useProfilesStore } from '../store/profiles.store';
@@ -270,12 +271,6 @@ function InlineChatNotice({
   );
 }
 
-function buildReplySnippet(text: string) {
-  const normalized = text.replace(/\s+/g, ' ').trim();
-  if (normalized.length <= 48) return normalized;
-  return `${normalized.slice(0, 48)}...`;
-}
-
 function resolveReplyPreview(
   message: UIMessage,
   allMessages: UIMessage[],
@@ -299,7 +294,7 @@ function resolveReplyPreview(
 
   return {
     title: match.mine ? 'You' : peerName,
-    text: buildReplySnippet(match.text),
+    text: describeMessageForQuote(match),
     targetMessageId: match.id,
   };
 }
@@ -1182,7 +1177,7 @@ useEffect(() => {
             const full = messages.find((m) => m.id === selectedMessageAction.id) ?? null;
             return (
               <MessageActionsSheet
-                snippet={buildReplySnippet(selectedMessageAction.text)}
+                snippet={describeMessageForQuote(full ?? selectedMessageAction)}
                 mine={selectedMessageAction.mine}
                 deleted={Boolean(full?.deletedAt)}
                 failed={selectedMessageAction.status === 'failed'}
@@ -1301,7 +1296,7 @@ useEffect(() => {
                   Replying to {replyTarget.mine ? 'yourself' : conversationName}
                 </Text>
                 <Text className="mt-1 text-[13px] leading-5 text-muted">
-                  {buildReplySnippet(replyTarget.text)}
+                  {describeMessageForQuote(replyTarget)}
                 </Text>
               </View>
               <Pressable
@@ -1333,7 +1328,7 @@ useEffect(() => {
               <View className="mt-0.5 h-8 w-1 rounded-full bg-warning" />
               <View className="flex-1">
                 <Text className="text-[12px] font-semibold uppercase tracking-[1px] text-warning">Editing message</Text>
-                <Text className="mt-1 text-[13px] leading-5 text-muted">{buildReplySnippet(editTarget.text)}</Text>
+                <Text className="mt-1 text-[13px] leading-5 text-muted">{describeMessageForQuote(editTarget)}</Text>
               </View>
               <Pressable
                 onPress={() => {

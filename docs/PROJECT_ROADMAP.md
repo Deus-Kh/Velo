@@ -588,7 +588,7 @@ Cause: `VoiceNoteView.tsx:45` starts with `local = null` while `hasMedia()` chec
 How: treat `null` as its own state: render the play icon dimmed and disabled (or a small spinner) until the check returns; show `download` only when `local === false`. Same in `AttachmentView` (image placeholder with the stored dimensions, no download badge while checking). For outgoing attachments, mark them local at send time so the check is instant.
 Test: component test with a deferred `hasMedia` → no `download` icon before it resolves.
 
-**A3 · A reply to a voice note or photo shows an empty quote ("You" with no text).**
+**A3 · A reply to a voice note or photo shows an empty quote ("You" with no text).** — **done 2026-10-01**: `shared/chat/describeMessage.ts` (`describeMessageForQuote`) is used by the quote, the reply and edit bars, both action-sheet headers and the notification bodies; unit test per kind; `formatDuration` moved to `shared/media/duration.ts`.
 Cause: `ChatScreen.tsx:302` builds the quote with `buildReplySnippet(match.text)`; an attachment message has an empty `text`. Same call sites at 1184, 1303, 1335. (Group chats have no replies yet; when they get them they use the same helper.)
 How: one shared `describeMessageForQuote(message)` in `shared/chat/` that returns the snippet by kind: text → the text; photo → `📷 Photo` or the caption; voice → `🎤 Voice message · 0:02`; tombstone → `Message deleted`; forwarded → keeps the text. Use it everywhere a quote, the reply bar, the edit bar, the action sheet header, the notification body and the chat-list preview (A1) need a one-line description.
 Test: unit test per kind.

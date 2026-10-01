@@ -1,4 +1,5 @@
 import { AppState } from 'react-native';
+import { describeMessageForQuote } from '../chat/describeMessage';
 import { messagesApi, type HistoryItem } from '../api/messages.api';
 import { conversationsApi, type ConversationListItem } from '../api/conversations.api';
 import { loadStoredSession } from '../auth/tokenStore';
@@ -82,7 +83,7 @@ async function notifyStored(params: { myUserId: string; peerUserId: string; mess
     await displayIncomingMessageNotification({
       id: notificationIdFor(conversationId, m.serverMessageId ?? m.id),
       title,
-      body: notificationBodyFor({ text: m.text || (m.attachment ? (m.attachment.contentType.startsWith('audio/') ? 'Voice message' : 'Photo') : ''), showMessagePreview: preferences.showMessagePreview }),
+      body: notificationBodyFor({ text: describeMessageForQuote(m, { maxLength: 240 }), showMessagePreview: preferences.showMessagePreview }),
       conversationId,
       fromUserId: peerUserId,
       soundEnabled: preferences.soundEnabled,
@@ -103,7 +104,7 @@ async function notifyStoredGroup(params: { myUserId: string; groupId: string; ti
     await displayIncomingMessageNotification({
       id: notificationIdFor(conversationId, m.serverMessageId ?? m.id),
       title,
-      body: notificationBodyFor({ text: m.text || (m.attachment ? (m.attachment.contentType.startsWith('audio/') ? 'Voice message' : 'Photo') : ''), showMessagePreview: preferences.showMessagePreview }),
+      body: notificationBodyFor({ text: describeMessageForQuote(m, { maxLength: 240 }), showMessagePreview: preferences.showMessagePreview }),
       conversationId,
       fromUserId: 'group:' + groupId,
       soundEnabled: preferences.soundEnabled,

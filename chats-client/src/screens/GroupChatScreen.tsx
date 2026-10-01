@@ -26,6 +26,7 @@ import SearchInChatSheet from '../components/SearchInChatSheet';
 import AttachmentView from '../components/AttachmentView';
 import ImageViewer from '../components/ImageViewer';
 import { isAudio, pickImage, sendAttachmentMessage, uploadAttachment } from '../shared/media/attachments';
+import { describeMessageForQuote } from '../shared/chat/describeMessage';
 import VoiceComposer from '../components/VoiceComposer';
 import { uploadVoiceNote, type Recording } from '../shared/media/voiceNotes';
 import { useProfilesStore } from '../store/profiles.store';
@@ -347,7 +348,7 @@ export default function GroupChatScreen({ groupId, initialName, jumpToMessageId,
 
       {selected ? (
         <MessageActionsSheet
-          snippet={selected.text.replace(/\s+/g, ' ').trim().slice(0, 48)}
+          snippet={describeMessageForQuote(selected)}
           mine={selected.mine}
           deleted={Boolean(selected.deletedAt)}
           failed={selected.status === 'failed'}
