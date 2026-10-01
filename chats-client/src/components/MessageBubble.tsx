@@ -158,7 +158,11 @@ export default function MessageBubble({
       }`}
     >
       <View className={`mr-2.5 w-1 rounded-full ${replyPreviewAccentClass}`} />
-      <View className="min-w-0 flex-1">
+      {/* shrink, not flex-1: with flexBasis 0 Yoga sizes this column at zero when the bubble
+          measures its own width, so the bubble never grew for the quote and the text wrapped at
+          render time below a one-line box; with flexBasis auto the quote widens the bubble (up to
+          its 80 %) and, when it still has to wrap, is measured at the width it wraps in */}
+      <View className="min-w-0 shrink">
         <Text
           numberOfLines={1}
           className={`text-[11px] font-semibold ${replyPreviewTitleTone}`}
