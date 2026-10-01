@@ -51,6 +51,9 @@ const WAVE_HEIGHT = 28;
 /** The note fills the bubble: at most 80 % of the screen less the bubble's horizontal padding. */
 const NOTE_MAX_WIDTH = 300;
 const NOTE_MIN_WIDTH = 200;
+// MessageBubble is max-w-[80%] of the message row, which sits inside the list's px-3; its own px-4 is inside the 80 %.
+const LIST_HORIZONTAL_PADDING = 24;
+const BUBBLE_MAX_FRACTION = 0.8;
 const BUBBLE_PADDING = 32;
 
 type Playback = {
@@ -75,7 +78,14 @@ export default function VoiceNoteView({
   const { width: windowWidth } = useWindowDimensions();
   const noteWidth = Math.min(
     NOTE_MAX_WIDTH,
-    Math.max(NOTE_MIN_WIDTH, Math.round(windowWidth * 0.8) - BUBBLE_PADDING),
+    Math.max(
+      NOTE_MIN_WIDTH,
+      Math.floor(
+        (windowWidth - LIST_HORIZONTAL_PADDING) * BUBBLE_MAX_FRACTION,
+      ) -
+        BUBBLE_PADDING -
+        1,
+    ),
   );
   const [local, setLocal] = useState<boolean | null>(null);
   const [downloading, setDownloading] = useState<number | null>(null);
@@ -267,19 +277,26 @@ export default function VoiceNoteView({
       </Pressable>
 
       <View className="ml-3 flex-1">
-        <View className="flex-row items-center">
+        <View className="flex-row items-end">
+          {/*
+            The Pressable owns the width (flex-1, may shrink) and the bars fill it
+            absolutely, so the bars never dictate the row's width: before the first
+            layout the default bar count would otherwise set an intrinsic width the
+            row cannot shrink from, pushing the speed pill past the bubble's edge.
+            pointerEvents none: the tap must target the Pressable itself, so that
+            locationX is measured from its left edge and not from the 3 px bar.
+          */}
           <Pressable
             onPress={onSeek}
             disabled={!local}
             accessibilityLabel="Seek inside the voice message"
             onLayout={onWaveLayout}
-            className="flex-1"
+            className="min-w-0 flex-1 shrink"
+            style={{ height: WAVE_HEIGHT }}
           >
-            {/* pointerEvents none: the tap must target the Pressable itself, so that locationX is measured from its left edge and not from the 3 px bar under the finger */}
             <View
               pointerEvents="none"
-              className="flex-row items-end overflow-hidden"
-              style={{ height: WAVE_HEIGHT }}
+              className="absolute inset-0 flex-row items-end overflow-hidden"
             >
               {heights.map((h, i) => {
                 const played = fill > 0 && i / bars < fill;
