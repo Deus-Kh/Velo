@@ -442,9 +442,9 @@ export default function SettingsScreen() {
 
   const confirmResetLocalSecurityState = () => {
     Alert.alert(
-      'Reset local secure state?',
-      'This deletes your identity keys, sessions and message keys on this device. ' +
-        'Contacts will see a safety-number change and existing conversations must be re-established. ' +
+      'Reset encryption on this phone?',
+      'This removes your keys and secure sessions from this phone. ' +
+        'Contacts will see that your safety number changed, and each chat starts a fresh secure session. ' +
         'This cannot be undone.',
       [
         { text: 'Cancel', style: 'cancel' },
@@ -692,16 +692,16 @@ export default function SettingsScreen() {
   const pushTokenValue = notificationLoading
     ? 'Checking'
     : notificationStatus?.tokenReady
-      ? 'Ready'
-      : 'Missing';
+      ? 'Working'
+      : 'Not registered';
 
   const pushTokenDescription = notificationLoading
-    ? 'Checking whether this installation already has a push token.'
+    ? 'Checking whether this phone can receive alerts in the background.'
     : notificationPreferences.pushEnabled
       ? notificationStatus?.tokenReady
-        ? 'This installation has an FCM device token and is ready for server-side push wiring.'
-        : 'Push is enabled locally, but this installation does not currently have a device token.'
-      : 'Push delivery is turned off locally, so the device token is intentionally cleared.';
+        ? 'This phone can receive new-message alerts while the app is closed.'
+        : 'Push is on, but this phone has not registered for alerts yet. Tap to try again.'
+      : 'Push is off, so this phone is not registered for background alerts.';
 
   return (
     <View className="flex-1 bg-background">
@@ -912,13 +912,12 @@ export default function SettingsScreen() {
 
           <SectionEyebrow
             title="Encryption"
-            description="State of local keys, ratchet sessions and message protection on this device."
+            description="Keys and secure sessions kept on this phone."
           />
           <SettingsGroup>
             <SettingsRow
-              title="Identity key state"
-              subtitle="Signing and Diffie-Hellman identity keys for this account."
-              value={keyStateValue}
+              title="Your keys"
+              subtitle="The keys that identify this account to your contacts."
               trailing={
                 <StatusChip
                   label={keyStateValue}
@@ -927,8 +926,8 @@ export default function SettingsScreen() {
               }
             />
             <SettingsRow
-              title="History protection"
-              subtitle="Local message key cache is wrapped with a dedicated secure storage master key."
+              title="Message protection"
+              subtitle="Messages and keys on this phone are stored encrypted."
               trailing={
                 <StatusChip
                   label={encryptionValue}
@@ -938,22 +937,22 @@ export default function SettingsScreen() {
             />
             <SettingsRow
               title="Secure sessions"
-              subtitle="Active local ratchet sessions currently stored for chats on this device."
+              subtitle="Encrypted sessions with your contacts, kept on this phone."
               value={diagnosticsLoading ? 'Checking' : `${diagnostics?.sessionCount ?? 0}`}
             />
             <SettingsRow
               title="Stored messages"
-              subtitle="Messages kept on this device, each sealed under the session master key (T2.14). No message key is ever kept."
+              subtitle="Messages kept on this phone, each stored encrypted."
               value={diagnosticsLoading ? 'Checking' : `${diagnostics?.storedMessagesCount ?? 0}`}
             />
             <SettingsRow
-              title="Prekeys"
-              subtitle="Signed prekey and local one-time prekeys available for secure bootstrap."
+              title="Keys for new chats"
+              subtitle="Spare keys that let a contact start a secure chat with you while you are offline."
               value={
                 diagnosticsLoading
                   ? 'Checking'
                   : diagnostics?.signedPreKeyReady
-                    ? `${diagnostics?.oneTimePreKeysCount ?? 0} local`
+                    ? `${diagnostics?.oneTimePreKeysCount ?? 0} ready`
                     : 'Missing'
               }
               last
@@ -961,24 +960,24 @@ export default function SettingsScreen() {
           </SettingsGroup>
 
           <SectionEyebrow
-            title="Devices & Sessions"
-            description="Current device session and local recovery actions."
+            title="This phone"
+            description="Your session on this phone and how to recover it."
           />
           <SettingsGroup>
             <SettingsRow
               title="Current device"
-              subtitle="You are signed in locally and encrypted messaging restores automatically after reconnect."
+              subtitle="Signed in on this phone. Secure chats resume on their own after a reconnect."
               trailing={<StatusChip label="Connected" tone="success" />}
             />
             <SettingsRow
-              title="Refresh security state"
-              subtitle="Re-scan local keys and session artifacts after resets or recovery steps."
+              title="Check again"
+              subtitle="Re-check the keys and sessions on this phone."
               onPress={loadDiagnostics}
               value={diagnosticsLoading ? 'Refreshing' : 'Refresh'}
             />
             <SettingsRow
-              title="Reset local secure state"
-              subtitle="Clears local sessions, trusted identities, cached message keys and local crypto secrets for this account."
+              title="Reset encryption on this phone"
+              subtitle="Removes this account's secure sessions, trusted contacts and keys from this phone. Chats start fresh secure sessions afterwards."
               onPress={confirmResetLocalSecurityState}
               value={isResettingSecurity ? 'Resetting' : 'Clear'}
               danger
@@ -994,7 +993,7 @@ export default function SettingsScreen() {
           <SettingsGroup>
             <SettingsRow
               title="Push notifications"
-              subtitle="Allow this device to keep a push token for background message delivery."
+              subtitle="Get alerted about new messages while the app is closed."
               onPress={() => handlePushToggle(!notificationPreferences.pushEnabled)}
               trailing={
                 <SettingsToggle
@@ -1023,13 +1022,13 @@ export default function SettingsScreen() {
               }
             />
             <SettingsRow
-              title="Device token"
+              title="Background alerts"
               subtitle={pushTokenDescription}
               onPress={loadNotificationStatus}
               trailing={
                 <StatusChip
                   label={pushTokenValue}
-                  tone={pushTokenValue === 'Ready' ? 'success' : 'warning'}
+                  tone={pushTokenValue === 'Working' ? 'success' : pushTokenValue === 'Checking' ? 'neutral' : 'warning'}
                 />
               }
             />

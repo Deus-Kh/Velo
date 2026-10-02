@@ -854,7 +854,7 @@ export default function ChatListScreen({
         searchResultItems.length === 0 && (
         <EmptyState
           title="No results found"
-          description="Try a different username or email to find an existing chat or start a new encrypted one."
+          description="Try a different username to find an existing chat or start a new one."
         />
       )}
 
@@ -927,7 +927,7 @@ export default function ChatListScreen({
                         ) : null}
                       </View>
                       <Text className="mt-1 text-sm text-muted">
-                        {item.group.members.length} member{item.group.members.length === 1 ? '' : 's'} · Sender Keys
+                        {item.group.members.length} member{item.group.members.length === 1 ? '' : 's'}
                       </Text>
                     </View>
                   </View>

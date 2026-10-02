@@ -212,7 +212,7 @@ export default function GroupChatScreen({ groupId, initialName, jumpToMessageId,
   const subtitle = removed
     ? 'You are no longer a member'
     : group
-      ? `${group.members.length} member${group.members.length === 1 ? '' : 's'} · epoch ${group.epoch}`
+      ? `${group.members.length} member${group.members.length === 1 ? '' : 's'}`
       : 'Loading…';
 
   const composerSurfaceClass = surfaceStyle === 'glass' ? 'bg-surface/82' : 'bg-surface-elevated';
