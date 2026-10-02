@@ -1,5 +1,8 @@
 import React, { useRef, isValidElement } from 'react';
 import { Pressable, Text, View } from 'react-native';
+import { Icon } from './Icon';
+import { useThemeColors } from '../theme/useThemeColors';
+import type { LucideIconName } from '../shared/chat/describeMessage';
 import ReanimatedSwipeable, {
   SwipeDirection,
   type SwipeableMethods,
@@ -7,18 +10,19 @@ import ReanimatedSwipeable, {
 
 type MessageStatus = 'sending' | 'sent' | 'delivered' | 'read' | 'failed' | undefined;
 
-function getStatusGlyph(status: MessageStatus) {
+/** Delivery state as a Lucide icon (B14 adds the read colour): a clock while sending, one check sent, two delivered / read, an alert on failure. */
+function statusIconName(status: MessageStatus): LucideIconName | null {
   switch (status) {
     case 'sending':
-      return '...';
+      return 'clock';
     case 'sent':
-      return '\u2713';
+      return 'check';
     case 'delivered':
-      return '\u2713\u2713';
+      return 'check-check';
     case 'read':
-      return '\u2713\u2713';
+      return 'check-check';
     case 'failed':
-      return '!';
+      return 'circle-alert';
     default:
       return null;
   }
@@ -88,18 +92,21 @@ export default function MessageBubble({
   replyPreview?: {
     title: string;
     text: string;
+    /** the quoted message's kind icon (mic, image, …), from describeMessage */
+    icon?: LucideIconName | null;
   } | null;
   onReplyPreviewPress?: (() => void) | undefined;
   onPress?: (() => void) | undefined;
   onSwipeReply?: (() => void) | undefined;
 }) {
-  const statusGlyph = getStatusGlyph(status);
+  const colors = useThemeColors();
+  const statusIcon = statusIconName(status);
   const timeLabel = formatMessageTime(timestamp);
   const swipeableRef = useRef<SwipeableMethods | null>(null);
   const bubbleTone = mine ? 'bg-primary' : 'bg-surface-elevated';
   const footerTextTone = mine ? 'text-background/65' : 'text-muted';
   const statusColor = getStatusColor(status, mine);
-  const showMeta = Boolean(timeLabel) || Boolean(statusGlyph);
+  const showMeta = Boolean(timeLabel) || Boolean(statusIcon);
   const messageTextTone = mine ? 'text-background' : 'text-text';
   const hasReactions = Boolean(reactions && reactions.length > 0);
   const compactMeta =
@@ -129,13 +136,10 @@ export default function MessageBubble({
         </Text>
       ) : null}
 
-      {statusGlyph && mine ? (
-        <Text
-          className={`${timeLabel ? 'ml-1' : ''} text-[11px] font-semibold`}
-          style={{ color: statusColor }}
-        >
-          {statusGlyph}
-        </Text>
+      {statusIcon && mine ? (
+        <View className={timeLabel ? 'ml-1' : ''}>
+          <Icon lib="Lucide" name={statusIcon} size={13} color={statusColor} />
+        </View>
       ) : null}
     </View>
   ) : null;
@@ -169,12 +173,16 @@ export default function MessageBubble({
         >
           {replyPreview.title}
         </Text>
-        <Text
-          numberOfLines={2}
-          className={`mt-1 text-[12px] leading-[18px] ${replyPreviewTextTone}`}
-        >
-          {replyPreview.text}
-        </Text>
+        <View className="mt-1 flex-row items-center">
+          {replyPreview.icon ? (
+            <View className="mr-1.5">
+              <Icon lib="Lucide" name={replyPreview.icon} size={13} color={mine ? '#FFFFFF' : colors.muted} />
+            </View>
+          ) : null}
+          <Text numberOfLines={2} className={`shrink text-[12px] leading-[18px] ${replyPreviewTextTone}`}>
+            {replyPreview.text}
+          </Text>
+        </View>
       </View>
     </ReplyPreviewContainer>
   ) : null;
@@ -203,7 +211,10 @@ export default function MessageBubble({
         <>
           {replyPreviewNode}
           {forwarded && !deleted ? (
-            <Text className={`mb-0.5 text-[11px] font-semibold ${mine ? 'text-background/70' : 'text-primary'}`}>{'\u21AA'} Forwarded</Text>
+            <View className="mb-0.5 flex-row items-center">
+              <Icon lib="Lucide" name="corner-up-right" size={12} color={mine ? colors.background : colors.primary} />
+              <Text className={`ml-1 text-[11px] font-semibold ${mine ? 'text-background/70' : 'text-primary'}`}>Forwarded</Text>
+            </View>
           ) : null}
           {!deleted && attachment ? (
             inlineMeta && isValidElement<{ trailing?: React.ReactNode }>(attachment) ? (

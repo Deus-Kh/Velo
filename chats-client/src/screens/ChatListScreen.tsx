@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useState, useCallback, useRef } from 'react';
+import { Icon } from '../components/Icon';
+import { useThemeColors } from '../theme/useThemeColors';
 import {
   View,
   Text,
@@ -239,6 +241,7 @@ export default function ChatListScreen({
   onHandledClosedChat: () => void;
 }) {
   const insets = useSafeAreaInsets();
+  const colors = useThemeColors();
   const logout = useAuthStore((s) => s.logout);
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
   const myUserId = useAuthStore((s) => s.userId);
@@ -771,7 +774,7 @@ export default function ChatListScreen({
               onPress={() => setShowArchivedView(false)}
               className="h-10 w-10 items-center justify-center rounded-full border border-border bg-surface-elevated active:opacity-80"
             >
-              <Text className="text-2xl leading-none text-text">{'\u2039'}</Text>
+              <Icon lib="Lucide" name="chevron-left" size={22} color={colors.text} />
             </Pressable>
           ) : (
             <Pressable

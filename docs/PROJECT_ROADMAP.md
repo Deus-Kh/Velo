@@ -573,13 +573,15 @@ Observed on a real Android phone (account Test2, chat with Test1). First pass: c
 
 **Benchmark (owner, 2026-10-02): Telegram.** The target is "like Telegram, but better": its density, its one-line action sheets, its contact-info screen behind the chat header, its attachment menu on "+", its sub-paged settings. Velo keeps its own identity (teal, no phone number, the safety number front and centre) and adds what Telegram lacks: E2EE by default, no presence broadcast, verified-contact state in the header.
 
+**Rule (owner, 2026-10-02): no emoji and no typographic stand-ins (↪ ↑ ✓ × ⏱ …) anywhere in the interface; icons come from the icon set (`components/Icon.tsx`, Lucide/Ionicons) only. Emoji remain solely as user content (the reaction palette, reactions on bubbles). Applied the same day: quotes and previews (`describeMessage` returns plain words plus an icon name), delivery marks, "Forwarded", the timer chip, back/close/search/camera/send buttons, the member chip. Open: the emoji-only avatars of T7.7 fall under the rule too and go with B9 (initials now, real avatar images later).**
+
 #### A — Defects (fix now, ~1–1.5 days)
 
 **A1 · Chat list preview says "(Encrypted message)" although the plaintext is on the device.**
 Cause: the row shows `lastMessagePreview` from `GET /conversations`; the server can only store a constant (`setupSocket.ts:316` writes `'(Encrypted message)'`, `Conversation.ts:21` defaults to `'(Message)'`). Since T2.14 the plaintext lives in the sealed local store, so the preview must come from there.
 How:
 1. Add a sealed per-user summary index to `storage/messageStore.ts`: `conversationSummary {peerUserId → {id, mine, kind, text, createdAt, deletedAt?}}`, updated inside `upsertStoredMessage`, `patchStoredMessage` (edit, delete for everyone) and `deleteStoredMessage` / `deleteStoredMessagesForPair` / expiry (recompute from `listStoredMessages(limit 1)` when the latest record is removed). Same for groups in the group store.
-2. Add `getConversationSummaries(myUserId)` and use it in `ChatListScreen.getConversationPreview`: text for text messages ("You: " prefix when `mine`), `📷 Photo` / caption, `🎤 Voice message · 0:12`, `Message deleted`, `Disappearing messages set to 1 h` for timer lines. Fall back to nothing (not "Encrypted conversation ready") when the device has no record.
+2. Add `getConversationSummaries(myUserId)` and use it in `ChatListScreen.getConversationPreview`: text for text messages ("You: " prefix when `mine`), `Photo` / `Photo · caption` and `Voice message · 0:12` with the kind's icon in front (from `describeMessage`), `Message deleted`, `Disappearing messages set to 1 h` for timer lines. Fall back to nothing (not "Encrypted conversation ready") when the device has no record.
 3. Refresh the row from the same patch bus the chat hooks already use (T7.2), so a new, edited, deleted or expired message updates the list without a refetch.
 4. Server: stop writing `lastMessagePreview` (remove the field from `Conversation`, from `GET /conversations` and from the socket notice). It never carried information and its presence suggests the server knows content.
 5. Respect the notification preview toggle only for notifications; the in-app list always shows the local text (it never leaves the device).
@@ -592,7 +594,7 @@ Test: component test with a deferred `hasMedia` → no `download` icon before it
 
 **A3 · A reply to a voice note or photo shows an empty quote ("You" with no text).** — **done 2026-10-01**: `shared/chat/describeMessage.ts` (`describeMessageForQuote`) is used by the quote, the reply and edit bars, both action-sheet headers and the notification bodies; unit test per kind; `formatDuration` moved to `shared/media/duration.ts`.
 Cause: `ChatScreen.tsx:302` builds the quote with `buildReplySnippet(match.text)`; an attachment message has an empty `text`. Same call sites at 1184, 1303, 1335. (Group chats have no replies yet; when they get them they use the same helper.)
-How: one shared `describeMessageForQuote(message)` in `shared/chat/` that returns the snippet by kind: text → the text; photo → `📷 Photo` or the caption; voice → `🎤 Voice message · 0:02`; tombstone → `Message deleted`; forwarded → keeps the text. Use it everywhere a quote, the reply bar, the edit bar, the action sheet header, the notification body and the chat-list preview (A1) need a one-line description.
+How: one shared `describeMessageForQuote(message)` in `shared/chat/` that returns the snippet by kind: text → the text; photo → `Photo` or `Photo · caption`; voice → `Voice message · 0:02`; tombstone → `Message deleted` (each with an icon name for places that have an icon slot); forwarded → keeps the text. Use it everywhere a quote, the reply bar, the edit bar, the action sheet header, the notification body and the chat-list preview (A1) need a one-line description.
 Test: unit test per kind.
 
 **A4 · Copy still mentions search by email.**

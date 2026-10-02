@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react';
 import { FlatList, Pressable, Text, TextInput, View } from 'react-native';
 
 import BottomSheetPanel from './BottomSheetPanel';
+import { Icon } from './Icon';
+import { useThemeColors } from '../theme/useThemeColors';
 import { groupsApi, type GroupView } from '../shared/api/groups.api';
 import { userApi, type UserListItem } from '../shared/api/user.api';
 
@@ -11,6 +13,7 @@ import { userApi, type UserListItem } from '../shared/api/user.api';
  * creator's sender key to every member over the pairwise sessions.
  */
 export default function CreateGroupPanel({ onClose, onCreated }: { onClose: () => void; onCreated: (group: GroupView) => void }) {
+  const colors = useThemeColors();
   const [name, setName] = useState('');
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<UserListItem[]>([]);
@@ -71,8 +74,11 @@ export default function CreateGroupPanel({ onClose, onCreated }: { onClose: () =
       {selected.length > 0 ? (
         <View className="mt-2 flex-row flex-wrap gap-2">
           {selected.map((u) => (
-            <Pressable key={u.userId} onPress={() => toggle(u)} className="rounded-full border border-primary/30 bg-primary/12 px-3 py-1 active:opacity-80">
-              <Text className="text-xs font-semibold text-primary">{u.username} ×</Text>
+            <Pressable key={u.userId} onPress={() => toggle(u)} accessibilityLabel={`Remove ${u.username}`} className="flex-row items-center rounded-full border border-primary/30 bg-primary/12 py-1 pl-3 pr-2 active:opacity-80">
+              <Text className="text-xs font-semibold text-primary">{u.username}</Text>
+              <View className="ml-1">
+                <Icon lib="Lucide" name="x" size={12} color={colors.primary} />
+              </View>
             </Pressable>
           ))}
         </View>

@@ -27,6 +27,8 @@ import AttachmentView from '../components/AttachmentView';
 import ImageViewer from '../components/ImageViewer';
 import { isAudio, pickImage, sendAttachmentMessage, uploadAttachment } from '../shared/media/attachments';
 import { describeMessageForQuote } from '../shared/chat/describeMessage';
+import { Icon } from '../components/Icon';
+import { useThemeColors } from '../theme/useThemeColors';
 import VoiceComposer from '../components/VoiceComposer';
 import { uploadVoiceNote, type Recording } from '../shared/media/voiceNotes';
 import { useProfilesStore } from '../store/profiles.store';
@@ -74,6 +76,7 @@ export default function GroupChatScreen({ groupId, initialName, jumpToMessageId,
   const [jumpTarget, setJumpTarget] = useState<string | null>(jumpToMessageId ?? null);
   const [viewerUri, setViewerUri] = useState<string | null>(null);
   const [uploadState, setUploadState] = useState<{ label: string; progress: number | null } | null>(null);
+  const colors = useThemeColors();
   const [editTarget, setEditTarget] = useState<GroupUIMessage | null>(null);
   const [forwardTarget, setForwardTarget] = useState<GroupUIMessage | null>(null);
   const [memberQuery, setMemberQuery] = useState('');
@@ -257,7 +260,7 @@ export default function GroupChatScreen({ groupId, initialName, jumpToMessageId,
               ) : null}
               {timer.timerSeconds ? (
                 <View className="mt-2">
-                  <StatusChip tone="primary" label={`\u23F1 Disappear after ${formatTimer(timer.timerSeconds)}`} />
+                  <StatusChip tone="primary" icon="timer" label={`Disappear after ${formatTimer(timer.timerSeconds)}`} />
                 </View>
               ) : null}
             </View>
@@ -268,7 +271,7 @@ export default function GroupChatScreen({ groupId, initialName, jumpToMessageId,
                 surfaceStyle === 'glass' ? 'bg-background-alt/60' : 'bg-background-alt'
               }`}
             >
-              <Text className="text-sm font-semibold text-text">{'\u2315'}</Text>
+              <Icon lib="Lucide" name="search" size={18} color={colors.text} />
             </Pressable>
 
             <Pressable
@@ -550,7 +553,7 @@ export default function GroupChatScreen({ groupId, initialName, jumpToMessageId,
               }}
               className="h-8 w-8 items-center justify-center rounded-full bg-background-alt/60 active:opacity-80"
             >
-              <Text className="text-lg leading-none text-text">×</Text>
+              <Icon lib="Lucide" name="x" size={18} color={colors.text} />
             </Pressable>
           </View>
         ) : null}
@@ -577,7 +580,7 @@ export default function GroupChatScreen({ groupId, initialName, jumpToMessageId,
             disabled={!group || removed || Boolean(uploadState)}
             className={`${buttonSizeClass} items-center justify-center rounded-full border border-border ${composerSurfaceClass} active:opacity-80`}
           >
-            <Text className="text-[20px] leading-none text-text">{'\u{1F4F7}'}</Text>
+            <Icon lib="Lucide" name="camera" size={20} color={colors.text} />
           </Pressable>
           <View className={`flex-1 rounded-[24px] border border-border bg-surface-elevated px-4 ${interfaceDensity === 'compact' ? 'py-0.5' : 'py-1'}`}>
             <TextInput
@@ -603,7 +606,7 @@ export default function GroupChatScreen({ groupId, initialName, jumpToMessageId,
               disabled={!canSend}
               className={`${buttonSizeClass} items-center justify-center rounded-full ${canSend ? 'bg-primary' : `border border-border ${composerSurfaceClass}`} active:opacity-80`}
             >
-              <Text className={`text-lg font-semibold ${canSend ? 'text-background' : 'text-muted'}`}>{'↑'}</Text>
+              <Icon lib="Lucide" name="send" size={18} color={canSend ? colors.background : colors.muted} />
             </Pressable>
           )}
         </VoiceComposer>

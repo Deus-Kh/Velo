@@ -33,7 +33,10 @@ import SearchInChatSheet from '../components/SearchInChatSheet';
 import AttachmentView from '../components/AttachmentView';
 import ImageViewer from '../components/ImageViewer';
 import { isAudio, pickImage, sendAttachmentMessage, uploadAttachment } from '../shared/media/attachments';
-import { describeMessageForQuote } from '../shared/chat/describeMessage';
+import { describeMessage, describeMessageForQuote, type LucideIconName } from '../shared/chat/describeMessage';
+import QuoteLine from '../components/QuoteLine';
+import { Icon } from '../components/Icon';
+import { useThemeColors } from '../theme/useThemeColors';
 import VoiceComposer from '../components/VoiceComposer';
 import { uploadVoiceNote, type Recording } from '../shared/media/voiceNotes';
 import { useProfilesStore } from '../store/profiles.store';
@@ -275,7 +278,7 @@ function resolveReplyPreview(
   message: UIMessage,
   allMessages: UIMessage[],
   peerName: string,
-): { title: string; text: string; targetMessageId: string | null } | null {
+): { title: string; text: string; icon?: LucideIconName | null; targetMessageId: string | null } | null {
   if (!message.replyTo) return null;
 
   const match = allMessages.find(
@@ -292,9 +295,11 @@ function resolveReplyPreview(
     };
   }
 
+  const description = describeMessage(match);
   return {
     title: match.mine ? 'You' : peerName,
-    text: describeMessageForQuote(match),
+    text: description.text,
+    icon: description.icon,
     targetMessageId: match.id,
   };
 }
@@ -368,6 +373,7 @@ const { keyboardShown , keyboardHeight } = useKeyboard()
   const [showSearchSheet, setShowSearchSheet] = useState(false);
   const [viewerUri, setViewerUri] = useState<string | null>(null);
   const [uploadState, setUploadState] = useState<{ label: string; progress: number | null } | null>(null);
+  const colors = useThemeColors();
   const [jumpTarget, setJumpTarget] = useState<string | null>(jumpToMessageId ?? null);
   const jumpAttemptsRef = useRef(0);
   const [reportBusy, setReportBusy] = useState(false);
@@ -882,7 +888,7 @@ useEffect(() => {
                 interfaceDensity === 'compact' ? 'h-9 w-9' : 'h-10 w-10'
               } ${surfaceStyle === 'glass' ? 'bg-background-alt/60' : 'bg-background-alt'}`}
             >
-              <Text className="text-2xl leading-none text-text">{'\u2039'}</Text>
+              <Icon lib="Lucide" name="chevron-left" size={22} color={colors.text} />
             </Pressable>
 
             <Avatar name={conversationName} profile={peerProfile} size="md" className="mr-3" />
@@ -897,7 +903,7 @@ useEffect(() => {
               ) : null}
               {timer.timerSeconds ? (
                 <View className="mt-2">
-                  <StatusChip tone="primary" label={`\u23F1 Disappear after ${formatTimer(timer.timerSeconds)}`} />
+                  <StatusChip tone="primary" icon="timer" label={`Disappear after ${formatTimer(timer.timerSeconds)}`} />
                 </View>
               ) : null}
             </View>
@@ -1295,15 +1301,13 @@ useEffect(() => {
                 <Text className="text-[12px] font-semibold uppercase tracking-[1px] text-primary">
                   Replying to {replyTarget.mine ? 'yourself' : conversationName}
                 </Text>
-                <Text className="mt-1 text-[13px] leading-5 text-muted">
-                  {describeMessageForQuote(replyTarget)}
-                </Text>
+                <QuoteLine message={replyTarget} className="mt-1" />
               </View>
               <Pressable
                 onPress={() => setReplyTarget(null)}
                 className="h-8 w-8 items-center justify-center rounded-full bg-background-alt/60 active:opacity-80"
               >
-                <Text className="text-lg leading-none text-text">×</Text>
+                <Icon lib="Lucide" name="x" size={18} color={colors.text} />
               </Pressable>
             </View>
           </View>
@@ -1328,7 +1332,7 @@ useEffect(() => {
               <View className="mt-0.5 h-8 w-1 rounded-full bg-warning" />
               <View className="flex-1">
                 <Text className="text-[12px] font-semibold uppercase tracking-[1px] text-warning">Editing message</Text>
-                <Text className="mt-1 text-[13px] leading-5 text-muted">{describeMessageForQuote(editTarget)}</Text>
+                <QuoteLine message={editTarget} className="mt-1" />
               </View>
               <Pressable
                 onPress={() => {
@@ -1337,7 +1341,7 @@ useEffect(() => {
                 }}
                 className="h-8 w-8 items-center justify-center rounded-full bg-background-alt/60 active:opacity-80"
               >
-                <Text className="text-lg leading-none text-text">×</Text>
+                <Icon lib="Lucide" name="x" size={18} color={colors.text} />
               </Pressable>
             </View>
           </View>
