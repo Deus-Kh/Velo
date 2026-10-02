@@ -13,7 +13,6 @@ import {
   ToastAndroid,
   View,
   Keyboard,
-  BackHandler 
 } from 'react-native';
 import Svg, { Path } from 'react-native-svg';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -35,6 +34,7 @@ import ImageViewer from '../components/ImageViewer';
 import { isAudio, pickImage, sendAttachmentMessage, uploadAttachment } from '../shared/media/attachments';
 import { describeMessage, describeMessageForQuote, type LucideIconName } from '../shared/chat/describeMessage';
 import QuoteLine from '../components/QuoteLine';
+import { useLayeredBackHandler } from '../shared/ui/layeredBack';
 import { Icon } from '../components/Icon';
 import { useThemeColors } from '../theme/useThemeColors';
 import VoiceComposer from '../components/VoiceComposer';
@@ -437,14 +437,27 @@ const { keyboardShown , keyboardHeight } = useKeyboard()
   };
 }, []);
 const hasNavigationButtons = insets.bottom >= 40;
-useEffect(() => {
-  const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
-    onClose();
-    return true; // true = событие обработано, не пропускать дальше
-  });
-
-  return () => subscription.remove();
-}, [onClose]);
+  // Back closes the topmost open layer first; the screen only when nothing is open (A7).
+  // Bottom to top; the image viewer is a Modal and handles Back on its own.
+  useLayeredBackHandler(
+    [
+      { open: Boolean(replyTarget), close: () => setReplyTarget(null) },
+      {
+        open: Boolean(editTarget),
+        close: () => {
+          setEditTarget(null);
+          setText('');
+        },
+      },
+      { open: showComposerActions, close: () => setShowComposerActions(false) },
+      { open: showTimerSheet, close: () => setShowTimerSheet(false) },
+      { open: showReportSheet, close: () => setShowReportSheet(false) },
+      { open: showSearchSheet, close: () => setShowSearchSheet(false) },
+      { open: Boolean(selectedMessageAction), close: () => setSelectedMessageAction(null) },
+      { open: Boolean(forwardTarget), close: () => setForwardTarget(null) },
+    ],
+    onClose,
+  );
   useEffect(() => {
     if (!myUserId) return;
 

@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
-  BackHandler,
   FlatList,
   KeyboardAvoidingView,
   Platform,
@@ -28,6 +27,7 @@ import ImageViewer from '../components/ImageViewer';
 import { isAudio, pickImage, sendAttachmentMessage, uploadAttachment } from '../shared/media/attachments';
 import { describeMessageForQuote } from '../shared/chat/describeMessage';
 import { Icon } from '../components/Icon';
+import { useLayeredBackHandler } from '../shared/ui/layeredBack';
 import { useThemeColors } from '../theme/useThemeColors';
 import VoiceComposer from '../components/VoiceComposer';
 import { uploadVoiceNote, type Recording } from '../shared/media/voiceNotes';
@@ -101,19 +101,22 @@ export default function GroupChatScreen({ groupId, initialName, jumpToMessageId,
     setJumpTarget(null);
   }, [jumpTarget, loading, reversed]);
 
-  useEffect(() => {
-    const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
-      if (sheet || selected || forwardTarget) {
-        setSheet(null);
-        setSelected(null);
-        setForwardTarget(null);
-        return true;
-      }
-      onClose();
-      return true;
-    });
-    return () => subscription.remove();
-  }, [forwardTarget, onClose, selected, sheet]);
+  // Back closes the topmost open layer first; the screen only when nothing is open (A7).
+  useLayeredBackHandler(
+    [
+      {
+        open: Boolean(editTarget),
+        close: () => {
+          setEditTarget(null);
+          setText('');
+        },
+      },
+      { open: Boolean(sheet), close: () => setSheet(null) },
+      { open: Boolean(selected), close: () => setSelected(null) },
+      { open: Boolean(forwardTarget), close: () => setForwardTarget(null) },
+    ],
+    onClose,
+  );
 
   useEffect(() => {
     if (sheet !== 'add') return;
