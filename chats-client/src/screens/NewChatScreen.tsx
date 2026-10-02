@@ -24,6 +24,8 @@ import { userApi, type UserListItem } from '../shared/api/user.api';
 import { conversationsApi, type ConversationListItem } from '../shared/api/conversations.api';
 import { useAuthStore } from '../store/auth.store';
 import { useContactsStore, type SavedContact } from '../store/contacts.store';
+import { useProfilesStore } from '../store/profiles.store';
+import { DIRECTORY_SEARCH_MIN_LENGTH, filterLocalContacts } from '../shared/contacts/searchLocal';
 import { listTrustedPeerUserIds } from '../shared/storage/trustedIdentities';
 import { contactSubtitle, formatHandle, shortSecureId } from '../shared/utils/identity';
 
@@ -41,9 +43,15 @@ type VerifyContactHandler = (params: {
 }) => void;
 
 type DiscoverSection =
-  | { type: 'section'; id: string; title: string; description?: string }
+  | { type: 'section'; id: string; title: string }
   | { type: 'saved'; id: string; contact: SavedContact; verified: boolean; hasConversation: boolean }
+  | { type: 'conversation'; id: string; conversation: ConversationListItem; verified: boolean }
   | { type: 'user'; id: string; user: UserListItem; verified: boolean };
+
+/** What the device holds and can match from the first character (A11); one entry per source, deduplicated by user. */
+type LocalCandidate =
+  | { peerUserId: string; username?: string; displayName?: string; source: 'saved'; contact: SavedContact }
+  | { peerUserId: string; username?: string; displayName?: string; source: 'conversation'; verified: boolean; conversation: ConversationListItem };
 
 type SavedContactEntry = {
   contact: SavedContact;
@@ -73,6 +81,14 @@ function EmptyState({
       <Text className="mt-5 text-center text-xl font-semibold text-text">{title}</Text>
       <Text className="mt-2 text-center text-sm leading-6 text-muted">{description}</Text>
     </View>
+  );
+}
+
+function SearchHint() {
+  return (
+    <Text className="px-6 py-4 text-center text-sm leading-6 text-muted">
+      {`Type ${DIRECTORY_SEARCH_MIN_LENGTH} characters to search the directory`}
+    </Text>
   );
 }
 
@@ -189,11 +205,14 @@ export default function NewChatScreen({
   const savedContactsByUser = useContactsStore((s) => s.savedContactsByUser);
   const saveContact = useContactsStore((s) => s.saveContact);
   const removeSavedContact = useContactsStore((s) => s.removeSavedContact);
+  const profilesByUser = useProfilesStore((s) => s.byUser);
 
   const [q, setQ] = useState('');
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [users, setUsers] = useState<UserListItem[]>([]);
+  // the query the current `users` answer; until it equals the typed query no "not found" is shown
+  const [searchedQuery, setSearchedQuery] = useState<string | null>(null);
   const [contactsLoading, setContactsLoading] = useState(true);
   const [contactsError, setContactsError] = useState<string | null>(null);
   const [conversations, setConversations] = useState<ConversationListItem[]>([]);
@@ -201,7 +220,9 @@ export default function NewChatScreen({
   const [error, setError] = useState<string | null>(null);
 
   const trimmedQuery = useMemo(() => q.trim(), [q]);
-  const canSearch = trimmedQuery.length >= 2;
+  // The device's lists filter from the first character; the directory needs the server's minimum (A11).
+  const searching = trimmedQuery.length >= 1;
+  const directorySearch = trimmedQuery.length >= DIRECTORY_SEARCH_MIN_LENGTH;
   const recentContactIds = useMemo(
     () => (myUserId ? recentContactIdsByUser[myUserId] ?? [] : []),
     [myUserId, recentContactIdsByUser],
@@ -276,77 +297,54 @@ export default function NewChatScreen({
   );
 
   const discoverSections = useMemo<DiscoverSection[]>(() => {
+    if (!searching) return [];
     const sections: DiscoverSection[] = [];
-    const savedResults = savedContacts
-      .filter((contact) => {
-        const query = trimmedQuery.toLowerCase();
-        return (
-          (contact.peerUsername || '').toLowerCase().includes(query)
-        );
-      })
-      .map((contact) => ({
-        type: 'saved' as const,
-        id: `saved-${contact.peerUserId}`,
-        contact,
-        verified: trustedPeerUserIdSet.has(contact.peerUserId),
-        hasConversation: conversations.some(
-          (conversation) => conversation.peerUserId === contact.peerUserId,
-        ),
-      }));
+    const nameOf = (peerUserId: string) => profilesByUser[peerUserId]?.name;
+    const local = filterLocalContacts<LocalCandidate>(trimmedQuery, [
+      ...savedContacts.map((contact) => ({ peerUserId: contact.peerUserId, username: contact.peerUsername, displayName: nameOf(contact.peerUserId), source: 'saved' as const, contact })),
+      ...verifiedConversations.map((conversation) => ({ peerUserId: conversation.peerUserId, username: conversation.peerUsername, displayName: nameOf(conversation.peerUserId), source: 'conversation' as const, verified: true, conversation })),
+      ...recentConversations.map((conversation) => ({ peerUserId: conversation.peerUserId, username: conversation.peerUsername, displayName: nameOf(conversation.peerUserId), source: 'conversation' as const, verified: false, conversation })),
+    ]);
+    const localIds = new Set(local.map((candidate) => candidate.peerUserId));
 
-    if (savedResults.length > 0) {
-      sections.push({
-        type: 'section',
-        id: 'discover-section-saved',
-        title: 'Saved Contacts',
-        description: 'People you saved locally for quick access.',
-      });
-      sections.push(...savedResults);
+    const savedRows: DiscoverSection[] = [];
+    const verifiedRows: DiscoverSection[] = [];
+    const recentRows: DiscoverSection[] = [];
+    for (const candidate of local) {
+      if (candidate.source === 'saved') {
+        savedRows.push({
+          type: 'saved',
+          id: `saved-${candidate.peerUserId}`,
+          contact: candidate.contact,
+          verified: trustedPeerUserIdSet.has(candidate.peerUserId),
+          hasConversation: conversations.some((conversation) => conversation.peerUserId === candidate.peerUserId),
+        });
+      } else if (candidate.verified) {
+        verifiedRows.push({ type: 'conversation', id: `verified-${candidate.peerUserId}`, conversation: candidate.conversation, verified: true });
+      } else {
+        recentRows.push({ type: 'conversation', id: `recent-${candidate.peerUserId}`, conversation: candidate.conversation, verified: false });
+      }
     }
 
-    const verifiedResults = users.filter((user) => trustedPeerUserIdSet.has(user.userId));
-    const unverifiedResults = users.filter(
-      (user) =>
-        !trustedPeerUserIdSet.has(user.userId) &&
-        !savedContactIdSet.has(user.userId),
-    );
-
-    if (verifiedResults.length > 0) {
-      sections.push({
-        type: 'section',
-        id: 'discover-section-verified',
-        title: 'Verified Contacts',
-        description: 'People you already trusted on this device.',
-      });
-      sections.push(
-        ...verifiedResults.map((user) => ({
-          type: 'user' as const,
-          id: `verified-${user.userId}`,
-          user,
-          verified: true,
-        })),
-      );
+    // Directory answers (>= DIRECTORY_SEARCH_MIN_LENGTH characters): anyone not already listed from the device.
+    const directoryRows: DiscoverSection[] = [];
+    for (const user of users) {
+      if (localIds.has(user.userId)) continue;
+      if (trustedPeerUserIdSet.has(user.userId)) verifiedRows.push({ type: 'user', id: `verified-${user.userId}`, user, verified: true });
+      else directoryRows.push({ type: 'user', id: `directory-${user.userId}`, user, verified: false });
     }
 
-    if (unverifiedResults.length > 0) {
-      sections.push({
-        type: 'section',
-        id: 'discover-section-discover',
-        title: verifiedResults.length > 0 ? 'Other Results' : 'Discover',
-        description: 'Start a secure chat with anyone who already has encryption keys.',
-      });
-      sections.push(
-        ...unverifiedResults.map((user) => ({
-          type: 'user' as const,
-          id: `discover-${user.userId}`,
-          user,
-          verified: false,
-        })),
-      );
-    }
-
+    const pushSection = (id: string, title: string, rows: DiscoverSection[]) => {
+      if (rows.length === 0) return;
+      sections.push({ type: 'section', id, title });
+      sections.push(...rows);
+    };
+    pushSection('discover-section-saved', 'Saved contacts', savedRows);
+    pushSection('discover-section-verified', 'Verified contacts', verifiedRows);
+    pushSection('discover-section-recent', 'Recent', recentRows);
+    pushSection('discover-section-directory', 'Directory', directoryRows);
     return sections;
-  }, [conversations, savedContactIdSet, savedContacts, trimmedQuery, trustedPeerUserIdSet, users]);
+  }, [conversations, profilesByUser, recentConversations, savedContacts, searching, trimmedQuery, trustedPeerUserIdSet, users, verifiedConversations]);
 
   const handleShareInvite = useCallback(async () => {
     if (!myUserId) return;
@@ -432,6 +430,7 @@ export default function NewChatScreen({
     try {
       const res = await userApi.getUsers({ q: query || undefined, limit: 50 });
       setUsers(res.data.items);
+      setSearchedQuery(query);
     } catch (e: any) {
       setError(e?.message || 'Failed to load users');
     } finally {
@@ -468,15 +467,16 @@ export default function NewChatScreen({
     try {
       await Promise.all([
         loadContactsOverview(),
-        canSearch
+        directorySearch
           ? userApi.getUsers({ q: trimmedQuery, limit: 50 }).then((res) => {
               setUsers(res.data.items);
+              setSearchedQuery(trimmedQuery);
               setError(null);
             })
           : Promise.resolve(),
       ]);
     } catch (e: any) {
-      if (canSearch) {
+      if (directorySearch) {
         setError(e?.message || 'Failed to refresh users');
       }
     } finally {
@@ -495,9 +495,11 @@ export default function NewChatScreen({
   );
 
   useEffect(() => {
-    if (!canSearch) {
+    if (!directorySearch) {
       setUsers([]);
+      setSearchedQuery(null);
       setError(null);
+      setLoading(false);
       return;
     }
 
@@ -506,7 +508,7 @@ export default function NewChatScreen({
     }, 250);
 
     return () => clearTimeout(timer);
-  }, [trimmedQuery, canSearch]);
+  }, [trimmedQuery, directorySearch]);
 
   return (
     <View className="flex-1 bg-background" style={{ paddingTop: insets.top }}>
@@ -519,7 +521,7 @@ export default function NewChatScreen({
           <TextInput
             value={q}
             onChangeText={setQ}
-            placeholder="Search by username or email"
+            placeholder="Search by username"
             placeholderTextColor="#94A3B8"
             className="py-3 text-[15px] text-text"
             autoCapitalize="none"
@@ -544,7 +546,7 @@ export default function NewChatScreen({
             </View>
           </View>
         ) : null}
-        {myUserId && !canSearch ? (
+        {myUserId && !searching ? (
           <ActionRow
             icon="users"
             title="New group"
@@ -556,7 +558,7 @@ export default function NewChatScreen({
         ) : null}
       </View>
 
-      {!canSearch && !contactsLoading && !contactsError && verifiedConversations.length === 0 ? (
+      {!searching && !contactsLoading && !contactsError && verifiedConversations.length === 0 ? (
         <View className="mx-5 mt-4 rounded-[22px] border border-border bg-surface/88 p-4">
           <Text className="text-[11px] font-semibold uppercase tracking-[1.3px] text-primary">
             Trust First
@@ -568,14 +570,14 @@ export default function NewChatScreen({
         </View>
       ) : null}
 
-      {!canSearch && contactsLoading && (
+      {!searching && contactsLoading && (
         <View className="flex-1 items-center justify-center px-8">
           <ActivityIndicator size="small" color="#2DD4BF" />
           <Text className="mt-4 text-sm text-muted">Loading recent and verified contacts...</Text>
         </View>
       )}
 
-      {!canSearch && !contactsLoading && contactsError && (
+      {!searching && !contactsLoading && contactsError && (
         <View className="mx-5 mt-5 rounded-[24px] border border-danger/40 bg-danger/10 p-5">
           <Text className="text-base font-semibold text-danger">Unable to load contacts overview</Text>
           <Text className="mt-2 text-sm leading-6 text-muted">{contactsError}</Text>
@@ -588,7 +590,7 @@ export default function NewChatScreen({
         </View>
       )}
 
-      {!canSearch && !contactsLoading && !contactsError && (
+      {!searching && !contactsLoading && !contactsError && (
         <FlatList<HomeRow>
           data={[
             ...(savedContactEntries.length > 0
@@ -642,17 +644,7 @@ export default function NewChatScreen({
               const isVerified = item.id === 'verified-header';
 
               return (
-                <SectionEyebrow
-                  title={isSaved ? 'Saved Contacts' : isVerified ? 'Verified Contacts' : 'Recent'}
-                  description={
-                    isSaved
-                      ? 'People you explicitly saved on this device.'
-                      : isVerified
-                      ? 'Trusted identities on this device.'
-                      : 'People you talked to recently.'
-                  }
-                  compact
-                />
+                <SectionEyebrow title={isSaved ? 'Saved contacts' : isVerified ? 'Verified contacts' : 'Recent'} compact />
               );
             }
 
@@ -751,25 +743,63 @@ export default function NewChatScreen({
         </View>
       )}
 
-      {!loading && !error && canSearch && users.length === 0 && (
-        <EmptyState
-          title="No contacts found"
-          description="Try a different username or email."
-        />
-      )}
-
-      {!loading && !error && canSearch && users.length > 0 && (
+      {!loading && !error && searching && (
         <FlatList
           data={discoverSections}
           keyExtractor={(item) => item.id}
+          keyboardShouldPersistTaps="handled"
           refreshControl={
             <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#94A3B8" />
           }
           className="mt-3"
           contentContainerStyle={listContentContainerStyle}
+          ListEmptyComponent={
+            !directorySearch ? (
+              <SearchHint />
+            ) : searchedQuery === trimmedQuery ? (
+              <EmptyState title="No contacts found" description="Try a different username." />
+            ) : null
+          }
+          ListFooterComponent={!directorySearch && discoverSections.length > 0 ? <SearchHint /> : null}
           renderItem={({ item }) => {
             if (item.type === 'section') {
-              return <SectionEyebrow title={item.title} description={item.description} compact />;
+              return <SectionEyebrow title={item.title} compact />;
+            }
+
+            if (item.type === 'conversation') {
+              const conversation = item.conversation;
+              return (
+                <ContactRow
+                  title={conversation.peerUsername}
+                  subtitle={formatHandle(conversation.peerUsername)}
+                  avatarSeed={conversation.peerUsername}
+                  onPress={() =>
+                    onOpenChat({
+                      peerUserId: conversation.peerUserId,
+                      peerUsername: conversation.peerUsername,
+                    })
+                  }
+                  badges={
+                    <>
+                      {item.verified ? <SecurityBadge ready label="Verified" /> : null}
+                      <SecurityBadge
+                        ready={conversation.peerHasPublicKey}
+                        label={conversation.peerHasPublicKey ? 'Ready for E2EE' : 'No public key yet'}
+                      />
+                    </>
+                  }
+                  action={renderVerifyAction({
+                    peerUserId: conversation.peerUserId,
+                    peerUsername: conversation.peerUsername,
+                    verified: item.verified,
+                  })}
+                  topAction={renderSaveAction({
+                    peerUserId: conversation.peerUserId,
+                    peerUsername: conversation.peerUsername,
+                  })}
+                  trailing={<Text className="text-xs font-medium text-muted">Open chat</Text>}
+                />
+              );
             }
 
             if (item.type === 'saved') {
