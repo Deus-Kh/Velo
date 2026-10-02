@@ -313,6 +313,9 @@ export default function MainTabsScreen() {
           ref={pagerRef}
           horizontal
           pagingEnabled
+          // the tab pager: without this, any tap while the keyboard is up (a "Select" in the
+          // new-group panel, "Open chat" after a search) only dismissed the keyboard
+          keyboardShouldPersistTaps="handled"
           bounces={false}
           overScrollMode="never"
           showsHorizontalScrollIndicator={false}

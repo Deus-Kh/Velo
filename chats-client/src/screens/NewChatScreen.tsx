@@ -16,6 +16,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import Clipboard from '@react-native-clipboard/clipboard';
 
 import ScreenHeader from '../components/ScreenHeader';
+import ActionRow from '../components/ActionRow';
 import CreateGroupPanel from '../components/CreateGroupPanel';
 import type { GroupView } from '../shared/api/groups.api';
 import SectionEyebrow from '../components/SectionEyebrow';
@@ -162,7 +163,9 @@ function QuickAction({
   return (
     <Pressable
       onPress={onPress}
-      className="flex-1 rounded-[18px] border border-border bg-surface/88 p-4 active:opacity-80"
+      // no flex-1 here: inside a column that made the card's height zero (roadmap §8.1 A6);
+      // the two-up row wraps each card in its own flex-1 View
+      className="rounded-[18px] border border-border bg-surface/88 p-4 active:opacity-80"
     >
       <Text className="text-sm font-semibold text-text">{title}</Text>
       <Text className="mt-1 text-xs leading-5 text-muted">{subtitle}</Text>
@@ -525,26 +528,31 @@ export default function NewChatScreen({
 
         {myUserId ? (
           <View className="mt-2.5 flex-row gap-3">
-            <QuickAction
-              title="Invite"
-              subtitle="Share your secure ID through another app."
-              onPress={handleShareInvite}
-            />
-            <QuickAction
-              title="Copy ID"
-              subtitle="Copy your invite code for email or notes."
-              onPress={handleCopyInvite}
-            />
+            <View className="flex-1">
+              <QuickAction
+                title="Invite"
+                subtitle="Share your secure ID through another app."
+                onPress={handleShareInvite}
+              />
+            </View>
+            <View className="flex-1">
+              <QuickAction
+                title="Copy ID"
+                subtitle="Copy your invite code for email or notes."
+                onPress={handleCopyInvite}
+              />
+            </View>
           </View>
         ) : null}
-        {myUserId ? (
-          <View className="mt-2.5">
-            <QuickAction
-              title="New group"
-              subtitle="Encrypted group with Sender Keys; every member gets your key over your private session."
-              onPress={() => setShowCreateGroup(true)}
-            />
-          </View>
+        {myUserId && !canSearch ? (
+          <ActionRow
+            icon="users"
+            title="New group"
+            subtitle="Encrypted end to end for every member"
+            onPress={() => setShowCreateGroup(true)}
+            testID="new-group-row"
+            className="mt-2.5"
+          />
         ) : null}
       </View>
 
