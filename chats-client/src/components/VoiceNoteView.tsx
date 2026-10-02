@@ -14,7 +14,7 @@ import {
   AUTO_DOWNLOAD_BYTES,
   downloadAttachment,
 } from '../shared/media/attachments';
-import { hasMedia } from '../shared/media/mediaStore';
+import { hasMedia, isKnownLocal } from '../shared/media/mediaStore';
 import {
   currentPlayback,
   formatDuration,
@@ -87,7 +87,8 @@ export default function VoiceNoteView({
         1,
     ),
   );
-  const [local, setLocal] = useState<boolean | null>(null);
+  // null = not checked yet. An own upload or a blob seen earlier in this process starts as local (A2).
+  const [local, setLocal] = useState<boolean | null>(() => (isKnownLocal(myUserId, meta.blobId) ? true : null));
   const [downloading, setDownloading] = useState<number | null>(null);
   const [error, setError] = useState<{ text: string; warning: boolean } | null>(
     null,
@@ -179,8 +180,9 @@ export default function VoiceNoteView({
   };
 
   const onMainPress = async () => {
-    if (!local) {
-      if (downloading === null) download();
+    if (local !== true) {
+      // a tap while the check is still running does nothing; only a confirmed "not here" downloads
+      if (local === false && downloading === null) download();
       return;
     }
     setError(null);
@@ -233,7 +235,8 @@ export default function VoiceNoteView({
     : mine
     ? 'text-background/80'
     : 'text-muted';
-  const icon = !local
+  const checking = local === null && downloading === null;
+  const icon = local === false
     ? 'download'
     : playback.state === 'playing'
     ? 'pause'
@@ -244,18 +247,22 @@ export default function VoiceNoteView({
       <Pressable
         onPress={onMainPress}
         accessibilityLabel={
-          !local
+          local === false
             ? 'Download the voice message'
+            : checking
+            ? 'Checking the voice message'
             : playback.state === 'playing'
             ? 'Pause'
             : 'Play the voice message'
         }
+        disabled={checking}
         hitSlop={6}
       >
         <View
           className={`h-11 w-11 items-center justify-center rounded-full ${
             mine ? 'bg-background' : 'bg-primary'
           }`}
+          style={checking ? styles.checking : undefined}
         >
           {downloading !== null ? (
             <Text
@@ -353,6 +360,7 @@ export default function VoiceNoteView({
 }
 
 const styles = StyleSheet.create({
+  checking: { opacity: 0.45 },
   bar: { width: BAR_WIDTH, borderRadius: 2, marginRight: BAR_GAP },
   lastBar: { width: BAR_WIDTH, borderRadius: 2 },
 });

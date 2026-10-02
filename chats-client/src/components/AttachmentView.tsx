@@ -3,7 +3,7 @@ import type React from 'react';
 import { Image, Pressable, Text, View } from 'react-native';
 import { protocolErrorCode } from '@velo/protocol';
 import { AUTO_DOWNLOAD_BYTES, downloadAttachment, isImage } from '../shared/media/attachments';
-import { mediaDataUri } from '../shared/media/mediaStore';
+import { cachedMediaDataUri, mediaDataUri } from '../shared/media/mediaStore';
 import type { AttachmentMeta } from '../shared/storage/messageStore';
 import { presentProtocolError } from '../shared/chat/protocolErrors';
 import VoiceNoteView from './VoiceNoteView';
@@ -38,7 +38,11 @@ export default function AttachmentView(props: { myUserId: string; meta: Attachme
 }
 
 function ImageAttachment({ myUserId, meta, mine, onOpen }: { myUserId: string; meta: AttachmentMeta; mine: boolean; onOpen?: (uri: string) => void }) {
-  const [uri, setUri] = useState<string | null>(null);
+  // An own photo (or one shown earlier in this process) renders at once from the cache; otherwise
+  // the placeholder shows the dimensions and size, and offers a download only once the file
+  // check has said the photo is not on the device (A2).
+  const [uri, setUri] = useState<string | null>(() => cachedMediaDataUri(meta.blobId));
+  const [checked, setChecked] = useState<boolean>(() => cachedMediaDataUri(meta.blobId) !== null);
   const [progress, setProgress] = useState<number | null>(null);
   const [error, setError] = useState<{ text: string; warning: boolean } | null>(null);
   const startedRef = useRef(false);
@@ -68,6 +72,7 @@ function ImageAttachment({ myUserId, meta, mine, onOpen }: { myUserId: string; m
     (async () => {
       const local = await mediaDataUri(myUserId, meta.blobId, meta.contentType);
       if (cancelled) return;
+      setChecked(true);
       if (local) setUri(local);
       else if (meta.size <= AUTO_DOWNLOAD_BYTES) download();
     })();
@@ -88,7 +93,7 @@ function ImageAttachment({ myUserId, meta, mine, onOpen }: { myUserId: string; m
   return (
     <Pressable
       onPress={() => {
-        if (progress === null && !uri) download();
+        if (checked && progress === null && !uri) download();
       }}
       accessibilityLabel="Download the attachment"
       className={`mb-1 items-center justify-center rounded-[14px] ${mine ? 'bg-white/15' : 'bg-black/10'}`}
@@ -106,7 +111,7 @@ function ImageAttachment({ myUserId, meta, mine, onOpen }: { myUserId: string; m
       ) : (
         <>
           <Text className={`text-[13px] font-semibold ${mine ? 'text-background' : 'text-text'}`}>{isImage(meta) ? 'Photo' : meta.name || 'File'}</Text>
-          <Text className={`mt-1 text-[12px] ${mine ? 'text-background/75' : 'text-muted'}`}>{`${formatBytes(meta.size)} · tap to download`}</Text>
+          <Text className={`mt-1 text-[12px] ${mine ? 'text-background/75' : 'text-muted'}`}>{checked ? `${formatBytes(meta.size)} · tap to download` : formatBytes(meta.size)}</Text>
         </>
       )}
     </Pressable>
