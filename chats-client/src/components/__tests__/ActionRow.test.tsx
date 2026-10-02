@@ -11,6 +11,9 @@ import ActionRow from '../ActionRow';
 const renderedStrings = (tree: ReactTestRenderer.ReactTestRenderer): string[] =>
   Array.from(new Set(tree.root.findAllByType(Text).map((t) => t.props.children).filter((c): c is string => typeof c === 'string')));
 
+// the first render of a native-preset component loads the RN, NativeWind and icon modules; under a full parallel run that alone can exceed Jest's 5 s default
+jest.setTimeout(30_000);
+
 describe('ActionRow', () => {
   it('renders its title and subtitle and forwards the press', async () => {
     const onPress = jest.fn();

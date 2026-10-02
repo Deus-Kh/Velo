@@ -236,7 +236,7 @@ export default function GroupChatScreen({ groupId, initialName, jumpToMessageId,
                 interfaceDensity === 'compact' ? 'h-9 w-9' : 'h-10 w-10'
               } ${surfaceStyle === 'glass' ? 'bg-background-alt/60' : 'bg-background-alt'}`}
             >
-              <Text className="text-2xl leading-none text-text">{'‹'}</Text>
+              <Icon lib="Lucide" name="chevron-left" size={22} color={colors.text} />
             </Pressable>
 
             <View className="mr-3 h-11 w-11 items-center justify-center rounded-full bg-primary-soft">

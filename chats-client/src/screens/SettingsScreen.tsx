@@ -10,6 +10,8 @@ import { useFocusEffect } from '@react-navigation/native';
 import ScreenHeader from '../components/ScreenHeader';
 import SectionEyebrow from '../components/SectionEyebrow';
 import StatusChip from '../components/StatusChip';
+import { Icon } from '../components/Icon';
+import { useThemeColors } from '../theme/useThemeColors';
 import { useAuthStore } from '../store/auth.store';
 import { wipeLocalStateForUser } from '../shared/storage/localWipe';
 import { saveStoredSession } from '../shared/auth/tokenStore';
@@ -90,6 +92,7 @@ function SettingsRow({
   last?: boolean;
 }) {
   const textTone = danger ? 'text-danger' : 'text-text';
+  const colors = useThemeColors();
 
   return (
     <Pressable
@@ -109,7 +112,7 @@ function SettingsRow({
           <Text className={`text-[13px] ${danger ? 'text-danger' : 'text-muted'}`}>{value}</Text>
         ) : null}
 
-        {trailing ? trailing : onPress ? <Text className="text-base text-muted">›</Text> : null}
+        {trailing ? trailing : onPress ? <Icon lib="Lucide" name="chevron-right" size={18} color={colors.muted} /> : null}
       </View>
     </Pressable>
   );
