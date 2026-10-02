@@ -176,6 +176,36 @@ export async function latestStoredCreatedAt(params: { myUserId: string; peerUser
   return keys.reduce((max, k) => Math.max(max, createdAtFromKey(k, prefix)), 0);
 }
 
+/**
+ * A1: the newest record of every conversation of the user (1:1 peers and
+ * `group:<id>` keys alike), keyed by peer key. One pass over the keys
+ * (whose order is the record time), then one read per conversation.
+ */
+export async function latestStoredMessagesByPeer(myUserId: string): Promise<Record<string, StoredMessage>> {
+  const prefix = `${PREFIX}:${myUserId}:`;
+  const newestKey = new Map<string, { key: string; createdAt: number }>();
+  for (const key of await AsyncStorage.getAllKeys()) {
+    if (!key.startsWith(prefix)) continue;
+    // <peerKey>:<15-digit time>:<id>; the peer key may itself contain ':' (groups), the id never does
+    const m = /^(.*):(\d{15}):([^:]+)$/.exec(key.slice(prefix.length));
+    if (!m) continue;
+    const peerKey = m[1]!;
+    const createdAt = Number(m[2]);
+    const current = newestKey.get(peerKey);
+    if (!current || createdAt > current.createdAt) newestKey.set(peerKey, { key, createdAt });
+  }
+  if (newestKey.size === 0) return {};
+  const mk = await getOrCreateSessionMasterKey(myUserId);
+  const rows = await AsyncStorage.multiGet(Array.from(newestKey.values()).map((v) => v.key));
+  const out: Record<string, StoredMessage> = {};
+  for (const [key, raw] of rows) {
+    const peerKey = Array.from(newestKey.entries()).find(([, v]) => v.key === key)?.[0];
+    const m = openJson<StoredMessage>(mk, raw);
+    if (peerKey && m && typeof m.text === 'string' && typeof m.createdAt === 'number') out[peerKey] = m;
+  }
+  return out;
+}
+
 export async function countStoredMessages(params: { myUserId: string; peerUserId: string }): Promise<number> {
   const prefix = pairPrefix(params.myUserId, params.peerUserId);
   return (await AsyncStorage.getAllKeys()).filter((k) => k.startsWith(prefix)).length;

@@ -18,7 +18,6 @@ const ConversationSchema = new Schema(
     /** T3.2: last sequence number handed out in this conversation (atomic $inc on send). */
     lastSeq: { type: Number, default: 0 },
     lastProtoVersion: { type: Number, required: true, default: 2 },
-    lastMessagePreview: { type: String, default: '(Message)' },
     unreadCounts: {
       type: Map,
       of: Number,

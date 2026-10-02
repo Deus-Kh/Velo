@@ -42,7 +42,6 @@ conversationsRouter.get('/', requireAuth, async (req: AuthedRequest, res) => {
         peerHasPublicKey: !!(peer.identitySignUpdatedAt && peer.identityDhUpdatedAt),
         lastMessageAt: doc.lastMessageAt,
         lastProtoVersion: doc.lastProtoVersion,
-         lastMessagePreview: doc.lastMessagePreview || '(Message)',
         unreadCount: typeof unreadCount === 'number' ? unreadCount : 0,
       };
     })

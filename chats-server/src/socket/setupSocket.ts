@@ -313,7 +313,6 @@ export function setupSocket(io: Server) {
               members: [userId, dto.toUserId].sort(),
               lastMessageAt: Date.now(),
               lastProtoVersion: protoVersion,
-              lastMessagePreview: '(Encrypted message)',
             },
             $inc: {
               lastSeq: 1,
@@ -389,7 +388,7 @@ export function setupSocket(io: Server) {
         });
 
 
-        // Also notify sender about the message for their ChatListScreen lastMessagePreview
+        // Also notify the sender's other sockets, so their chat list moves the conversation up
         io.to(userId).emit("message:new", {
           serverMessageId: String(doc._id),
           conversationId: (doc as any).conversationId,

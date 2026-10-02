@@ -8,7 +8,6 @@ export interface ConversationListItem {
   peerHasPublicKey: boolean;
   lastMessageAt: number;
   lastProtoVersion: number;
-  lastMessagePreview: string;
   unreadCount: number;
 }
 

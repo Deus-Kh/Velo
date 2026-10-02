@@ -33,7 +33,9 @@ import { deleteGroupKeys } from '../shared/storage/senderKeyStore';
 import { selectBlockedIds, useBlocksStore } from '../store/blocks.store';
 import { blockPeer, unblockPeer } from '../shared/chat/blocks';
 import Avatar from '../components/Avatar';
-import { searchStoredMessages, type SearchHit } from '../shared/storage/messageStore';
+import { latestStoredMessagesByPeer, listStoredMessages, searchStoredMessages, type SearchHit, type StoredMessage } from '../shared/storage/messageStore';
+import { subscribeToMessagePatches } from '../shared/chat/actions';
+import { formatConversationPreview, previewSenderLabel } from '../shared/chat/conversationPreview';
 import { useProfilesStore } from '../store/profiles.store';
 import { formatHandle, shortSecureId } from '../shared/utils/identity';
 
@@ -74,12 +76,6 @@ function formatConversationTime(value: number) {
     month: 'short',
     day: 'numeric',
   });
-}
-
-function getConversationPreview(item: ConversationListItem) {
-  const preview = item.lastMessagePreview?.trim();
-  if (preview) return preview;
-  return 'Encrypted conversation ready';
 }
 
 function sortConversations(
@@ -255,6 +251,8 @@ export default function ChatListScreen({
   const blockedIds = useBlocksStore(selectBlockedIds(myUserId));
   const profiles = useProfilesStore((s) => s.byUser); // T7.7
   const [messageHits, setMessageHits] = useState<SearchHit[]>([]); // T7.8
+  // A1: the newest stored record per conversation, read from the sealed store; the server never knows content.
+  const [previews, setPreviews] = useState<Record<string, StoredMessage>>({});
 
   const [q, setQ] = useState('');
   const [loading, setLoading] = useState(true);
@@ -469,6 +467,52 @@ export default function ChatListScreen({
     }
   }, [shouldAllowArchiveReveal]);
 
+  const refreshPreviews = useCallback(async () => {
+    if (!myUserId) return;
+    try {
+      setPreviews(await latestStoredMessagesByPeer(String(myUserId)));
+    } catch (e: any) {
+      console.warn('[ChatListScreen] preview refresh failed:', e?.message || e);
+    }
+  }, [myUserId]);
+
+  // A1: a message sent, edited, deleted or expired anywhere in the app updates its row at once.
+  useEffect(() => {
+    if (!myUserId) return undefined;
+    const me = String(myUserId);
+    return subscribeToMessagePatches((patch) => {
+      if (patch.myUserId !== me) return;
+      listStoredMessages({ myUserId: me, peerUserId: patch.peerKey, limit: 1 })
+        .then(([latest]) => {
+          setPreviews((prev) => {
+            const next = { ...prev };
+            if (latest) next[patch.peerKey] = latest;
+            else delete next[patch.peerKey];
+            return next;
+          });
+        })
+        .catch((e) => console.warn('[ChatListScreen] preview patch failed:', e?.message || e));
+    });
+  }, [myUserId]);
+
+  const previewFor = useCallback(
+    (item: ConversationListItem): string => {
+      const m = previews[item.peerUserId];
+      return m ? formatConversationPreview(m, { senderLabel: previewSenderLabel(m, { isGroup: false }) }) : '';
+    },
+    [previews],
+  );
+
+  const groupPreviewFor = useCallback(
+    (group: GroupView): string => {
+      const m = previews[groupPeerKey(group.groupId)];
+      if (!m) return '';
+      const memberName = m.senderUserId ? profiles[m.senderUserId]?.name?.trim() || group.members.find((member) => member.userId === m.senderUserId)?.username || null : null;
+      return formatConversationPreview(m, { senderLabel: previewSenderLabel(m, { isGroup: true, memberName }) });
+    },
+    [previews, profiles],
+  );
+
   const refreshGroupsSilently = useCallback(async () => {
     try {
       const res = await groupsApi.list();
@@ -485,22 +529,24 @@ export default function ChatListScreen({
       const res = await conversationsApi.list();
       setConversations(res.data.items);
       refreshGroupsSilently();
+      refreshPreviews();
     } catch (e: any) {
       setError(e?.message || 'Failed to load conversations');
     } finally {
       setLoading(false);
     }
-  }, [refreshGroupsSilently]);
+  }, [refreshGroupsSilently, refreshPreviews]);
 
   const refreshConversationsSilently = useCallback(async () => {
     try {
+      refreshPreviews();
       const res = await conversationsApi.list();
       setConversations(res.data.items);
       setError(null);
     } catch (e: any) {
       console.warn('[ChatListScreen] Silent conversation refresh failed:', e?.message || e);
     }
-  }, []);
+  }, [refreshPreviews]);
 
   async function onRefresh() {
     setRefreshing(true);
@@ -929,6 +975,11 @@ export default function ChatListScreen({
                       <Text className="mt-1 text-sm text-muted">
                         {item.group.members.length} member{item.group.members.length === 1 ? '' : 's'}
                       </Text>
+                      {groupPreviewFor(item.group) ? (
+                        <Text numberOfLines={1} className="mt-1 text-sm text-muted">
+                          {groupPreviewFor(item.group)}
+                        </Text>
+                      ) : null}
                     </View>
                   </View>
                 </Pressable>
@@ -980,13 +1031,14 @@ export default function ChatListScreen({
                         </View>
                       </View>
 
-                      <Text
-                        className={`text-sm leading-6 text-muted ${
-                          interfaceDensity === 'compact' ? 'mt-2.5' : 'mt-3'
-                        }`}
-                      >
-                        {getConversationPreview(item.item)}
-                      </Text>
+                      {previewFor(item.item) ? (
+                        <Text
+                          numberOfLines={1}
+                          className={`text-sm leading-6 text-muted ${interfaceDensity === 'compact' ? 'mt-2.5' : 'mt-3'}`}
+                        >
+                          {previewFor(item.item)}
+                        </Text>
+                      ) : null}
 
                       <View
                         className={`flex-row items-center justify-between ${
@@ -1067,13 +1119,14 @@ export default function ChatListScreen({
                     </View>
                   </View>
 
-                  <Text
-                    className={`text-sm leading-6 text-muted ${
-                      interfaceDensity === 'compact' ? 'mt-2.5' : 'mt-3'
-                    }`}
-                  >
-                    {getConversationPreview(item)}
-                  </Text>
+                  {previewFor(item) ? (
+                    <Text
+                      numberOfLines={1}
+                      className={`text-sm leading-6 text-muted ${interfaceDensity === 'compact' ? 'mt-2.5' : 'mt-3'}`}
+                    >
+                      {previewFor(item)}
+                    </Text>
+                  ) : null}
 
                   <View
                     className={`flex-row items-center justify-between ${
@@ -1176,13 +1229,14 @@ export default function ChatListScreen({
                       </View>
                     </View>
 
-                    <Text
-                      className={`text-sm leading-6 text-muted ${
-                        interfaceDensity === 'compact' ? 'mt-2.5' : 'mt-3'
-                      }`}
-                    >
-                      {getConversationPreview(item.item)}
-                    </Text>
+                    {previewFor(item.item) ? (
+                      <Text
+                        numberOfLines={1}
+                        className={`text-sm leading-6 text-muted ${interfaceDensity === 'compact' ? 'mt-2.5' : 'mt-3'}`}
+                      >
+                        {previewFor(item.item)}
+                      </Text>
+                    ) : null}
                   </View>
                 </View>
               </Pressable>
