@@ -1,6 +1,5 @@
 import { useMemo } from 'react';
-import { useColorScheme } from 'react-native';
-import { useAppearanceStore } from '../store/appearance.store';
+import { useResolvedTheme } from './useResolvedTheme';
 import { darkTheme, lightTheme, type ThemeColors } from './theme';
 
 /**
@@ -43,8 +42,6 @@ export function themeColorSet(t: ThemeColors): ThemeColorSet {
 }
 
 export function useThemeColors(): ThemeColorSet {
-  const system = useColorScheme();
-  const preference = useAppearanceStore((s) => s.themePreference);
-  const dark = preference === 'system' ? system === 'dark' : preference === 'dark';
+  const dark = useResolvedTheme() === 'dark';
   return useMemo(() => themeColorSet(dark ? darkTheme : lightTheme), [dark]);
 }

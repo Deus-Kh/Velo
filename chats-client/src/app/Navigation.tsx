@@ -1,5 +1,7 @@
 import { useEffect } from 'react';
-import { NavigationContainer } from '@react-navigation/native';
+import { DarkTheme, DefaultTheme, NavigationContainer } from '@react-navigation/native';
+import { useThemeColors } from '../theme/useThemeColors';
+import { useResolvedTheme } from '../theme/useResolvedTheme';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { useAuthStore } from '../store/auth.store';
 
@@ -26,7 +28,17 @@ const Stack = createNativeStackNavigator<RootStackParamList>();
 
 export default function Navigation() {
   const { isAuthenticated, hydrate, isLoading } = useAuthStore();
-  
+  // A9: the navigator paints every screen's backdrop with the app's theme, so no
+  // light or dark flash from the library's default theme and nothing foreign
+  // shows behind the translucent status bar during transitions.
+  const resolvedTheme = useResolvedTheme();
+  const colors = useThemeColors();
+  const base = resolvedTheme === 'dark' ? DarkTheme : DefaultTheme;
+  const navigationTheme = {
+    ...base,
+    colors: { ...base.colors, background: colors.background, card: colors.surface, text: colors.text, border: colors.border, primary: colors.primary },
+  };
+
   useEffect(() => {
     hydrate();
   }, [hydrate]);
@@ -34,7 +46,7 @@ export default function Navigation() {
   if (isLoading) return null;
 
   return (
-    <NavigationContainer>
+    <NavigationContainer theme={navigationTheme}>
       <Stack.Navigator screenOptions={{ headerShown: false }}>
         {!isAuthenticated ? (
           <>
