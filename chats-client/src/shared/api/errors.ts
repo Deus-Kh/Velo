@@ -9,6 +9,8 @@ export interface ApiErrorShape {
   status: number | null;
   fields: Record<string, string>;
   isNetwork: boolean;
+  /** the server's machine-readable code (e.g. EMAIL_TAKEN), when it sent one */
+  code: string | null;
 }
 
 /**
@@ -19,7 +21,7 @@ export interface ApiErrorShape {
 export function toApiError(e: unknown): ApiErrorShape {
   if (axios.isAxiosError(e)) {
     const status = e.response?.status ?? null;
-    const data = e.response?.data as { error?: unknown; fields?: unknown } | undefined;
+    const data = e.response?.data as { error?: unknown; fields?: unknown; code?: unknown } | undefined;
     const message =
       typeof data?.error === 'string'
         ? data.error
@@ -42,12 +44,12 @@ export function toApiError(e: unknown): ApiErrorShape {
       }
     }
 
-    return { message, status, fields, isNetwork: !e.response };
+    return { message, status, fields, isNetwork: !e.response, code: typeof data?.code === 'string' ? data.code : null };
   }
 
   if (e instanceof Error) {
-    return { message: e.message || 'Something went wrong.', status: null, fields: {}, isNetwork: false };
+    return { message: e.message || 'Something went wrong.', status: null, fields: {}, isNetwork: false, code: null };
   }
 
-  return { message: 'Something went wrong.', status: null, fields: {}, isNetwork: false };
+  return { message: 'Something went wrong.', status: null, fields: {}, isNetwork: false, code: null };
 }
