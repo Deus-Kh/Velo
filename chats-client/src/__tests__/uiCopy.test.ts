@@ -10,7 +10,20 @@ import { join, relative } from 'path';
  * section (B9) will get its own allowance when it exists.
  */
 const ROOT = join(__dirname, '..');
-const SCANNED = ['screens', 'components', join('shared', 'chat', 'protocolErrors.ts'), join('shared', 'chat', 'sessionHealthPresentation.ts')];
+const SCANNED = [
+  'screens',
+  'components',
+  join('shared', 'chat', 'protocolErrors.ts'),
+  join('shared', 'chat', 'sessionHealthPresentation.ts'),
+  // C1: copy that moved out of the screens into pure helpers and hooks
+  join('shared', 'chat', 'presence.ts'),
+  join('shared', 'chat', 'replyPreview.ts'),
+  join('shared', 'chat', 'messageListItems.ts'),
+  join('shared', 'chat', 'conversationList.ts'),
+  join('shared', 'chat', 'useConversationList.ts'),
+  join('shared', 'chat', 'useGroupList.ts'),
+  join('shared', 'settings'),
+];
 const JARGON = /T\d+\.\d+|\bFCM\b|ratchet|pre-?keys?\b|sender keys?\b|master key|\bepochs?\b|X3DH|HKDF|libsignal|double ratchet|diffie[- ]hellman/i;
 
 function listFiles(dir: string): string[] {

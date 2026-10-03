@@ -11,7 +11,6 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useKeyboard } from '@react-native-community/hooks';
 import Clipboard from '@react-native-clipboard/clipboard';
 
 import BottomSheetPanel from '../components/BottomSheetPanel';
@@ -41,6 +40,10 @@ import { deleteGroupKeys } from '../shared/storage/senderKeyStore';
 import { useAppearanceStore } from '../store/appearance.store';
 import { useAuthStore } from '../store/auth.store';
 import { formatHandle } from '../shared/utils/identity';
+import ChatHeader, { HeaderAction } from '../components/chat/ChatHeader';
+import ComposerFrame from '../components/chat/ComposerFrame';
+import SystemMessagePill from '../components/chat/SystemMessagePill';
+import UploadProgressBar, { type UploadState } from '../components/chat/UploadProgressBar';
 
 /**
  * T6.4: one group conversation. Messages are Sender-Key encrypted (T6.1);
@@ -66,7 +69,6 @@ export default function GroupChatScreen({ groupId, initialName, jumpToMessageId,
   const insets = useSafeAreaInsets();
   const interfaceDensity = useAppearanceStore((s) => s.interfaceDensity);
   const surfaceStyle = useAppearanceStore((s) => s.surfaceStyle);
-  const { keyboardShown, keyboardHeight } = useKeyboard();
   const profiles = useProfilesStore((s) => s.byUser);
   const { group, messages, loading, removed, waitingForKeys, securityWarning, timer, setTimer, send, addMembers, removeMember, react, edit, deleteEverywhere, deleteLocally } = useGroupChat(groupId);
 
@@ -75,7 +77,7 @@ export default function GroupChatScreen({ groupId, initialName, jumpToMessageId,
   const [selected, setSelected] = useState<GroupUIMessage | null>(null);
   const [jumpTarget, setJumpTarget] = useState<string | null>(jumpToMessageId ?? null);
   const [viewerUri, setViewerUri] = useState<string | null>(null);
-  const [uploadState, setUploadState] = useState<{ label: string; progress: number | null } | null>(null);
+  const [uploadState, setUploadState] = useState<UploadState | null>(null);
   const colors = useThemeColors();
   const [editTarget, setEditTarget] = useState<GroupUIMessage | null>(null);
   const [forwardTarget, setForwardTarget] = useState<GroupUIMessage | null>(null);
@@ -89,7 +91,6 @@ export default function GroupChatScreen({ groupId, initialName, jumpToMessageId,
   const membersById = useMemo(() => new Map((group?.members ?? []).map((m) => [m.userId, m])), [group]);
   const me = myUserId ? membersById.get(String(myUserId)) : undefined;
   const isAdmin = me?.role === 'admin';
-  const hasNavigationButtons = insets.bottom >= 40;
   const canSend = text.trim().length > 0 && Boolean(group);
   const reversed = useMemo(() => [...messages].reverse(), [messages]);
 
@@ -226,68 +227,43 @@ export default function GroupChatScreen({ groupId, initialName, jumpToMessageId,
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       keyboardVerticalOffset={Platform.OS === 'ios' ? insets.top + 44 : 0}
     >
-      <View className="px-4" style={{ paddingTop: insets.top + 6 }}>
-        <View
-          className={`rounded-[22px] border border-border px-4 ${interfaceDensity === 'compact' ? 'py-2.5' : 'py-3'} ${
-            surfaceStyle === 'glass' ? 'bg-surface/88' : 'bg-surface-elevated'
-          }`}
-        >
-          <View className="flex-row items-center">
-            <Pressable
-              onPress={onClose}
-              className={`mr-3 items-center justify-center rounded-full border border-border active:opacity-80 ${
-                interfaceDensity === 'compact' ? 'h-9 w-9' : 'h-10 w-10'
-              } ${surfaceStyle === 'glass' ? 'bg-background-alt/60' : 'bg-background-alt'}`}
-            >
-              <Icon lib="Lucide" name="chevron-left" size={22} color={colors.text} />
-            </Pressable>
-
-            <View className="mr-3 h-11 w-11 items-center justify-center rounded-full bg-primary-soft">
-              <Text className="text-base font-semibold text-primary">{name.slice(0, 1).toUpperCase()}</Text>
-            </View>
-
-            <View className="flex-1 pr-2">
-              <Text className="text-[20px] font-semibold text-text" numberOfLines={1}>
-                {name}
-              </Text>
-              <Text className="mt-1 text-sm leading-5 text-muted">{subtitle}</Text>
-              {waitingForKeys.length > 0 ? (
-                <View className="mt-2.5">
-                  <StatusChip tone="warning" label={`Waiting for ${waitingForKeys.length} member key${waitingForKeys.length === 1 ? '' : 's'}`} />
-                </View>
-              ) : null}
-              {securityWarning ? (
-                <View className="mt-2">
-                  <StatusChip tone="danger" label={`Bad signature from ${memberName(membersById.get(securityWarning.fromUserId), securityWarning.fromUserId, profiles)}`} />
-                </View>
-              ) : null}
-              {timer.timerSeconds ? (
-                <View className="mt-2">
-                  <StatusChip tone="primary" icon="timer" label={`Disappear after ${formatTimer(timer.timerSeconds)}`} />
-                </View>
-              ) : null}
-            </View>
-
-            <Pressable
-              onPress={() => setSheet('search')}
-              className={`mr-2 rounded-full border border-border px-3 ${interfaceDensity === 'compact' ? 'py-1.5' : 'py-2'} active:opacity-80 ${
-                surfaceStyle === 'glass' ? 'bg-background-alt/60' : 'bg-background-alt'
-              }`}
-            >
-              <Icon lib="Lucide" name="search" size={18} color={colors.text} />
-            </Pressable>
-
-            <Pressable
-              onPress={() => setSheet('members')}
-              className={`rounded-full border border-border px-4 ${interfaceDensity === 'compact' ? 'py-1.5' : 'py-2'} active:opacity-80 ${
-                surfaceStyle === 'glass' ? 'bg-background-alt/60' : 'bg-background-alt'
-              }`}
-            >
-              <Text className="text-sm font-semibold text-text">Members</Text>
-            </Pressable>
+      <ChatHeader
+        onClose={onClose}
+        avatar={
+          <View className="mr-3 h-11 w-11 items-center justify-center rounded-full bg-primary-soft">
+            <Text className="text-base font-semibold text-primary">{name.slice(0, 1).toUpperCase()}</Text>
           </View>
-        </View>
-      </View>
+        }
+        title={name}
+        titleNumberOfLines={1}
+        subtitle={subtitle}
+        actions={
+          <>
+            <HeaderAction onPress={() => setSheet('search')} className="mr-2" horizontalPadding="px-3">
+              <Icon lib="Lucide" name="search" size={18} color={colors.text} />
+            </HeaderAction>
+            <HeaderAction onPress={() => setSheet('members')}>
+              <Text className="text-sm font-semibold text-text">Members</Text>
+            </HeaderAction>
+          </>
+        }
+      >
+        {waitingForKeys.length > 0 ? (
+          <View className="mt-2.5">
+            <StatusChip tone="warning" label={`Waiting for ${waitingForKeys.length} member key${waitingForKeys.length === 1 ? '' : 's'}`} />
+          </View>
+        ) : null}
+        {securityWarning ? (
+          <View className="mt-2">
+            <StatusChip tone="danger" label={`Bad signature from ${memberName(membersById.get(securityWarning.fromUserId), securityWarning.fromUserId, profiles)}`} />
+          </View>
+        ) : null}
+        {timer.timerSeconds ? (
+          <View className="mt-2">
+            <StatusChip tone="primary" icon="timer" label={`Disappear after ${formatTimer(timer.timerSeconds)}`} />
+          </View>
+        ) : null}
+      </ChatHeader>
 
       <View className="flex-1 px-3 pt-3">
         {removed ? (
@@ -316,13 +292,7 @@ export default function GroupChatScreen({ groupId, initialName, jumpToMessageId,
             keyExtractor={(item) => item.id}
             renderItem={({ item, index }) => {
               if (item.system) {
-                return (
-                  <View className="mb-3 items-center">
-                    <View className="rounded-full border border-primary/25 bg-primary/10 px-3 py-1.5">
-                      <Text className="text-xs font-medium text-primary">{item.text}</Text>
-                    </View>
-                  </View>
-                );
+                return <SystemMessagePill text={item.text} />;
               }
               const newer = reversed[index - 1];
               const showSender = !item.mine && (!newer || newer.senderUserId !== item.senderUserId);
@@ -543,10 +513,7 @@ export default function GroupChatScreen({ groupId, initialName, jumpToMessageId,
 
       {/* A8: the search sheet replaces the composer while it is open */}
       {sheet === 'search' ? null : (
-      <View
-        className={`px-3 ${interfaceDensity === 'compact' ? 'pt-1.5' : 'pt-2'}`}
-        style={{ paddingBottom: keyboardShown ? (hasNavigationButtons ? keyboardHeight + insets.bottom + 5 : insets.bottom + 5) : insets.bottom + 8 }}
-      >
+      <ComposerFrame>
         {editTarget ? (
           <View className={`mb-2.5 flex-row items-center rounded-[20px] border border-border px-4 py-2.5 ${surfaceStyle === 'glass' ? 'bg-surface/82' : 'bg-surface-elevated'}`}>
             <View className="mr-3 h-8 w-1 rounded-full bg-warning" />
@@ -562,14 +529,7 @@ export default function GroupChatScreen({ groupId, initialName, jumpToMessageId,
             </Pressable>
           </View>
         ) : null}
-        {uploadState ? (
-          <View className={`mb-2.5 rounded-[20px] border border-border px-4 py-3 ${surfaceStyle === 'glass' ? 'bg-surface/82' : 'bg-surface-elevated'}`}>
-            <Text className="text-[12px] font-semibold uppercase tracking-[1px] text-primary">{uploadState.label}</Text>
-            <View className="mt-2 h-1.5 overflow-hidden rounded-full bg-background-alt/70">
-              <View className="h-full bg-primary" style={{ width: `${Math.round((uploadState.progress ?? 0.05) * 100)}%` }} />
-            </View>
-          </View>
-        ) : null}
+        {uploadState ? <UploadProgressBar state={uploadState} /> : null}
         <VoiceComposer
           active={showMic}
           disabled={Boolean(uploadState)}
@@ -615,7 +575,7 @@ export default function GroupChatScreen({ groupId, initialName, jumpToMessageId,
             </Pressable>
           )}
         </VoiceComposer>
-      </View>
+      </ComposerFrame>
       )}
     </KeyboardAvoidingView>
   );

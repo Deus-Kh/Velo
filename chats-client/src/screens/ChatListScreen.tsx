@@ -10,34 +10,29 @@ import {
   ActivityIndicator,
   RefreshControl,
 } from 'react-native';
-import { useFocusEffect } from '@react-navigation/native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import BottomSheetPanel from '../components/BottomSheetPanel';
 import ScreenHeader from '../components/ScreenHeader';
 import SectionEyebrow from '../components/SectionEyebrow';
-import StatusChip from '../components/StatusChip';
-import { conversationsApi, type ConversationListItem } from '../shared/api/conversations.api';
-import { messagesApi } from '../shared/api/messages.api';
-import { userApi, type UserListItem } from '../shared/api/user.api';
+import type { ConversationListItem } from '../shared/api/conversations.api';
 import { useAuthStore } from '../store/auth.store';
-import { ensureSocketConnected, getSocket } from '../shared/socket/socket';
 import { useAppearanceStore } from '../store/appearance.store';
 import { useChatListStore } from '../store/chat-list.store';
 import { useAppUiStore } from '../store/app-ui.store';
-import { ingestLiveGroupMessage, ingestLiveMessage } from '../shared/notifications/pushIngest';
-import { groupPeerKey, groupsApi, type GroupView } from '../shared/api/groups.api';
-import { ensureOwnSenderKey } from '../shared/chat/groupKeys';
-import { deleteGroupKeys } from '../shared/storage/senderKeyStore';
 import { selectBlockedIds, useBlocksStore } from '../store/blocks.store';
 import { blockPeer, unblockPeer } from '../shared/chat/blocks';
-import Avatar from '../components/Avatar';
-import { latestStoredMessagesByPeer, listStoredMessages, searchStoredMessages, type SearchHit, type StoredMessage } from '../shared/storage/messageStore';
-import { subscribeToMessagePatches } from '../shared/chat/actions';
-import { formatConversationPreview, previewSenderLabel } from '../shared/chat/conversationPreview';
 import { useProfilesStore } from '../store/profiles.store';
-import { formatHandle, shortSecureId } from '../shared/utils/identity';
+import ArchivedRow from '../components/chatlist/ArchivedRow';
+import ConversationActionsSheet from '../components/chatlist/ConversationActionsSheet';
+import ConversationRow from '../components/chatlist/ConversationRow';
+import GroupRow from '../components/chatlist/GroupRow';
+import MessageHitRow from '../components/chatlist/MessageHitRow';
+import UserRow from '../components/chatlist/UserRow';
+import { ChatListSkeleton, EmptyState, InlineSearchLoading } from '../components/chatlist/ChatListStates';
+import { buildHomeListItems, buildSearchResultItems, sortConversations } from '../shared/chat/conversationList';
+import { useConversationList } from '../shared/chat/useConversationList';
+import { useGroupList } from '../shared/chat/useGroupList';
 
 type ChatOpenHandler = (chat: { peerUserId: string; peerUsername?: string; jumpToMessageId?: string }) => void;
 type GroupOpenHandler = (group: { groupId: string; name?: string; jumpToMessageId?: string }) => void;
@@ -49,182 +44,16 @@ type SelectedConversationAction = {
   unreadCount: number;
 };
 
-type SearchResultListItem =
-  | { type: 'section'; id: string; label: string }
-  | { type: 'conversation'; id: string; item: ConversationListItem }
-  | { type: 'user'; id: string; item: UserListItem }
-  | { type: 'message'; id: string; hit: SearchHit; title: string };
-
-type HomeListItem =
-  | { type: 'section'; id: string; label: string }
-  | { type: 'conversation'; id: string; item: ConversationListItem }
-  | { type: 'group'; id: string; group: GroupView };
-
-function formatConversationTime(value: number) {
-  const date = new Date(value);
-  const now = new Date();
-  const sameDay = date.toDateString() === now.toDateString();
-
-  if (sameDay) {
-    return date.toLocaleTimeString([], {
-      hour: '2-digit',
-      minute: '2-digit',
-    });
-  }
-
-  return date.toLocaleDateString([], {
-    month: 'short',
-    day: 'numeric',
-  });
-}
-
-function sortConversations(
-  items: ConversationListItem[],
-  pinnedConversationIds: string[],
-) {
-  const pinnedSet = new Set(pinnedConversationIds);
-
-  return [...items].sort((a, b) => {
-    const aPinned = pinnedSet.has(a.conversationId) ? 1 : 0;
-    const bPinned = pinnedSet.has(b.conversationId) ? 1 : 0;
-
-    if (aPinned !== bPinned) {
-      return bPinned - aPinned;
-    }
-
-    return b.lastMessageAt - a.lastMessageAt;
-  });
-}
-
-function SecurityBadge({
-  ready,
-  label,
-}: {
-  ready: boolean;
-  label: string;
-}) {
-  return (
-    <StatusChip label={label} tone={ready ? 'primary' : 'warning'} />
-  );
-}
-
-function EmptyState({
-  title,
-  description,
-}: {
-  title: string;
-  description: string;
-}) {
-  return (
-    <View className="flex-1 items-center justify-center px-8 py-16">
-      <View className="h-16 w-16 items-center justify-center rounded-full bg-surface-elevated border border-border">
-        <View className="h-6 w-6 rounded-full bg-primary/30" />
-      </View>
-      <Text className="mt-5 text-center text-xl font-semibold text-text">{title}</Text>
-      <Text className="mt-2 text-center text-sm leading-6 text-muted">{description}</Text>
-    </View>
-  );
-}
-
-function ChatListSkeleton({
-  compact,
-}: {
-  compact: boolean;
-}) {
-  const items = compact ? [0, 1, 2, 3] : [0, 1, 2];
-
-  return (
-    <View className="mt-4 px-4">
-      {items.map((item) => (
-        <View
-          key={item}
-          className={`mb-3 rounded-[22px] border border-border bg-surface-elevated ${
-            compact ? 'p-3.5' : 'p-4'
-          }`}
-        >
-          <View className="flex-row items-start">
-            <View className={`mr-4 rounded-full bg-background-alt/80 ${compact ? 'h-12 w-12' : 'h-14 w-14'}`} />
-
-            <View className="flex-1">
-              <View className="flex-row items-start justify-between gap-3">
-                <View className="flex-1">
-                  <View className="h-4 w-28 rounded-full bg-background-alt/80" />
-                  <View className="mt-2 h-3.5 w-36 rounded-full bg-background-alt/65" />
-                </View>
-                <View className="h-3.5 w-12 rounded-full bg-background-alt/65" />
-              </View>
-
-              <View className={`h-3.5 rounded-full bg-background-alt/60 ${compact ? 'mt-3 w-[72%]' : 'mt-4 w-[76%]'}`} />
-
-              <View className={`flex-row items-center justify-between ${compact ? 'mt-3' : 'mt-4'}`}>
-                <View className="h-7 w-32 rounded-full bg-background-alt/75" />
-                <View className="h-3.5 w-24 rounded-full bg-background-alt/60" />
-              </View>
-            </View>
-          </View>
-        </View>
-      ))}
-    </View>
-  );
-}
-
-function InlineSearchLoading() {
-  return (
-    <View className="mx-4 mt-4 flex-row items-center rounded-[18px] border border-border bg-surface-elevated px-4 py-3">
-      <ActivityIndicator size="small" color="#2DD4BF" />
-      <Text className="ml-3 text-sm text-muted">Searching encrypted contacts...</Text>
-    </View>
-  );
-}
-
 const ARCHIVE_REVEAL_DRAG_TRIGGER = 28;
 const ARCHIVE_REVEAL_HIT_ZONE_HEIGHT = 28;
 const ARCHIVE_REVEAL_HORIZONTAL_TOLERANCE = 10;
 
-function ArchivedRow({
-  count,
-  unreadCount,
-  compact,
-  onPress,
-}: {
-  count: number;
-  unreadCount: number;
-  compact: boolean;
-  onPress: () => void;
-}) {
-  return (
-    <Pressable
-      onPress={onPress}
-      className={`mx-4 mt-4 flex-row items-center rounded-[18px] border border-border bg-surface-elevated active:opacity-80 ${
-        compact ? 'px-3 py-2.5' : 'px-3.5 py-3'
-      }`}
-    >
-      <View className={`mr-3 items-center justify-center rounded-full border border-border bg-background-alt/70 ${compact ? 'h-9 w-9' : 'h-10 w-10'}`}>
-        <Text className="text-[16px] text-muted">⌄</Text>
-      </View>
-
-      <View className="flex-1">
-        <Text className="text-[15px] font-semibold text-text">Archived</Text>
-        <Text className="mt-0.5 text-[12px] text-muted">
-          {count} chat{count === 1 ? '' : 's'} stored outside the main list
-        </Text>
-      </View>
-
-      <View className="items-end">
-        {unreadCount > 0 ? (
-          <View className="min-w-6 rounded-full bg-primary px-2 py-[5px]">
-            <Text className="text-center text-xs font-semibold text-background">
-              {unreadCount}
-            </Text>
-          </View>
-        ) : (
-          <Text className="text-[12px] font-medium text-muted">Open</Text>
-        )}
-      </View>
-    </Pressable>
-  );
-}
-
+/**
+ * The home list: groups, pinned and regular chats, the archive, and the
+ * search over contacts, the directory and stored messages. The data lives
+ * in `useConversationList` / `useGroupList`; the rows and the sheet are
+ * components under `components/chatlist` (C1).
+ */
 export default function ChatListScreen({
   onOpenChat,
   onOpenGroup,
@@ -241,7 +70,6 @@ export default function ChatListScreen({
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
   const myUserId = useAuthStore((s) => s.userId);
   const interfaceDensity = useAppearanceStore((s) => s.interfaceDensity);
-  const surfaceStyle = useAppearanceStore((s) => s.surfaceStyle);
   const pinnedConversationIds = useChatListStore((s) => s.pinnedConversationIds);
   const archivedConversationIds = useChatListStore((s) => s.archivedConversationIds);
   const togglePinnedConversation = useChatListStore((s) => s.togglePinnedConversation);
@@ -249,21 +77,11 @@ export default function ChatListScreen({
   const activeChatPeerUserId = useAppUiStore((s) => s.activeChatPeerUserId);
   const blockedIds = useBlocksStore(selectBlockedIds(myUserId));
   const profiles = useProfilesStore((s) => s.byUser); // T7.7
-  const [messageHits, setMessageHits] = useState<SearchHit[]>([]); // T7.8
-  // A1: the newest stored record per conversation, read from the sealed store; the server never knows content.
-  const [previews, setPreviews] = useState<Record<string, StoredMessage>>({});
 
   const [q, setQ] = useState('');
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [conversations, setConversations] = useState<ConversationListItem[]>([]);
-  const [groups, setGroups] = useState<GroupView[]>([]);
-  const [searchItems, setSearchItems] = useState<UserListItem[]>([]);
-  const [error, setError] = useState<string | null>(null);
   const [selectedConversationAction, setSelectedConversationAction] =
     useState<SelectedConversationAction | null>(null);
   const [showArchivedView, setShowArchivedView] = useState(false);
-  const conversationsRef = useRef<ConversationListItem[]>([]);
   const homeListOffsetRef = useRef(0);
   const archiveRevealTriggeredRef = useRef(false);
   const [archivePeekVisible, setArchivePeekVisible] = useState(false);
@@ -274,6 +92,32 @@ export default function ChatListScreen({
     () => trimmedQuery.length === 0 || trimmedQuery.length >= 2,
     [trimmedQuery]
   );
+
+  const groupList = useGroupList({ myUserId, activeChatPeerUserId });
+  const { groups } = groupList;
+  const {
+    conversations,
+    loading,
+    error,
+    refreshing,
+    searchItems,
+    messageHits,
+    previewFor,
+    groupPreviewFor,
+    refreshConversationsSilently,
+    onRefresh,
+    markConversationRead,
+  } = useConversationList({
+    myUserId,
+    isAuthenticated,
+    activeChatPeerUserId,
+    trimmedQuery,
+    showingSearch,
+    canSearch,
+    recentlyClosedChatPeerUserId,
+    onHandledClosedChat,
+    groupList,
+  });
 
   const headerSubtitle = showingSearch
     ? 'Find a contact and open an encrypted conversation.'
@@ -305,38 +149,10 @@ export default function ChatListScreen({
       ),
     [archivedConversationIds, sortedConversations],
   );
-  const homeListItems = useMemo(() => {
-    const items: HomeListItem[] = [];
-    if (groups.length > 0) {
-      items.push({ type: 'section', id: 'section-groups', label: 'Groups' });
-      [...groups]
-        .sort((a, b) => b.lastMessageAt - a.lastMessageAt)
-        .forEach((group) => items.push({ type: 'group', id: `group-${group.groupId}`, group }));
-    }
-    const pinnedSet = new Set(pinnedConversationIds);
-    const pinned = activeConversations.filter((item) => pinnedSet.has(item.conversationId));
-    const regular = activeConversations.filter((item) => !pinnedSet.has(item.conversationId));
-
-    if (pinned.length > 0) {
-      items.push({ type: 'section', id: 'section-pinned', label: 'Pinned' });
-      pinned.forEach((item) => {
-        items.push({ type: 'conversation', id: `conversation-${item.conversationId}`, item });
-      });
-    }
-
-    if (regular.length > 0) {
-      items.push({
-        type: 'section',
-        id: pinned.length > 0 ? 'section-all-chats' : 'section-chats',
-        label: pinned.length > 0 ? 'All Chats' : 'Chats',
-      });
-      regular.forEach((item) => {
-        items.push({ type: 'conversation', id: `conversation-${item.conversationId}`, item });
-      });
-    }
-
-    return items;
-  }, [activeConversations, groups, pinnedConversationIds]);
+  const homeListItems = useMemo(
+    () => buildHomeListItems({ groups, activeConversations, pinnedConversationIds }),
+    [activeConversations, groups, pinnedConversationIds],
+  );
   const matchingConversations = useMemo(() => {
     if (!showingSearch) return [];
 
@@ -350,75 +166,10 @@ export default function ChatListScreen({
     const existingPeerIds = new Set(sortedConversations.map((item) => item.peerUserId));
     return searchItems.filter((item) => !existingPeerIds.has(item.userId));
   }, [searchItems, sortedConversations]);
-  // T7.8: the local store is searched alongside contacts (debounced; sealed records are decrypted on the fly).
-  useEffect(() => {
-    if (!showingSearch || !canSearch || !myUserId) {
-      setMessageHits([]);
-      return;
-    }
-    let cancelled = false;
-    const handle = setTimeout(async () => {
-      try {
-        const hits = await searchStoredMessages({ myUserId: String(myUserId), query: trimmedQuery, maxResults: 30 });
-        if (!cancelled) setMessageHits(hits);
-      } catch (e) {
-        console.warn('[ChatListScreen] message search failed:', e);
-      }
-    }, 250);
-    return () => {
-      cancelled = true;
-      clearTimeout(handle);
-    };
-  }, [canSearch, myUserId, showingSearch, trimmedQuery]);
-
-  const searchResultItems = useMemo(() => {
-    const items: SearchResultListItem[] = [];
-
-    if (matchingConversations.length > 0) {
-      items.push({
-        type: 'section',
-        id: 'section-existing-chats',
-        label: 'Existing Chats',
-      });
-
-      matchingConversations.forEach((item) => {
-        items.push({
-          type: 'conversation',
-          id: `conversation-${item.conversationId}`,
-          item,
-        });
-      });
-    }
-
-    if (matchingSearchContacts.length > 0) {
-      items.push({
-        type: 'section',
-        id: 'section-new-contacts',
-        label: matchingConversations.length > 0 ? 'New Contacts' : 'Contacts',
-      });
-
-      matchingSearchContacts.forEach((item) => {
-        items.push({
-          type: 'user',
-          id: `user-${item.userId}`,
-          item,
-        });
-      });
-    }
-
-    if (messageHits.length > 0) {
-      items.push({ type: 'section', id: 'section-messages', label: 'Messages' });
-      for (const hit of messageHits) {
-        const isGroup = hit.peerKey.startsWith('group:');
-        const title = isGroup
-          ? groups.find((g) => 'group:' + g.groupId === hit.peerKey)?.name ?? 'Group'
-          : profiles[hit.peerKey]?.name?.trim() || sortedConversations.find((c) => c.peerUserId === hit.peerKey)?.peerUsername || hit.peerKey;
-        items.push({ type: 'message', id: `message-${hit.peerKey}-${hit.message.id}`, hit, title });
-      }
-    }
-
-    return items;
-  }, [groups, matchingConversations, matchingSearchContacts, messageHits, profiles, sortedConversations]);
+  const searchResultItems = useMemo(
+    () => buildSearchResultItems({ matchingConversations, matchingSearchContacts, messageHits, groups, profiles, sortedConversations }),
+    [groups, matchingConversations, matchingSearchContacts, messageHits, profiles, sortedConversations],
+  );
   const showInitialConversationSkeleton = loading && !showingSearch && conversations.length === 0;
   const showInlineSearchLoading = loading && showingSearch;
   const shouldAllowArchiveReveal =
@@ -457,126 +208,10 @@ export default function ChatListScreen({
   );
 
   useEffect(() => {
-    conversationsRef.current = conversations;
-  }, [conversations]);
-
-  useEffect(() => {
     if (!shouldAllowArchiveReveal) {
       setArchivePeekVisible(false);
     }
   }, [shouldAllowArchiveReveal]);
-
-  const refreshPreviews = useCallback(async () => {
-    if (!myUserId) return;
-    try {
-      setPreviews(await latestStoredMessagesByPeer(String(myUserId)));
-    } catch (e: any) {
-      console.warn('[ChatListScreen] preview refresh failed:', e?.message || e);
-    }
-  }, [myUserId]);
-
-  // A1: a message sent, edited, deleted or expired anywhere in the app updates its row at once.
-  useEffect(() => {
-    if (!myUserId) return undefined;
-    const me = String(myUserId);
-    return subscribeToMessagePatches((patch) => {
-      if (patch.myUserId !== me) return;
-      listStoredMessages({ myUserId: me, peerUserId: patch.peerKey, limit: 1 })
-        .then(([latest]) => {
-          setPreviews((prev) => {
-            const next = { ...prev };
-            if (latest) next[patch.peerKey] = latest;
-            else delete next[patch.peerKey];
-            return next;
-          });
-        })
-        .catch((e) => console.warn('[ChatListScreen] preview patch failed:', e?.message || e));
-    });
-  }, [myUserId]);
-
-  const previewFor = useCallback(
-    (item: ConversationListItem): string => {
-      const m = previews[item.peerUserId];
-      return m ? formatConversationPreview(m, { senderLabel: previewSenderLabel(m, { isGroup: false }) }) : '';
-    },
-    [previews],
-  );
-
-  const groupPreviewFor = useCallback(
-    (group: GroupView): string => {
-      const m = previews[groupPeerKey(group.groupId)];
-      if (!m) return '';
-      const memberName = m.senderUserId ? profiles[m.senderUserId]?.name?.trim() || group.members.find((member) => member.userId === m.senderUserId)?.username || null : null;
-      return formatConversationPreview(m, { senderLabel: previewSenderLabel(m, { isGroup: true, memberName }) });
-    },
-    [previews, profiles],
-  );
-
-  const refreshGroupsSilently = useCallback(async () => {
-    try {
-      const res = await groupsApi.list();
-      setGroups(res.data.items);
-    } catch (e: any) {
-      console.warn('[ChatListScreen] group list refresh failed:', e?.message || e);
-    }
-  }, []);
-
-  const loadConversations = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const res = await conversationsApi.list();
-      setConversations(res.data.items);
-      refreshGroupsSilently();
-      refreshPreviews();
-    } catch (e: any) {
-      setError(e?.message || 'Failed to load conversations');
-    } finally {
-      setLoading(false);
-    }
-  }, [refreshGroupsSilently, refreshPreviews]);
-
-  const refreshConversationsSilently = useCallback(async () => {
-    try {
-      refreshPreviews();
-      const res = await conversationsApi.list();
-      setConversations(res.data.items);
-      setError(null);
-    } catch (e: any) {
-      console.warn('[ChatListScreen] Silent conversation refresh failed:', e?.message || e);
-    }
-  }, [refreshPreviews]);
-
-  async function onRefresh() {
-    setRefreshing(true);
-    try {
-      if (showingSearch && trimmedQuery.length >= 2) {
-        const res = await userApi.getUsers({ q: trimmedQuery, limit: 50 });
-        setSearchItems(res.data.items);
-      } else {
-        const res = await conversationsApi.list();
-        setConversations(res.data.items);
-      }
-      setError(null);
-    } catch (e: any) {
-      setError(e?.message || 'Failed to refresh data');
-    } finally {
-      setRefreshing(false);
-    }
-  }
-
-  async function loadUsers(query: string) {
-    setLoading(true);
-    setError(null);
-    try {
-      const res = await userApi.getUsers({ q: query || undefined, limit: 50 });
-      setSearchItems(res.data.items);
-    } catch (e: any) {
-      setError(e?.message || 'Failed to load users');
-    } finally {
-      setLoading(false);
-    }
-  }
 
   const handleOpenConversationActions = useCallback((item: ConversationListItem) => {
     setSelectedConversationAction({
@@ -596,217 +231,19 @@ export default function ChatListScreen({
 
     const { conversationId, peerUserId } = selectedConversationAction;
 
-    setConversations((prev) =>
-      prev.map((item) =>
-        item.conversationId === conversationId ? { ...item, unreadCount: 0 } : item,
-      ),
-    );
+    const work = markConversationRead(conversationId, peerUserId);
     setSelectedConversationAction(null);
+    await work;
+  }, [markConversationRead, selectedConversationAction]);
 
-    await Promise.allSettled([
-      conversationsApi.markAsRead(peerUserId),
-      messagesApi.markAsRead(conversationId),
-    ]);
-
-    try {
-      await ensureSocketConnected();
-      const socket = getSocket();
-      socket.emit('message:read', { conversationId });
-    } catch (e) {
-      console.warn('[ChatListScreen] Failed to emit message:read:', (e as any)?.message || e);
-    }
-  }, [selectedConversationAction]);
-
-  useEffect(() => {
-    if (!recentlyClosedChatPeerUserId) return;
-
-    setConversations((prev) =>
-      prev.map((conv) =>
-        conv.peerUserId === recentlyClosedChatPeerUserId
-          ? { ...conv, unreadCount: 0 }
-          : conv
-      )
-    );
-
-    refreshConversationsSilently();
-    onHandledClosedChat();
-  }, [onHandledClosedChat, recentlyClosedChatPeerUserId, refreshConversationsSilently]);
-
-  useEffect(() => {
-    loadConversations();
-  }, [loadConversations]);
-
-  useFocusEffect(
-    useCallback(() => {
-      loadConversations();
-    }, [loadConversations])
+  const handleToggleBlock = useCallback(
+    (peer: string) => {
+      if (!myUserId) return;
+      const action = blockedIds.includes(peer) ? unblockPeer(myUserId, peer) : blockPeer(myUserId, peer);
+      action.then(refreshConversationsSilently).catch((e) => console.warn('[ChatListScreen] block change failed:', e));
+    },
+    [blockedIds, myUserId, refreshConversationsSilently],
   );
-
-  useEffect(() => {
-    if (!isAuthenticated) return;
-
-    let unsubscribed = false;
-    let cleanup: (() => void) | undefined;
-    let retryTimeout: ReturnType<typeof setTimeout> | null = null;
-
-    const setupListener = async () => {
-      try {
-        const socket = await ensureSocketConnected();
-        if (unsubscribed) return;
-
-        const handler = (evt: any) => {
-          if (!evt?.fromUserId) return;
-          // T6.4: a group copy; the open group screen ingests its own, the rest is stored and notified here.
-          if (evt.g1 && evt.groupId) {
-            const groupOpen = activeChatPeerUserId === groupPeerKey(String(evt.groupId));
-            if (!groupOpen && myUserId && evt.fromUserId !== myUserId) {
-              ingestLiveGroupMessage({
-                myUserId,
-                item: {
-                  serverMessageId: String(evt.serverMessageId),
-                  conversationId: evt.conversationId,
-                  fromUserId: String(evt.fromUserId),
-                  toUserId: String(evt.toUserId ?? myUserId),
-                  groupId: String(evt.groupId),
-                  g1: evt.g1,
-                  epoch: typeof evt.epoch === 'number' ? evt.epoch : null,
-                  clientMessageId: String(evt.clientMessageId ?? ''),
-                  createdAt: Number(evt.createdAt ?? Date.now()),
-                  seq: typeof evt.seq === 'number' ? evt.seq : null,
-                  status: evt.status,
-                },
-              }).catch((ingestError) => {
-                console.warn('[ChatListScreen] Failed to ingest live group message:', ingestError);
-              });
-            }
-            setGroups((prev) => prev.map((g) => (g.groupId === String(evt.groupId) ? { ...g, lastMessageAt: Number(evt.createdAt ?? Date.now()) } : g)));
-            return;
-          }
-          if (evt.fromUserId === myUserId) {
-            refreshConversationsSilently();
-            return;
-          }
-
-          const foundConversation = conversationsRef.current.some(
-            (conv) =>
-              conv.conversationId === evt.conversationId ||
-              conv.peerUserId === evt.fromUserId
-          );
-
-          setConversations((prev) => {
-            const next = prev.map((conv) => {
-              if (
-                conv.conversationId !== evt.conversationId &&
-                conv.peerUserId !== evt.fromUserId
-              ) {
-                return conv;
-              }
-
-              return {
-                ...conv,
-                unreadCount:
-                  typeof evt.unreadCount === 'number'
-                    ? evt.unreadCount
-                    : (conv.unreadCount ?? 0) + 1,
-                lastMessageAt: evt.createdAt ?? Date.now(),
-              };
-            });
-
-            if (!foundConversation) return prev;
-
-            return next;
-          });
-
-          // T3.3: a message for a chat that is not open is decrypted, stored and acked
-          // here (the open chat handles its own), then notified: sender name from local
-          // data, text only if the user enabled previews (pushPolicy decides).
-          const isCurrentChatOpen = activeChatPeerUserId === evt.fromUserId;
-          if (!isCurrentChatOpen && myUserId && evt.protoVersion === 4 && evt.v4) {
-            ingestLiveMessage({
-              myUserId,
-              item: {
-                serverMessageId: String(evt.serverMessageId),
-                conversationId: evt.conversationId,
-                fromUserId: String(evt.fromUserId),
-                toUserId: String(evt.toUserId ?? myUserId),
-                protoVersion: 4,
-                v4: evt.v4,
-                initPacket: evt.initPacket ?? null,
-                replyTo: evt.replyTo ?? null,
-                clientMessageId: String(evt.clientMessageId ?? ''),
-                createdAt: Number(evt.createdAt ?? Date.now()),
-                seq: typeof evt.seq === 'number' ? evt.seq : null,
-                status: evt.status,
-                deliveredAt: evt.deliveredAt ?? null,
-                readAt: evt.readAt ?? null,
-              },
-            }).catch((ingestError) => {
-              console.warn('[ChatListScreen] Failed to ingest live message:', ingestError);
-            });
-          }
-
-          refreshConversationsSilently();
-        };
-
-        // T6.5: a membership change rotates our sender key at once (the new key is distributed on the
-        // next open or send); being removed wipes everything this device holds for the group.
-        const onGroupChanged = (evt: any) => {
-          const groupId = String(evt?.groupId ?? '');
-          if (!groupId || !myUserId) return;
-          const gone = (evt?.change?.type === 'removed' || evt?.change?.type === 'left') && Array.isArray(evt?.change?.userIds) && evt.change.userIds.includes(myUserId);
-          const work = gone ? deleteGroupKeys(myUserId, groupId) : typeof evt?.epoch === 'number' ? ensureOwnSenderKey({ myUserId, groupId, epoch: evt.epoch }).then(() => undefined) : Promise.resolve();
-          work.catch((e) => console.warn('[ChatListScreen] group key update failed:', e)).finally(refreshGroupsSilently);
-        };
-        socket.on('message:new', handler);
-        socket.on('connect', refreshConversationsSilently);
-        socket.on('user:deleted', refreshConversationsSilently); // T7.6: the pair's conversation is gone server-side
-        socket.on('group:changed', onGroupChanged);
-        cleanup = () => {
-          socket.off('message:new', handler);
-          socket.off('connect', refreshConversationsSilently);
-          socket.off('user:deleted', refreshConversationsSilently);
-          socket.off('group:changed', onGroupChanged);
-        };
-      } catch (e) {
-        console.warn('[ChatListScreen] Socket not ready for message listener:', (e as any)?.message);
-        if (!unsubscribed) {
-          retryTimeout = setTimeout(() => {
-            setupListener();
-          }, 400);
-        }
-      }
-    };
-
-    setupListener();
-
-    return () => {
-      unsubscribed = true;
-      if (retryTimeout) {
-        clearTimeout(retryTimeout);
-      }
-      cleanup?.();
-    };
-  }, [
-    activeChatPeerUserId,
-    isAuthenticated,
-    myUserId,
-    refreshConversationsSilently,
-    refreshGroupsSilently,
-  ]);
-
-  useEffect(() => {
-    if (!canSearch) return;
-
-    const timer = setTimeout(() => {
-      if (showingSearch) {
-        loadUsers(trimmedQuery);
-      } else {
-        loadConversations();
-      }
-    }, 250);
-
-    return () => clearTimeout(timer);
-  }, [trimmedQuery, showingSearch, canSearch, loadConversations]);
 
   return (
     <View className="flex-1 bg-background" style={{ paddingTop: insets.top }}>
@@ -938,44 +375,19 @@ export default function ChatListScreen({
               item.type === 'section' ? (
                 <SectionEyebrow title={item.label} compact />
               ) : item.type === 'group' ? (
-                <Pressable
+                <GroupRow
+                  group={item.group}
+                  preview={groupPreviewFor(item.group)}
                   onPress={() => onOpenGroup({ groupId: item.group.groupId, name: item.group.name })}
-                  className={`mb-3 rounded-[22px] border border-border active:opacity-80 ${
-                    surfaceStyle === 'glass' ? 'bg-surface/82' : 'bg-surface-elevated'
-                  } ${interfaceDensity === 'compact' ? 'p-3.5' : 'p-4'}`}
-                >
-                  <View className="flex-row items-center">
-                    <View className={`mr-4 items-center justify-center rounded-full bg-primary/15 ${
-                      interfaceDensity === 'compact' ? 'h-12 w-12' : 'h-14 w-14'
-                    }`}>
-                      <Text className="text-lg font-semibold text-primary">
-                        {(item.group.name || '?').slice(0, 1).toUpperCase()}
-                      </Text>
-                    </View>
-                    <View className="flex-1">
-                      <View className="flex-row items-start justify-between gap-3">
-                        <Text className="flex-1 text-base font-semibold text-text" numberOfLines={1}>
-                          {item.group.name}
-                        </Text>
-                        {item.group.lastMessageAt > 0 ? (
-                          <Text className="text-xs font-medium text-muted">
-                            {formatConversationTime(item.group.lastMessageAt)}
-                          </Text>
-                        ) : null}
-                      </View>
-                      <Text className="mt-1 text-sm text-muted">
-                        {item.group.members.length} member{item.group.members.length === 1 ? '' : 's'}
-                      </Text>
-                      {groupPreviewFor(item.group) ? (
-                        <Text numberOfLines={1} className="mt-1 text-sm text-muted">
-                          {groupPreviewFor(item.group)}
-                        </Text>
-                      ) : null}
-                    </View>
-                  </View>
-                </Pressable>
+                />
               ) : (
-                <Pressable
+                <ConversationRow
+                  item={item.item}
+                  title={profiles[item.item.peerUserId]?.name?.trim() || item.item.peerUsername}
+                  badge={pinnedConversationIds.includes(item.item.conversationId) ? 'pinned' : null}
+                  profile={profiles[item.item.peerUserId] ?? null}
+                  preview={previewFor(item.item)}
+                  showSecurityRow
                   onPress={() =>
                     onOpenChat({
                       peerUserId: item.item.peerUserId,
@@ -983,68 +395,7 @@ export default function ChatListScreen({
                     })
                   }
                   onLongPress={() => handleOpenConversationActions(item.item)}
-                  className={`mb-3 rounded-[22px] border border-border active:opacity-80 ${
-                    surfaceStyle === 'glass' ? 'bg-surface/82' : 'bg-surface-elevated'
-                  } ${interfaceDensity === 'compact' ? 'p-3.5' : 'p-4'}`}
-                >
-                  <View className="flex-row items-start">
-                    <Avatar name={item.item.peerUsername || '?'} profile={profiles[item.item.peerUserId] ?? null} size={interfaceDensity === 'compact' ? 'md' : 'lg'} className="mr-4" />
-
-                    <View className="flex-1">
-                      <View className="flex-row items-start justify-between gap-3">
-                        <View className="flex-1">
-                          <View className="flex-row items-center gap-2">
-                            <Text className="text-base font-semibold text-text">
-                              {profiles[item.item.peerUserId]?.name?.trim() || item.item.peerUsername}
-                            </Text>
-                            {pinnedConversationIds.includes(item.item.conversationId) ? (
-                              <View className="rounded-full border border-primary/25 bg-primary/10 px-2 py-0.5">
-                                <Text className="text-[10px] font-semibold uppercase tracking-[0.8px] text-primary">
-                                  Pinned
-                                </Text>
-                              </View>
-                            ) : null}
-                          </View>
-                          <Text className="mt-1 text-sm text-muted">{formatHandle(item.item.peerUsername)}</Text>
-                        </View>
-
-                        <View className="items-end">
-                          <Text className="text-xs font-medium text-muted">
-                            {formatConversationTime(item.item.lastMessageAt)}
-                          </Text>
-                          {item.item.unreadCount > 0 ? (
-                            <View className="mt-2 min-w-6 rounded-full bg-primary px-2 py-1">
-                              <Text className="text-center text-xs font-semibold text-background">
-                                {item.item.unreadCount}
-                              </Text>
-                            </View>
-                          ) : null}
-                        </View>
-                      </View>
-
-                      {previewFor(item.item) ? (
-                        <Text
-                          numberOfLines={1}
-                          className={`text-sm leading-6 text-muted ${interfaceDensity === 'compact' ? 'mt-2.5' : 'mt-3'}`}
-                        >
-                          {previewFor(item.item)}
-                        </Text>
-                      ) : null}
-
-                      <View
-                        className={`flex-row items-center justify-between ${
-                          interfaceDensity === 'compact' ? 'mt-2.5' : 'mt-3'
-                        }`}
-                      >
-                        <SecurityBadge
-                          ready={Boolean(item.item.peerHasPublicKey)}
-                          label={item.item.peerHasPublicKey ? 'Secure channel ready' : 'Public key missing'}
-                        />
-                        <Text className="text-xs font-medium text-muted">Open conversation</Text>
-                      </View>
-                    </View>
-                  </View>
-                </Pressable>
+                />
               )
             }
           />
@@ -1065,7 +416,13 @@ export default function ChatListScreen({
           className="mt-4"
           contentContainerStyle={listContentContainerStyle}
           renderItem={({ item }) => (
-            <Pressable
+            <ConversationRow
+              item={item}
+              title={item.peerUsername}
+              badge="archived"
+              profile={profiles[item.peerUserId] ?? null}
+              preview={previewFor(item)}
+              showSecurityRow
               onPress={() =>
                 onOpenChat({
                   peerUserId: item.peerUserId,
@@ -1073,66 +430,7 @@ export default function ChatListScreen({
                 })
               }
               onLongPress={() => handleOpenConversationActions(item)}
-              className={`mb-3 rounded-[22px] border border-border active:opacity-80 ${
-                surfaceStyle === 'glass' ? 'bg-surface/82' : 'bg-surface-elevated'
-              } ${interfaceDensity === 'compact' ? 'p-3.5' : 'p-4'}`}
-            >
-              <View className="flex-row items-start">
-                <Avatar name={item.peerUsername || '?'} profile={profiles[item.peerUserId] ?? null} size={interfaceDensity === 'compact' ? 'md' : 'lg'} className="mr-4" />
-
-                <View className="flex-1">
-                  <View className="flex-row items-start justify-between gap-3">
-                    <View className="flex-1">
-                      <View className="flex-row items-center gap-2">
-                        <Text className="text-base font-semibold text-text">
-                          {item.peerUsername}
-                        </Text>
-                        <View className="rounded-full border border-border bg-background-alt/55 px-2 py-0.5">
-                          <Text className="text-[10px] font-semibold uppercase tracking-[0.8px] text-muted">
-                            Archived
-                          </Text>
-                        </View>
-                      </View>
-                      <Text className="mt-1 text-sm text-muted">{formatHandle(item.peerUsername)}</Text>
-                    </View>
-
-                    <View className="items-end">
-                      <Text className="text-xs font-medium text-muted">
-                        {formatConversationTime(item.lastMessageAt)}
-                      </Text>
-                      {item.unreadCount > 0 ? (
-                        <View className="mt-2 min-w-6 rounded-full bg-primary px-2 py-1">
-                          <Text className="text-center text-xs font-semibold text-background">
-                            {item.unreadCount}
-                          </Text>
-                        </View>
-                      ) : null}
-                    </View>
-                  </View>
-
-                  {previewFor(item) ? (
-                    <Text
-                      numberOfLines={1}
-                      className={`text-sm leading-6 text-muted ${interfaceDensity === 'compact' ? 'mt-2.5' : 'mt-3'}`}
-                    >
-                      {previewFor(item)}
-                    </Text>
-                  ) : null}
-
-                  <View
-                    className={`flex-row items-center justify-between ${
-                      interfaceDensity === 'compact' ? 'mt-2.5' : 'mt-3'
-                    }`}
-                  >
-                    <SecurityBadge
-                      ready={Boolean(item.peerHasPublicKey)}
-                      label={item.peerHasPublicKey ? 'Secure channel ready' : 'Public key missing'}
-                    />
-                    <Text className="text-xs font-medium text-muted">Open conversation</Text>
-                  </View>
-                </View>
-              </View>
-            </Pressable>
+            />
           )}
         />
       )}
@@ -1154,28 +452,23 @@ export default function ChatListScreen({
             item.type === 'section' ? (
               <SectionEyebrow title={item.label} compact />
             ) : item.type === 'message' ? (
-              <Pressable
+              <MessageHitRow
+                title={item.title}
+                hit={item.hit}
                 onPress={() => {
                   const { hit } = item;
                   if (hit.peerKey.startsWith('group:')) onOpenGroup({ groupId: hit.peerKey.slice('group:'.length), name: item.title, jumpToMessageId: hit.message.id });
                   else onOpenChat({ peerUserId: hit.peerKey, peerUsername: sortedConversations.find((c) => c.peerUserId === hit.peerKey)?.peerUsername, jumpToMessageId: hit.message.id });
                 }}
-                className={`mb-3 rounded-[22px] border border-border active:opacity-80 ${
-                  surfaceStyle === 'glass' ? 'bg-surface/82' : 'bg-surface-elevated'
-                } ${interfaceDensity === 'compact' ? 'p-3.5' : 'p-4'}`}
-              >
-                <View className="flex-row items-center justify-between gap-3">
-                  <Text className="flex-1 text-base font-semibold text-text" numberOfLines={1}>
-                    {item.title}
-                  </Text>
-                  <Text className="text-xs font-medium text-muted">{formatConversationTime(item.hit.message.createdAt)}</Text>
-                </View>
-                <Text className="mt-1 text-sm leading-6 text-muted" numberOfLines={2}>
-                  {item.hit.snippet}
-                </Text>
-              </Pressable>
+              />
             ) : item.type === 'conversation' ? (
-              <Pressable
+              <ConversationRow
+                item={item.item}
+                title={profiles[item.item.peerUserId]?.name?.trim() || item.item.peerUsername}
+                badge="existing"
+                profile={profiles[item.item.peerUserId] ?? null}
+                preview={previewFor(item.item)}
+                showSecurityRow={false}
                 onPress={() =>
                   onOpenChat({
                     peerUserId: item.item.peerUserId,
@@ -1183,177 +476,36 @@ export default function ChatListScreen({
                   })
                 }
                 onLongPress={() => handleOpenConversationActions(item.item)}
-                className={`mb-3 rounded-[22px] border border-border active:opacity-80 ${
-                  surfaceStyle === 'glass' ? 'bg-surface/82' : 'bg-surface-elevated'
-                } ${interfaceDensity === 'compact' ? 'p-3.5' : 'p-4'}`}
-              >
-                <View className="flex-row items-start">
-                  <Avatar name={item.item.peerUsername || '?'} profile={profiles[item.item.peerUserId] ?? null} size={interfaceDensity === 'compact' ? 'md' : 'lg'} className="mr-4" />
-
-                  <View className="flex-1">
-                    <View className="flex-row items-start justify-between gap-3">
-                      <View className="flex-1">
-                        <View className="flex-row items-center gap-2">
-                          <Text className="text-base font-semibold text-text">
-                            {profiles[item.item.peerUserId]?.name?.trim() || item.item.peerUsername}
-                          </Text>
-                          <View className="rounded-full border border-border bg-background-alt/55 px-2 py-0.5">
-                            <Text className="text-[10px] font-semibold uppercase tracking-[0.8px] text-muted">
-                              Existing
-                            </Text>
-                          </View>
-                        </View>
-                        <Text className="mt-1 text-sm text-muted">{formatHandle(item.item.peerUsername)}</Text>
-                      </View>
-
-                      <View className="items-end">
-                        <Text className="text-xs font-medium text-muted">
-                          {formatConversationTime(item.item.lastMessageAt)}
-                        </Text>
-                        {item.item.unreadCount > 0 ? (
-                          <View className="mt-2 min-w-6 rounded-full bg-primary px-2 py-1">
-                            <Text className="text-center text-xs font-semibold text-background">
-                              {item.item.unreadCount}
-                            </Text>
-                          </View>
-                        ) : null}
-                      </View>
-                    </View>
-
-                    {previewFor(item.item) ? (
-                      <Text
-                        numberOfLines={1}
-                        className={`text-sm leading-6 text-muted ${interfaceDensity === 'compact' ? 'mt-2.5' : 'mt-3'}`}
-                      >
-                        {previewFor(item.item)}
-                      </Text>
-                    ) : null}
-                  </View>
-                </View>
-              </Pressable>
+              />
             ) : (
-              <Pressable
+              <UserRow
+                user={item.item}
+                profile={profiles[item.item.userId] ?? null}
                 onPress={() =>
                   onOpenChat({
                     peerUserId: item.item.userId,
                     peerUsername: item.item.username,
                   })
                 }
-                className={`mb-3 rounded-[22px] border border-border active:opacity-80 ${
-                  surfaceStyle === 'glass' ? 'bg-surface/82' : 'bg-surface-elevated'
-                } ${interfaceDensity === 'compact' ? 'p-3.5' : 'p-4'}`}
-              >
-                <View className="flex-row items-center">
-                  <Avatar name={item.item.username || '?'} profile={profiles[item.item.userId] ?? null} size={interfaceDensity === 'compact' ? 'md' : 'lg'} className="mr-4" />
-
-                  <View className="flex-1">
-                    <Text className="text-base font-semibold text-text">{item.item.username}</Text>
-                    <Text className="mt-1 text-sm text-muted">{shortSecureId(item.item.userId)}</Text>
-                    <View
-                      className={`flex-row items-center justify-between ${
-                        interfaceDensity === 'compact' ? 'mt-2.5' : 'mt-3'
-                      }`}
-                    >
-                      <SecurityBadge
-                        ready={Boolean(item.item.hasPublicKey)}
-                        label={item.item.hasPublicKey ? 'Ready for E2EE' : 'No public key yet'}
-                      />
-                      <Text className="text-xs font-medium text-muted">Start chat</Text>
-                    </View>
-                  </View>
-                </View>
-              </Pressable>
+              />
             )
           )}
         />
       )}
 
       {selectedConversationAction ? (
-        <BottomSheetPanel title="Conversation Actions" onClose={handleCloseConversationActions}>
-          <View className="rounded-[18px] bg-background-alt/55 px-3 py-3">
-            <Text className="text-[15px] font-medium text-text">
-              {selectedConversationAction.peerUsername}
-            </Text>
-            <Text className="mt-1 text-[13px] leading-5 text-muted">
-              {formatHandle(selectedConversationAction.peerUsername)}
-            </Text>
-          </View>
-
-          <Pressable
-            onPress={() => {
-              togglePinnedConversation(selectedConversationAction.conversationId);
-              handleCloseConversationActions();
-            }}
-            className="mt-2 rounded-[18px] px-3 py-3 active:opacity-80"
-          >
-            <Text className="text-[15px] font-medium text-text">
-              {pinnedConversationIds.includes(selectedConversationAction.conversationId)
-                ? 'Unpin conversation'
-                : 'Pin conversation'}
-            </Text>
-            <Text className="mt-1 text-[13px] leading-5 text-muted">
-              Keep this chat at the top of the list for faster access.
-            </Text>
-          </Pressable>
-
-          <Pressable
-            onPress={() => {
-              toggleArchivedConversation(selectedConversationAction.conversationId);
-              handleCloseConversationActions();
-            }}
-            className="rounded-[18px] px-3 py-3 active:opacity-80"
-          >
-            <Text className="text-[15px] font-medium text-text">
-              {archivedConversationIds.includes(selectedConversationAction.conversationId)
-                ? 'Unarchive conversation'
-                : 'Archive conversation'}
-            </Text>
-            <Text className="mt-1 text-[13px] leading-5 text-muted">
-              {archivedConversationIds.includes(selectedConversationAction.conversationId)
-                ? 'Return this chat to the main conversation list.'
-                : 'Move this chat out of the main list without deleting it.'}
-            </Text>
-          </Pressable>
-
-          <Pressable
-            onPress={() => {
-              const peer = selectedConversationAction.peerUserId;
-              handleCloseConversationActions();
-              if (!myUserId) return;
-              const action = blockedIds.includes(peer) ? unblockPeer(myUserId, peer) : blockPeer(myUserId, peer);
-              action.then(refreshConversationsSilently).catch((e) => console.warn('[ChatListScreen] block change failed:', e));
-            }}
-            className="rounded-[18px] px-3 py-3 active:opacity-80"
-          >
-            <Text className={`text-[15px] font-medium ${blockedIds.includes(selectedConversationAction.peerUserId) ? 'text-text' : 'text-danger'}`}>
-              {blockedIds.includes(selectedConversationAction.peerUserId) ? 'Unblock contact' : 'Block contact'}
-            </Text>
-            <Text className="mt-1 text-[13px] leading-5 text-muted">
-              {blockedIds.includes(selectedConversationAction.peerUserId)
-                ? 'Messages, presence and typing flow again.'
-                : 'They can no longer message you or see you; they are not told. History stays on this device.'}
-            </Text>
-          </Pressable>
-
-          {selectedConversationAction.unreadCount > 0 ? (
-            <Pressable
-              onPress={handleMarkConversationAsRead}
-              className="rounded-[18px] px-3 py-3 active:opacity-80"
-            >
-              <Text className="text-[15px] font-medium text-text">Mark as read</Text>
-              <Text className="mt-1 text-[13px] leading-5 text-muted">
-                Clear unread state for this conversation on this device.
-              </Text>
-            </Pressable>
-          ) : null}
-
-          <Pressable
-            onPress={handleCloseConversationActions}
-            className="rounded-[18px] px-3 py-3 active:opacity-80"
-          >
-            <Text className="text-[15px] font-medium text-text">Cancel</Text>
-          </Pressable>
-        </BottomSheetPanel>
+        <ConversationActionsSheet
+          peerUsername={selectedConversationAction.peerUsername}
+          unreadCount={selectedConversationAction.unreadCount}
+          pinned={pinnedConversationIds.includes(selectedConversationAction.conversationId)}
+          archived={archivedConversationIds.includes(selectedConversationAction.conversationId)}
+          blocked={blockedIds.includes(selectedConversationAction.peerUserId)}
+          onTogglePin={() => togglePinnedConversation(selectedConversationAction.conversationId)}
+          onToggleArchive={() => toggleArchivedConversation(selectedConversationAction.conversationId)}
+          onToggleBlock={() => handleToggleBlock(selectedConversationAction.peerUserId)}
+          onMarkAsRead={handleMarkConversationAsRead}
+          onClose={handleCloseConversationActions}
+        />
       ) : null}
     </View>
   );
