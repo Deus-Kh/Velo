@@ -1,10 +1,12 @@
 import { useState } from 'react';
 import { Alert } from 'react-native';
 
+import { Icon } from '../Icon';
 import SectionEyebrow from '../SectionEyebrow';
 import StatusChip from '../StatusChip';
 import { InfoNote, SettingsGroup, SettingsRow } from './primitives';
 import { wipeLocalStateForUser } from '../../shared/storage/localWipe';
+import { useThemeColors } from '../../theme/useThemeColors';
 
 /** Settings → This phone: the device's session, a re-check, and the local encryption reset (confirmed). */
 export default function ThisPhoneSection({
@@ -16,6 +18,7 @@ export default function ThisPhoneSection({
   diagnosticsLoading: boolean;
   loadDiagnostics: () => Promise<void>;
 }) {
+  const colors = useThemeColors();
   const [isResettingSecurity, setIsResettingSecurity] = useState(false);
   const [securityResetStatus, setSecurityResetStatus] = useState<string | null>(null);
 
@@ -56,10 +59,7 @@ export default function ThisPhoneSection({
 
   return (
     <>
-      <SectionEyebrow
-        title="This phone"
-        description="Your session on this phone and how to recover it."
-      />
+      <SectionEyebrow title="This phone" />
       <SettingsGroup>
         <SettingsRow
           title="Current device"
@@ -68,16 +68,17 @@ export default function ThisPhoneSection({
         />
         <SettingsRow
           title="Check again"
-          subtitle="Re-check the keys and sessions on this phone."
+          subtitle={diagnosticsLoading ? 'Checking the keys and sessions on this phone…' : 'Re-check the keys and sessions on this phone.'}
           onPress={loadDiagnostics}
-          value={diagnosticsLoading ? 'Refreshing' : 'Refresh'}
+          trailing={<Icon lib="Lucide" name="refresh-cw" size={18} color={colors.muted} />}
         />
         <SettingsRow
           title="Reset encryption on this phone"
           subtitle="Removes this account's secure sessions, trusted contacts and keys from this phone. Chats start fresh secure sessions afterwards."
           onPress={confirmResetLocalSecurityState}
-          value={isResettingSecurity ? 'Resetting' : 'Clear'}
+          value={isResettingSecurity ? 'Resetting…' : undefined}
           danger
+          chevron={false}
           last
         />
       </SettingsGroup>

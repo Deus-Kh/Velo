@@ -170,10 +170,7 @@ export default function NotificationsSection({ userId }: { userId: string | null
 
   return (
     <>
-      <SectionEyebrow
-        title="Notifications"
-        description="Messaging alerts and attention behavior."
-      />
+      <SectionEyebrow title="Notifications" />
       <SettingsGroup>
         <SettingsRow
           title="Push notifications"

@@ -15,10 +15,7 @@ export default function AppearanceSection() {
 
   return (
     <>
-      <SectionEyebrow
-        title="Appearance"
-        description="Visual preferences for messenger density and atmosphere."
-      />
+      <SectionEyebrow title="Appearance" />
       <SettingsGroup>
         <SettingsRow
           title="Theme"

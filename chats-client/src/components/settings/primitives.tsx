@@ -23,6 +23,7 @@ export function SettingsRow({
   onPress,
   trailing,
   last,
+  chevron = true,
 }: {
   title: string;
   subtitle?: string;
@@ -31,6 +32,8 @@ export function SettingsRow({
   onPress?: () => void | Promise<void>;
   trailing?: ReactNode;
   last?: boolean;
+  /** B4: a chevron only where the row opens something; off for inline editors, confirmations and reloads. */
+  chevron?: boolean;
 }) {
   const textTone = danger ? 'text-danger' : 'text-text';
   const colors = useThemeColors();
@@ -53,7 +56,7 @@ export function SettingsRow({
           <Text className={`text-[13px] ${danger ? 'text-danger' : 'text-muted'}`}>{value}</Text>
         ) : null}
 
-        {trailing ? trailing : onPress ? <Icon lib="Lucide" name="chevron-right" size={18} color={colors.muted} /> : null}
+        {trailing ? trailing : onPress && chevron ? <Icon lib="Lucide" name="chevron-right" size={18} color={colors.muted} /> : null}
       </View>
     </Pressable>
   );

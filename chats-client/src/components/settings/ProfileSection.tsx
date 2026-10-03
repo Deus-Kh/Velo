@@ -10,10 +10,7 @@ export default function ProfileSection({ account, userId }: { account: OwnAccoun
 
   return (
     <>
-      <SectionEyebrow
-        title="Profile"
-        description="Identity and account context for the current device session."
-      />
+      <SectionEyebrow title="Profile" />
       <SettingsGroup>
         {editingField === 'username' ? (
           <View className="border-b border-border px-4 py-3.5">
@@ -39,6 +36,7 @@ export default function ProfileSection({ account, userId }: { account: OwnAccoun
             subtitle={profileLoading ? 'Loading profile...' : profile?.username || 'Not available'}
             onPress={() => startEditing('username')}
             value="Edit"
+            chevron={false}
           />
         )}
         {editingField === 'email' ? (
@@ -66,12 +64,12 @@ export default function ProfileSection({ account, userId }: { account: OwnAccoun
             subtitle={profileLoading ? 'Loading email...' : profile?.email || 'Not available'}
             onPress={() => startEditing('email')}
             value="Edit"
+            chevron={false}
           />
         )}
         <SettingsRow
           title="Account ID"
           subtitle={userId ? maskUserId(userId) : 'Signed in on this device'}
-          value="Current"
           last
         />
       </SettingsGroup>

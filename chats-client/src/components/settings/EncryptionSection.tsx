@@ -17,10 +17,7 @@ export default function EncryptionSection({
 }) {
   return (
     <>
-      <SectionEyebrow
-        title="Encryption"
-        description="Keys and secure sessions kept on this phone."
-      />
+      <SectionEyebrow title="Encryption" />
       <SettingsGroup>
         <SettingsRow
           title="Your keys"

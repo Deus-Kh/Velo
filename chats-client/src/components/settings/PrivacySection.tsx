@@ -6,7 +6,7 @@ import type { PrivacySettings } from '../../shared/api/user.api';
 import type { SecurityDiagnostics } from '../../shared/settings/useSecurityDiagnostics';
 import { useBlocksStore } from '../../store/blocks.store';
 
-/** Settings → Privacy: the T7.4 toggles, blocked and trusted contacts. */
+/** Settings → Privacy: the T7.4 toggles, then blocked and trusted contacts and a short explainer (B4). */
 export default function PrivacySection({
   userId,
   privacy,
@@ -15,6 +15,8 @@ export default function PrivacySection({
   diagnostics,
   diagnosticsLoading,
   onOpenBlocked,
+  onOpenTrusted,
+  onOpenVerificationHelp,
 }: {
   userId: string | null;
   privacy: PrivacySettings;
@@ -23,15 +25,14 @@ export default function PrivacySection({
   diagnostics: SecurityDiagnostics | null;
   diagnosticsLoading: boolean;
   onOpenBlocked: () => void;
+  onOpenTrusted: () => void;
+  onOpenVerificationHelp: () => void;
 }) {
   const blockedCount = useBlocksStore((s) => (userId ? s.blockedByUser[String(userId)] : undefined)?.length ?? 0);
 
   return (
     <>
-      <SectionEyebrow
-        title="Privacy"
-        description="Controls and explanations related to identity trust and secure communication."
-      />
+      <SectionEyebrow title="Privacy" />
       <SettingsGroup>
         <SettingsRow
           title="Show when I'm online"
@@ -73,18 +74,13 @@ export default function PrivacySection({
         />
         <SettingsRow
           title="Trusted contacts"
-          subtitle="Contacts you explicitly verified on this device."
+          subtitle="Contacts you verified on this phone."
           value={diagnosticsLoading ? 'Checking' : `${diagnostics?.trustedContactsCount ?? 0}`}
+          onPress={onOpenTrusted}
         />
         <SettingsRow
-          title="Verification flow"
-          subtitle="Identity verification is available inside each chat before marking a contact as trusted."
-          value="In chats"
-        />
-        <SettingsRow
-          title="Security explanations"
-          subtitle="The app explains encryption state in human language instead of protocol jargon."
-          value="Enabled"
+          title="How verification works"
+          onPress={onOpenVerificationHelp}
           last
         />
       </SettingsGroup>

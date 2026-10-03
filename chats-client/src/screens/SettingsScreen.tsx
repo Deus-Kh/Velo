@@ -19,6 +19,8 @@ import PrivacySection from '../components/settings/PrivacySection';
 import ProfileSection from '../components/settings/ProfileSection';
 import SharedProfileSection from '../components/settings/SharedProfileSection';
 import ThisPhoneSection from '../components/settings/ThisPhoneSection';
+import TrustedContactsSheet from '../components/settings/TrustedContactsSheet';
+import VerificationExplainerSheet from '../components/settings/VerificationExplainerSheet';
 import { useOwnAccount } from '../shared/settings/useOwnAccount';
 import { useSecurityDiagnostics } from '../shared/settings/useSecurityDiagnostics';
 
@@ -39,6 +41,8 @@ export default function SettingsScreen() {
   const { profile, loadProfile, privacy, privacyError, handlePrivacyToggle } = account;
 
   const [showBlocked, setShowBlocked] = useState(false);
+  const [showTrusted, setShowTrusted] = useState(false);
+  const [showVerificationHelp, setShowVerificationHelp] = useState(false);
   const [showDeleteAccount, setShowDeleteAccount] = useState(false);
   const [showProfileSheet, setShowProfileSheet] = useState(false);
   const [profileSheetBusy, setProfileSheetBusy] = useState(false);
@@ -63,10 +67,7 @@ export default function SettingsScreen() {
         showsVerticalScrollIndicator={false}
       >
         <View className="px-4">
-          <ScreenHeader
-            title="Settings"
-            subtitle="Account, privacy, encryption and device preferences for this messenger."
-          />
+          <ScreenHeader title="Settings" />
           <AccountHero
             profile={profile}
             userId={userId}
@@ -92,6 +93,8 @@ export default function SettingsScreen() {
             diagnostics={diagnostics}
             diagnosticsLoading={diagnosticsLoading}
             onOpenBlocked={() => setShowBlocked(true)}
+            onOpenTrusted={() => setShowTrusted(true)}
+            onOpenVerificationHelp={() => setShowVerificationHelp(true)}
           />
 
           <EncryptionSection
@@ -118,6 +121,8 @@ export default function SettingsScreen() {
       </ScrollView>
 
       {showBlocked && userId ? <BlockedContactsSheet myUserId={String(userId)} onClose={() => setShowBlocked(false)} /> : null}
+      {showTrusted && userId ? <TrustedContactsSheet myUserId={String(userId)} onClose={() => setShowTrusted(false)} /> : null}
+      {showVerificationHelp ? <VerificationExplainerSheet onClose={() => setShowVerificationHelp(false)} /> : null}
       {showProfileSheet && userId ? (
         <ProfileSheet
           current={ownProfile}

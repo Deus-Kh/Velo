@@ -113,10 +113,7 @@ export default function AccountSection({ userId, onOpenDeleteAccount }: { userId
 
   return (
     <>
-      <SectionEyebrow
-        title="Account"
-        description="Your password, and the ways to leave this phone."
-      />
+      <SectionEyebrow title="Account" />
       <SettingsGroup>
         {editingPassword ? (
           <View className="border-b border-border px-4 py-3.5">
@@ -159,13 +156,13 @@ export default function AccountSection({ userId, onOpenDeleteAccount }: { userId
               setEditingPassword(true);
             }}
             value="Edit"
+            chevron={false}
           />
         )}
         <SettingsRow
           title="Delete account"
           subtitle="Removes everything the server holds for you and erases this device. Cannot be undone."
           onPress={onOpenDeleteAccount}
-          value="Delete"
           danger
           last
         />
@@ -178,12 +175,14 @@ export default function AccountSection({ userId, onOpenDeleteAccount }: { userId
           title="Log out"
           subtitle="Your keys and messages stay on this phone, so signing back in restores your chats."
           onPress={confirmLogout}
+          chevron={false}
         />
         <SettingsRow
           title="Log out and erase local data"
           subtitle="Removes your keys, sessions and stored messages from this phone. Nothing left here can read your messages."
           onPress={confirmLogoutAndErase}
           danger
+          chevron={false}
           last
         />
       </SettingsGroup>

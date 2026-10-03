@@ -9,10 +9,7 @@ export default function SharedProfileSection({ fallbackName, onOpen }: { fallbac
 
   return (
     <>
-      <SectionEyebrow
-        title="Shared profile"
-        description="What contacts see for you. It travels over your encrypted sessions; the server stores none of it."
-      />
+      <SectionEyebrow title="Shared profile" description="Travels over your encrypted sessions; the server stores none of it." />
       <SettingsGroup>
         <SettingsRow
           title="Name and avatar"
