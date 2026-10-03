@@ -83,11 +83,17 @@ export {
 
 export {
   computeSafetyNumber,
+  safetyNumberJob,
   fingerprintHalf,
+  fingerprintHalfJob,
   displayableFingerprint,
   groupDigits,
   FINGERPRINT_ITERATIONS,
   FINGERPRINT_VERSION,
+  type SafetyNumber,
+  type SafetyNumberParams,
+  type FingerprintHalfJob,
+  type SafetyNumberJob,
 } from './identity/fingerprint';
 export {
   signIdentityBinding,

@@ -13,10 +13,11 @@ import { useThemeColors } from '../theme/useThemeColors';
 import { keysApi } from '../shared/api/keys.api';
 import { ensureIdentityKeyPairForUser } from '../shared/crypto/identityKeys';
 import { ensureIdentityDhKeyPairForUser } from '../shared/crypto/identityDhKeys';
-import { computeSafetyNumber, verifyIdentityBinding, type Identity } from '@velo/protocol';
+import { verifyIdentityBinding, type Identity, type SafetyNumber } from '@velo/protocol';
 import { getTrustedIdentity, setTrustedIdentity, clearTrustedIdentity, type TrustedIdentity } from '../shared/storage/trustedIdentities';
 import { resolveVerifyView, type ServerIdentityState } from '../shared/chat/verifyState';
 import { withTimeout } from '../shared/utils/withTimeout';
+import { getSafetyNumber } from '../shared/chat/safetyNumber';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'VerifyContact'>;
 
@@ -31,6 +32,10 @@ const SERVER_TIMEOUT_MS = 8000;
  * fetched in the background with a timeout and only confirms the pin or
  * reveals a change. A contact without a pin shows a skeleton of the
  * number until the server answers, with a retry when it does not.
+ *
+ * The number itself (2 × 5200 SHA-512 rounds) is never computed inside a
+ * render: it comes from the safety-number cache, which computes it in
+ * chunks that yield to the UI and reports progress for the skeleton.
  */
 export default function VerifyContactScreen({ route, navigation }: Props) {
   const { peerUserId, peerUsername, source } = route.params;
@@ -104,10 +109,32 @@ export default function VerifyContactScreen({ route, navigation }: Props) {
 
   const view = useMemo(() => resolveVerifyView(trusted, server), [trusted, server]);
 
-  const computed = useMemo(() => {
-    if (!myUserId || !myIdentity || !view.identity) return null;
-    return computeSafetyNumber({ myUserId, myIdentity, theirUserId: peerUserId, theirIdentity: view.identity });
-  }, [myUserId, myIdentity, view.identity, peerUserId]);
+  // The number for the identity on screen: cached, or computed in chunks with progress.
+  const [computed, setComputed] = useState<SafetyNumber | null>(null);
+  const [computeProgress, setComputeProgress] = useState(0);
+  const identityOnScreen = view.identity;
+  useEffect(() => {
+    if (!myUserId || !myIdentity || !identityOnScreen) {
+      setComputed(null);
+      return undefined;
+    }
+    let alive = true;
+    setComputed(null);
+    setComputeProgress(0);
+    getSafetyNumber(
+      { myUserId, myIdentity, peerUserId, theirIdentity: identityOnScreen },
+      { onProgress: (f) => alive && setComputeProgress(f) },
+    )
+      .then((result) => {
+        if (alive) setComputed(result);
+      })
+      .catch((e) => {
+        if (alive) setLocalError((e as Error)?.message || 'Could not compute the safety number');
+      });
+    return () => {
+      alive = false;
+    };
+  }, [myUserId, myIdentity, identityOnScreen, peerUserId]);
 
   const displayName = peerProfile?.name?.trim() || peerUsername || 'Unknown contact';
   const screenTitle = source === 'new-chat' ? 'Verify before chatting' : 'Verify contact';
@@ -194,12 +221,14 @@ export default function VerifyContactScreen({ route, navigation }: Props) {
             ) : (
               <>
                 {/* a skeleton of the number block, not a spinner: the shape of what is coming */}
-                <View className="mt-3 gap-2" accessibilityLabel="Fetching this contact's keys">
+                <View className="mt-3 gap-2" accessibilityLabel={identityOnScreen ? 'Computing the safety number' : "Fetching this contact's keys"}>
                   {[0, 1, 2].map((row) => (
-                    <View key={row} className="h-6 w-full rounded-md bg-background-alt/80" />
+                    <View key={row} className="h-6 w-full overflow-hidden rounded-md bg-background-alt/80">
+                      {identityOnScreen ? <View className="h-full bg-primary/25" style={{ width: `${Math.round(Math.max(0, Math.min(1, computeProgress * 3 - row)) * 100)}%` }} /> : null}
+                    </View>
                   ))}
                 </View>
-                <Text className="mt-3 text-xs leading-5 text-muted">Fetching this contact's keys…</Text>
+                <Text className="mt-3 text-xs leading-5 text-muted">{identityOnScreen ? `Computing the safety number… ${Math.round(computeProgress * 100)}%` : "Fetching this contact's keys…"}</Text>
               </>
             )}
           </View>

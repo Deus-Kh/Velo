@@ -118,7 +118,7 @@ describe('libsignal vectors: constructions (red until the named task)', () => {
     }
   });
 
-  it('numeric fingerprint matches libsignal (T2.13; libsignal’s 0x05-serialized key as input)', () => {
+  it('numeric fingerprint matches libsignal (T2.13; libsignal’s 0x05-serialized key as input)', { timeout: 30_000 }, () => {
     const enc = new TextEncoder();
     for (const v of vectors.fingerprints) {
       const local = fingerprintHalf({ identifier: enc.encode(v.localIdentifier), identityKey: fromHex(v.localKeySerialized), iterations: v.iterations, version: v.version });

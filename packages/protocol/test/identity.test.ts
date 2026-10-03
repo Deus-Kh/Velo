@@ -88,7 +88,7 @@ describe('identity trust check', () => {
 });
 
 describe('numeric fingerprint', () => {
-  it('reproduces libsignal’s displayable fingerprint for the T2.15 vectors (0x05-serialized key)', () => {
+  it('reproduces libsignal’s displayable fingerprint for the T2.15 vectors (0x05-serialized key)', { timeout: 30_000 }, () => {
     for (const v of vectors.fingerprints) {
       const enc = new TextEncoder();
       const local = fingerprintHalf({ identifier: enc.encode(v.localIdentifier), identityKey: fromHex(v.localKeySerialized), iterations: v.iterations, version: v.version });
@@ -97,7 +97,7 @@ describe('numeric fingerprint', () => {
     }
   });
 
-  it('Velo safety number covers both identity keys, is symmetric, and changes when the DH key changes (P0-9)', () => {
+  it('Velo safety number covers both identity keys, is symmetric, and changes when the DH key changes (P0-9)', { timeout: 30_000 }, () => {
     const a = identity(0x70);
     const b = identity(0x80);
     const fromA = computeSafetyNumber({ myUserId: 'A', myIdentity: a, theirUserId: 'B', theirIdentity: b });
@@ -111,5 +111,5 @@ describe('numeric fingerprint', () => {
     expect(swappedDh.display).not.toBe(fromA.display);
     const otherUser = computeSafetyNumber({ myUserId: 'A', myIdentity: a, theirUserId: 'C', theirIdentity: b });
     expect(otherUser.display).not.toBe(fromA.display);
-  }, 30_000); // 5200-iteration fingerprints, several of them; slow under coverage instrumentation
+  });
 });

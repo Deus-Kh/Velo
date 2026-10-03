@@ -37,23 +37,78 @@ function encodedChunk(hash: Uint8Array, offset: number): string {
   return String(v % 100000).padStart(5, '0');
 }
 
-/** One party's 30-digit half. */
-export function fingerprintHalf(params: {
+type HalfParams = {
   identifier: Uint8Array;
   identityKey: Uint8Array;
   iterations?: number;
   version?: number;
-}): string {
+};
+
+function halfSeed(params: HalfParams): { buf: Uint8Array; iterations: number } {
   const iterations = params.iterations ?? FINGERPRINT_ITERATIONS;
   const version = params.version ?? FINGERPRINT_VERSION;
   const versionBytes = new Uint8Array([(version >>> 8) & 0xff, version & 0xff]);
-  let buf: Uint8Array = concat([versionBytes, params.identityKey, params.identifier]);
-  for (let i = 0; i < iterations; i += 1) {
-    buf = sha512(concat([buf, params.identityKey]));
-  }
+  return { buf: concat([versionBytes, params.identityKey, params.identifier]), iterations };
+}
+
+/** `count` rounds of buf := SHA-512(buf || identityKey). */
+function iterate(buf: Uint8Array, identityKey: Uint8Array, count: number): Uint8Array {
+  let out = buf;
+  for (let i = 0; i < count; i += 1) out = sha512.create().update(out).update(identityKey).digest();
+  return out;
+}
+
+function digitsOf(buf: Uint8Array): string {
   let out = '';
   for (let offset = 0; offset < 30; offset += 5) out += encodedChunk(buf, offset);
   return out;
+}
+
+/** One party's 30-digit half. */
+export function fingerprintHalf(params: HalfParams): string {
+  const { buf, iterations } = halfSeed(params);
+  return digitsOf(iterate(buf, params.identityKey, iterations));
+}
+
+/**
+ * The same half as a resumable job: `step(rounds)` runs that many SHA-512
+ * rounds and returns whether the job is complete; `digits()` is valid once
+ * it is. 5200 rounds take seconds in an interpreted JS engine on a phone,
+ * and a single synchronous loop would freeze the screen for all of them;
+ * a caller that owns an event loop drives the job in slices and yields
+ * between them. The package stays synchronous and pure (no timers here).
+ * Identical digits to `fingerprintHalf` (the libsignal vectors pin both).
+ */
+export type FingerprintHalfJob = {
+  readonly total: number;
+  readonly done: number;
+  /** Runs up to `rounds` more rounds; true when the half is complete. */
+  step(rounds: number): boolean;
+  /** The 30 digits once the job is complete; null before. */
+  digits(): string | null;
+};
+
+export function fingerprintHalfJob(params: HalfParams): FingerprintHalfJob {
+  const { buf: seed, iterations } = halfSeed(params);
+  let buf = seed;
+  let done = 0;
+  return {
+    total: iterations,
+    get done() {
+      return done;
+    },
+    step(rounds: number): boolean {
+      const count = Math.max(0, Math.min(rounds, iterations - done));
+      if (count > 0) {
+        buf = iterate(buf, params.identityKey, count);
+        done += count;
+      }
+      return done >= iterations;
+    },
+    digits(): string | null {
+      return done < iterations ? null : digitsOf(buf);
+    },
+  };
 }
 
 /** The 60-digit displayable fingerprint: smaller half first. */
@@ -71,15 +126,56 @@ export function groupDigits(display: string): string {
  * stable identifier is the user id. Both identity keys are covered, so a
  * substituted DH key changes the number (the P0-9 gap).
  */
-export function computeSafetyNumber(params: {
+export type SafetyNumberParams = {
   myUserId: string;
   myIdentity: Identity;
   theirUserId: string;
   theirIdentity: Identity;
-}): { display: string; grouped: string; myHalf: string; theirHalf: string } {
-  const keyBytes = (id: Identity) => concat([decodeBase64(normalizeB64(id.identitySignPublicKey)), decodeBase64(normalizeB64(id.identityDhPublicKey))]);
-  const myHalf = fingerprintHalf({ identifier: utf8Encode(params.myUserId), identityKey: keyBytes(params.myIdentity) });
-  const theirHalf = fingerprintHalf({ identifier: utf8Encode(params.theirUserId), identityKey: keyBytes(params.theirIdentity) });
+};
+export type SafetyNumber = { display: string; grouped: string; myHalf: string; theirHalf: string };
+
+const identityKeyBytes = (id: Identity): Uint8Array => concat([decodeBase64(normalizeB64(id.identitySignPublicKey)), decodeBase64(normalizeB64(id.identityDhPublicKey))]);
+
+export function computeSafetyNumber(params: SafetyNumberParams): SafetyNumber {
+  const myHalf = fingerprintHalf({ identifier: utf8Encode(params.myUserId), identityKey: identityKeyBytes(params.myIdentity) });
+  const theirHalf = fingerprintHalf({ identifier: utf8Encode(params.theirUserId), identityKey: identityKeyBytes(params.theirIdentity) });
   const display = displayableFingerprint(myHalf, theirHalf);
   return { display, grouped: groupDigits(display), myHalf, theirHalf };
+}
+
+/** The whole safety number as a resumable job over both halves (`total` = 2 × iterations). */
+export type SafetyNumberJob = {
+  readonly total: number;
+  readonly done: number;
+  step(rounds: number): boolean;
+  /** The number once both halves are complete; null before. */
+  result(): SafetyNumber | null;
+};
+
+export function safetyNumberJob(params: SafetyNumberParams): SafetyNumberJob {
+  const mine = fingerprintHalfJob({ identifier: utf8Encode(params.myUserId), identityKey: identityKeyBytes(params.myIdentity) });
+  const theirs = fingerprintHalfJob({ identifier: utf8Encode(params.theirUserId), identityKey: identityKeyBytes(params.theirIdentity) });
+  return {
+    total: mine.total + theirs.total,
+    get done() {
+      return mine.done + theirs.done;
+    },
+    step(rounds: number): boolean {
+      let left = Math.max(0, rounds);
+      if (mine.done < mine.total) {
+        const before = mine.done;
+        mine.step(left);
+        left -= mine.done - before;
+      }
+      if (left > 0 && theirs.done < theirs.total) theirs.step(left);
+      return mine.done >= mine.total && theirs.done >= theirs.total;
+    },
+    result(): SafetyNumber | null {
+      const myHalf = mine.digits();
+      const theirHalf = theirs.digits();
+      if (myHalf === null || theirHalf === null) return null;
+      const display = displayableFingerprint(myHalf, theirHalf);
+      return { display, grouped: groupDigits(display), myHalf, theirHalf };
+    },
+  };
 }

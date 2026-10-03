@@ -35,6 +35,7 @@ import { isAudio, pickImage, sendAttachmentMessage, uploadAttachment } from '../
 import { describeMessage, describeMessageForQuote, type LucideIconName } from '../shared/chat/describeMessage';
 import QuoteLine from '../components/QuoteLine';
 import { useLayeredBackHandler } from '../shared/ui/layeredBack';
+import { prewarmSafetyNumber } from '../shared/chat/safetyNumber';
 import { Icon } from '../components/Icon';
 import { useThemeColors } from '../theme/useThemeColors';
 import VoiceComposer from '../components/VoiceComposer';
@@ -374,6 +375,13 @@ const { keyboardShown , keyboardHeight } = useKeyboard()
   const [viewerUri, setViewerUri] = useState<string | null>(null);
   const [uploadState, setUploadState] = useState<{ label: string; progress: number | null } | null>(null);
   const colors = useThemeColors();
+
+  // A10: with a pinned contact, compute the safety number in the background now, so the
+  // Verify screen opens with it ready instead of spending seconds of SHA-512 on first use.
+  useEffect(() => {
+    if (!myUserId) return;
+    prewarmSafetyNumber({ myUserId: String(myUserId), peerUserId });
+  }, [myUserId, peerUserId]);
   const [jumpTarget, setJumpTarget] = useState<string | null>(jumpToMessageId ?? null);
   const jumpAttemptsRef = useRef(0);
   const [reportBusy, setReportBusy] = useState(false);
