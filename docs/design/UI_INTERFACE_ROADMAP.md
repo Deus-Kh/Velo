@@ -253,7 +253,7 @@ Status: `In Progress`
 #### Осталось сделать
 
 - полноценные spacing tokens и typography hierarchy как системный слой
-- собрать общий row-pattern для chat/contact/settings
+- ~~собрать общий row-pattern для chat/contact/settings~~ — `components/ListRow.tsx` (2026-10-03, roadmap B1): chat list, search, forward picker, New Chat; settings rows остаются на `SettingsRow` до B9
 - решить вопрос с реальным blur/glass implementation
 - описать и унифицировать motion rules
 - добавить reusable layout templates для новых экранов

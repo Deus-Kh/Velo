@@ -1,4 +1,4 @@
-import { ActivityIndicator, Text, View } from 'react-native';
+import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
 
 /** The chat list's empty states, with a title and one line of guidance. */
 export function EmptyState({ title, description }: { title: string; description: string }) {
@@ -13,39 +13,25 @@ export function EmptyState({ title, description }: { title: string; description:
   );
 }
 
-/** Placeholder rows while the first page of conversations loads. */
+/** Placeholder rows in the shape of the list row while the first page of conversations loads (B1). */
 export function ChatListSkeleton({ compact }: { compact: boolean }) {
-  const items = compact ? [0, 1, 2, 3] : [0, 1, 2];
+  const items = compact ? [0, 1, 2, 3, 4, 5] : [0, 1, 2, 3, 4];
 
   return (
-    <View className="mt-4 px-4">
+    <View className="mt-2">
       {items.map((item) => (
-        <View
-          key={item}
-          className={`mb-3 rounded-[22px] border border-border bg-surface-elevated ${
-            compact ? 'p-3.5' : 'p-4'
-          }`}
-        >
-          <View className="flex-row items-start">
-            <View className={`mr-4 rounded-full bg-background-alt/80 ${compact ? 'h-12 w-12' : 'h-14 w-14'}`} />
-
+        <View key={item}>
+          <View className={`flex-row items-center px-4 ${compact ? 'py-2' : 'py-3'}`}>
+            <View className="mr-3 h-12 w-12 rounded-full bg-background-alt/80" />
             <View className="flex-1">
-              <View className="flex-row items-start justify-between gap-3">
-                <View className="flex-1">
-                  <View className="h-4 w-28 rounded-full bg-background-alt/80" />
-                  <View className="mt-2 h-3.5 w-36 rounded-full bg-background-alt/65" />
-                </View>
-                <View className="h-3.5 w-12 rounded-full bg-background-alt/65" />
+              <View className="flex-row items-center justify-between">
+                <View className="h-4 w-32 rounded-full bg-background-alt/80" />
+                <View className="h-3 w-10 rounded-full bg-background-alt/65" />
               </View>
-
-              <View className={`h-3.5 rounded-full bg-background-alt/60 ${compact ? 'mt-3 w-[72%]' : 'mt-4 w-[76%]'}`} />
-
-              <View className={`flex-row items-center justify-between ${compact ? 'mt-3' : 'mt-4'}`}>
-                <View className="h-7 w-32 rounded-full bg-background-alt/75" />
-                <View className="h-3.5 w-24 rounded-full bg-background-alt/60" />
-              </View>
+              <View className="mt-2.5 h-3.5 w-[70%] rounded-full bg-background-alt/60" />
             </View>
           </View>
+          <View className="ml-[76px] bg-border" style={{ height: StyleSheet.hairlineWidth }} />
         </View>
       ))}
     </View>

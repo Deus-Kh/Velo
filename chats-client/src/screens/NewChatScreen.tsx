@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -17,6 +17,8 @@ import Clipboard from '@react-native-clipboard/clipboard';
 
 import ScreenHeader from '../components/ScreenHeader';
 import ActionRow from '../components/ActionRow';
+import Avatar from '../components/Avatar';
+import ListRow from '../components/ListRow';
 import CreateGroupPanel from '../components/CreateGroupPanel';
 import type { GroupView } from '../shared/api/groups.api';
 import SectionEyebrow from '../components/SectionEyebrow';
@@ -29,8 +31,8 @@ import { DIRECTORY_SEARCH_MIN_LENGTH, filterLocalContacts } from '../shared/cont
 import { listTrustedPeerUserIds } from '../shared/storage/trustedIdentities';
 import { contactSubtitle, formatHandle, shortSecureId } from '../shared/utils/identity';
 
+// B1: flat rows span the full width; only the section labels carry side padding
 const listContentContainerStyle = {
-  paddingHorizontal: 20,
   paddingBottom: 24,
 };
 
@@ -89,81 +91,6 @@ function SearchHint() {
     <Text className="px-6 py-4 text-center text-sm leading-6 text-muted">
       {`Type ${DIRECTORY_SEARCH_MIN_LENGTH} characters to search the directory`}
     </Text>
-  );
-}
-
-function SecurityBadge({
-  ready,
-  label,
-}: {
-  ready: boolean;
-  label: string;
-}) {
-  return (
-    <View
-      className={`rounded-full border px-3 py-1 ${
-        ready ? 'border-primary/30 bg-primary-soft/60' : 'border-warning/30 bg-warning/10'
-      }`}
-    >
-      <Text className={`text-xs font-semibold ${ready ? 'text-primary' : 'text-warning'}`}>
-        {label}
-      </Text>
-    </View>
-  );
-}
-
-function ContactRow({
-  title,
-  subtitle,
-  avatarSeed,
-  onPress,
-  badges,
-  trailing,
-  action,
-  topAction,
-}: {
-  title: string;
-  subtitle: string;
-  avatarSeed: string;
-  onPress: () => void;
-  badges?: ReactNode;
-  trailing?: ReactNode;
-  action?: ReactNode;
-  topAction?: ReactNode;
-}) {
-  return (
-    <Pressable
-      onPress={onPress}
-      className="mb-3 rounded-[20px] border border-border bg-surface/88 p-4 active:opacity-80"
-    >
-      <View className="flex-row items-center">
-        <View className="mr-4 h-14 w-14 items-center justify-center rounded-full bg-primary-soft">
-          <Text className="text-lg font-semibold text-primary">
-            {(avatarSeed || '?').slice(0, 1).toUpperCase()}
-          </Text>
-        </View>
-
-        <View className="flex-1">
-          <View className="flex-row items-start justify-between gap-3">
-            <Text className="flex-1 text-base font-semibold text-text">{title}</Text>
-            {topAction}
-          </View>
-          <Text className="mt-1 text-sm text-muted">{subtitle}</Text>
-
-          {badges ? (
-            <View className="mt-3 flex-row items-center justify-between">
-              <View className="flex-row flex-wrap items-center gap-2">{badges}</View>
-              <View className="flex-row items-center gap-2">
-                {action}
-                {trailing}
-              </View>
-            </View>
-          ) : trailing ? (
-            <View className="mt-3 flex-row items-center justify-end">{trailing}</View>
-          ) : null}
-        </View>
-      </View>
-    </Pressable>
   );
 }
 
@@ -424,6 +351,31 @@ export default function NewChatScreen({
     [myUserId, removeSavedContact, saveContact, savedContactIdSet],
   );
 
+  /** B1: every person on this screen is one list row: avatar, name with a verified mark, one line, the Verify / Add actions. */
+  const renderPerson = useCallback(
+    (p: { peerUserId: string; peerUsername?: string; peerEmail?: string; title: string; subtitle: string; hasPublicKey: boolean | null; verified: boolean }) => {
+      const noKey = p.hasPublicKey === false;
+      return (
+        <ListRow
+          avatar={<Avatar name={p.title || '?'} profile={profilesByUser[p.peerUserId] ?? null} size="list" />}
+          title={p.title}
+          titleIcon={p.verified ? 'badge-check' : undefined}
+          subtitle={noKey ? 'No encryption key yet' : p.subtitle}
+          subtitleTone={noKey ? 'warning' : 'muted'}
+          subtitleIcon={noKey ? 'key-round' : undefined}
+          trailing={
+            <>
+              {renderVerifyAction({ peerUserId: p.peerUserId, peerUsername: p.peerUsername, peerEmail: p.peerEmail, verified: p.verified })}
+              {renderSaveAction({ peerUserId: p.peerUserId, peerUsername: p.peerUsername, peerEmail: p.peerEmail })}
+            </>
+          }
+          onPress={() => onOpenChat({ peerUserId: p.peerUserId, peerUsername: p.peerUsername })}
+        />
+      );
+    },
+    [onOpenChat, profilesByUser, renderSaveAction, renderVerifyAction],
+  );
+
   async function loadUsers(query: string) {
     setLoading(true);
     setError(null);
@@ -644,81 +596,34 @@ export default function NewChatScreen({
               const isVerified = item.id === 'verified-header';
 
               return (
-                <SectionEyebrow title={isSaved ? 'Saved contacts' : isVerified ? 'Verified contacts' : 'Recent'} compact />
+                <View className="px-3 pt-2">
+                  <SectionEyebrow title={isSaved ? 'Saved contacts' : isVerified ? 'Verified contacts' : 'Recent'} compact />
+                </View>
               );
             }
 
             if (item.type === 'saved-contact') {
-              const { contact, verified, hasConversation } = item.entry;
-
-              return (
-                <ContactRow
-                  title={contact.peerUsername || contact.peerUserId}
-                  subtitle={contactSubtitle({ username: contact.peerUsername, userId: contact.peerUserId })}
-                  avatarSeed={contact.peerUsername || contact.peerUserId}
-                  onPress={() =>
-                    onOpenChat({
-                      peerUserId: contact.peerUserId,
-                      peerUsername: contact.peerUsername,
-                    })
-                  }
-                  badges={
-                    <>
-                      {verified ? <SecurityBadge ready label="Verified" /> : null}
-                      <SecurityBadge ready={hasConversation} label={hasConversation ? 'Recent chat' : 'Saved only'} />
-                    </>
-                  }
-                  action={renderVerifyAction({
-                    peerUserId: contact.peerUserId,
-                    peerUsername: contact.peerUsername,
-                    peerEmail: contact.peerEmail,
-                    verified,
-                  })}
-                  topAction={renderSaveAction({
-                    peerUserId: contact.peerUserId,
-                    peerUsername: contact.peerUsername,
-                    peerEmail: contact.peerEmail,
-                  })}
-                  trailing={<Text className="text-xs font-medium text-muted">Open chat</Text>}
-                />
-              );
+              const { contact, verified } = item.entry;
+              return renderPerson({
+                peerUserId: contact.peerUserId,
+                peerUsername: contact.peerUsername,
+                peerEmail: contact.peerEmail,
+                title: contact.peerUsername || contact.peerUserId,
+                subtitle: contactSubtitle({ username: contact.peerUsername, userId: contact.peerUserId }),
+                hasPublicKey: null,
+                verified,
+              });
             }
 
             const conversation = item.conversation;
-            const isVerified = item.type === 'verified-contact';
-
-            return (
-              <ContactRow
-                title={conversation.peerUsername}
-                subtitle={formatHandle(conversation.peerUsername)}
-                avatarSeed={conversation.peerUsername}
-                onPress={() =>
-                  onOpenChat({
-                    peerUserId: conversation.peerUserId,
-                    peerUsername: conversation.peerUsername,
-                  })
-                }
-                badges={
-                  <>
-                    {isVerified ? <SecurityBadge ready label="Verified" /> : null}
-                    <SecurityBadge
-                      ready={conversation.peerHasPublicKey}
-                      label={conversation.peerHasPublicKey ? 'Ready for E2EE' : 'No public key yet'}
-                    />
-                  </>
-                }
-                action={renderVerifyAction({
-                  peerUserId: conversation.peerUserId,
-                  peerUsername: conversation.peerUsername,
-                  verified: isVerified,
-                })}
-                topAction={renderSaveAction({
-                  peerUserId: conversation.peerUserId,
-                  peerUsername: conversation.peerUsername,
-                })}
-                trailing={<Text className="text-xs font-medium text-muted">Open chat</Text>}
-              />
-            );
+            return renderPerson({
+              peerUserId: conversation.peerUserId,
+              peerUsername: conversation.peerUsername,
+              title: conversation.peerUsername,
+              subtitle: formatHandle(conversation.peerUsername),
+              hasPublicKey: conversation.peerHasPublicKey,
+              verified: item.type === 'verified-contact',
+            });
           }}
         />
       )}
@@ -763,114 +668,45 @@ export default function NewChatScreen({
           ListFooterComponent={!directorySearch && discoverSections.length > 0 ? <SearchHint /> : null}
           renderItem={({ item }) => {
             if (item.type === 'section') {
-              return <SectionEyebrow title={item.title} compact />;
+              return (
+                <View className="px-3 pt-2">
+                  <SectionEyebrow title={item.title} compact />
+                </View>
+              );
             }
 
             if (item.type === 'conversation') {
               const conversation = item.conversation;
-              return (
-                <ContactRow
-                  title={conversation.peerUsername}
-                  subtitle={formatHandle(conversation.peerUsername)}
-                  avatarSeed={conversation.peerUsername}
-                  onPress={() =>
-                    onOpenChat({
-                      peerUserId: conversation.peerUserId,
-                      peerUsername: conversation.peerUsername,
-                    })
-                  }
-                  badges={
-                    <>
-                      {item.verified ? <SecurityBadge ready label="Verified" /> : null}
-                      <SecurityBadge
-                        ready={conversation.peerHasPublicKey}
-                        label={conversation.peerHasPublicKey ? 'Ready for E2EE' : 'No public key yet'}
-                      />
-                    </>
-                  }
-                  action={renderVerifyAction({
-                    peerUserId: conversation.peerUserId,
-                    peerUsername: conversation.peerUsername,
-                    verified: item.verified,
-                  })}
-                  topAction={renderSaveAction({
-                    peerUserId: conversation.peerUserId,
-                    peerUsername: conversation.peerUsername,
-                  })}
-                  trailing={<Text className="text-xs font-medium text-muted">Open chat</Text>}
-                />
-              );
+              return renderPerson({
+                peerUserId: conversation.peerUserId,
+                peerUsername: conversation.peerUsername,
+                title: conversation.peerUsername,
+                subtitle: formatHandle(conversation.peerUsername),
+                hasPublicKey: conversation.peerHasPublicKey,
+                verified: item.verified,
+              });
             }
 
             if (item.type === 'saved') {
-              return (
-                <ContactRow
-                  title={item.contact.peerUsername || item.contact.peerUserId}
-                  subtitle={contactSubtitle({ username: item.contact.peerUsername, userId: item.contact.peerUserId })}
-                  avatarSeed={item.contact.peerUsername || item.contact.peerUserId}
-                  onPress={() =>
-                    onOpenChat({
-                      peerUserId: item.contact.peerUserId,
-                      peerUsername: item.contact.peerUsername,
-                    })
-                  }
-                  badges={
-                    <>
-                      {item.verified ? <SecurityBadge ready label="Verified" /> : null}
-                      <SecurityBadge
-                        ready={item.hasConversation}
-                        label={item.hasConversation ? 'Recent chat' : 'Saved only'}
-                      />
-                    </>
-                  }
-                  action={renderVerifyAction({
-                    peerUserId: item.contact.peerUserId,
-                    peerUsername: item.contact.peerUsername,
-                    peerEmail: item.contact.peerEmail,
-                    verified: item.verified,
-                  })}
-                  topAction={renderSaveAction({
-                    peerUserId: item.contact.peerUserId,
-                    peerUsername: item.contact.peerUsername,
-                    peerEmail: item.contact.peerEmail,
-                  })}
-                  trailing={<Text className="text-xs font-medium text-muted">Open chat</Text>}
-                />
-              );
+              return renderPerson({
+                peerUserId: item.contact.peerUserId,
+                peerUsername: item.contact.peerUsername,
+                peerEmail: item.contact.peerEmail,
+                title: item.contact.peerUsername || item.contact.peerUserId,
+                subtitle: contactSubtitle({ username: item.contact.peerUsername, userId: item.contact.peerUserId }),
+                hasPublicKey: null,
+                verified: item.verified,
+              });
             }
 
-            return (
-              <ContactRow
-                title={item.user.username}
-                subtitle={shortSecureId(item.user.userId)}
-                avatarSeed={item.user.username}
-                onPress={() =>
-                  onOpenChat({
-                    peerUserId: item.user.userId,
-                    peerUsername: item.user.username,
-                  })
-                }
-                badges={
-                  <>
-                    {item.verified ? <SecurityBadge ready label="Verified" /> : null}
-                    <SecurityBadge
-                      ready={Boolean(item.user.hasPublicKey)}
-                      label={item.user.hasPublicKey ? 'Ready for E2EE' : 'No public key yet'}
-                    />
-                  </>
-                }
-                action={renderVerifyAction({
-                  peerUserId: item.user.userId,
-                  peerUsername: item.user.username,
-                  verified: item.verified,
-                })}
-                topAction={renderSaveAction({
-                  peerUserId: item.user.userId,
-                  peerUsername: item.user.username,
-                })}
-                trailing={<Text className="text-xs font-medium text-muted">Open chat</Text>}
-              />
-            );
+            return renderPerson({
+              peerUserId: item.user.userId,
+              peerUsername: item.user.username,
+              title: item.user.username,
+              subtitle: shortSecureId(item.user.userId),
+              hasPublicKey: Boolean(item.user.hasPublicKey),
+              verified: item.verified,
+            });
           }}
         />
       )}

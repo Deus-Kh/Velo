@@ -124,9 +124,9 @@ export default function ChatListScreen({
     : showArchivedView
       ? 'Archived conversations stay out of the main list until you bring them back.'
       : 'Private conversations, secured end to end.';
+  // B1: flat rows span the full width; only the section labels carry side padding
   const listContentContainerStyle = useMemo(
     () => ({
-      paddingHorizontal: interfaceDensity === 'compact' ? 16 : 20,
       paddingBottom: interfaceDensity === 'compact' ? 18 : 24,
     }),
     [interfaceDensity],
@@ -343,7 +343,6 @@ export default function ChatListScreen({
         <ArchivedRow
           count={archivedConversations.length}
           unreadCount={archivedUnreadCount}
-          compact={interfaceDensity === 'compact'}
           onPress={() => setShowArchivedView(true)}
         />
       ) : null}
@@ -360,7 +359,7 @@ export default function ChatListScreen({
           <FlatList
             data={homeListItems}
             keyExtractor={(item) => item.id}
-            className="mt-4"
+            className="mt-2"
             contentContainerStyle={listContentContainerStyle}
             onScroll={(event) => {
               const offsetY = event.nativeEvent.contentOffset.y;
@@ -373,7 +372,9 @@ export default function ChatListScreen({
             scrollEventThrottle={16}
             renderItem={({ item }) =>
               item.type === 'section' ? (
-                <SectionEyebrow title={item.label} compact />
+                <View className="px-3 pt-2">
+                  <SectionEyebrow title={item.label} compact />
+                </View>
               ) : item.type === 'group' ? (
                 <GroupRow
                   group={item.group}
@@ -384,10 +385,10 @@ export default function ChatListScreen({
                 <ConversationRow
                   item={item.item}
                   title={profiles[item.item.peerUserId]?.name?.trim() || item.item.peerUsername}
-                  badge={pinnedConversationIds.includes(item.item.conversationId) ? 'pinned' : null}
                   profile={profiles[item.item.peerUserId] ?? null}
                   preview={previewFor(item.item)}
-                  showSecurityRow
+                  pinned={pinnedConversationIds.includes(item.item.conversationId)}
+                  blocked={blockedIds.includes(item.item.peerUserId)}
                   onPress={() =>
                     onOpenChat({
                       peerUserId: item.item.peerUserId,
@@ -413,16 +414,16 @@ export default function ChatListScreen({
               tintColor="#94A3B8"
             />
           }
-          className="mt-4"
+          className="mt-2"
           contentContainerStyle={listContentContainerStyle}
           renderItem={({ item }) => (
             <ConversationRow
               item={item}
-              title={item.peerUsername}
-              badge="archived"
+              title={profiles[item.peerUserId]?.name?.trim() || item.peerUsername}
               profile={profiles[item.peerUserId] ?? null}
               preview={previewFor(item)}
-              showSecurityRow
+              pinned={false}
+              blocked={blockedIds.includes(item.peerUserId)}
               onPress={() =>
                 onOpenChat({
                   peerUserId: item.peerUserId,
@@ -446,15 +447,18 @@ export default function ChatListScreen({
               tintColor="#94A3B8"
             />
           }
-          className="mt-4"
+          className="mt-2"
           contentContainerStyle={listContentContainerStyle}
           renderItem={({ item }) => (
             item.type === 'section' ? (
-              <SectionEyebrow title={item.label} compact />
+              <View className="px-3 pt-2">
+                <SectionEyebrow title={item.label} compact />
+              </View>
             ) : item.type === 'message' ? (
               <MessageHitRow
                 title={item.title}
                 hit={item.hit}
+                profile={profiles[item.hit.peerKey] ?? null}
                 onPress={() => {
                   const { hit } = item;
                   if (hit.peerKey.startsWith('group:')) onOpenGroup({ groupId: hit.peerKey.slice('group:'.length), name: item.title, jumpToMessageId: hit.message.id });
@@ -465,10 +469,10 @@ export default function ChatListScreen({
               <ConversationRow
                 item={item.item}
                 title={profiles[item.item.peerUserId]?.name?.trim() || item.item.peerUsername}
-                badge="existing"
                 profile={profiles[item.item.peerUserId] ?? null}
                 preview={previewFor(item.item)}
-                showSecurityRow={false}
+                pinned={pinnedConversationIds.includes(item.item.conversationId)}
+                blocked={blockedIds.includes(item.item.peerUserId)}
                 onPress={() =>
                   onOpenChat({
                     peerUserId: item.item.peerUserId,

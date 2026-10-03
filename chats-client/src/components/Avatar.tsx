@@ -8,6 +8,8 @@ import type { StoredProfile } from '../shared/storage/profileStore';
 const SIZES = {
   sm: { box: 'h-9 w-9', text: 'text-sm', emoji: 'text-[18px]', px: 36 },
   md: { box: 'h-11 w-11', text: 'text-base', emoji: 'text-[22px]', px: 44 },
+  /** B1: the list-row size (chat list, contacts, pickers). */
+  list: { box: 'h-12 w-12', text: 'text-base', emoji: 'text-[24px]', px: 48 },
   lg: { box: 'h-14 w-14', text: 'text-lg', emoji: 'text-[28px]', px: 56 },
   xl: { box: 'h-20 w-20', text: 'text-2xl', emoji: 'text-[40px]', px: 80 },
 } as const;

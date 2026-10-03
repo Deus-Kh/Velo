@@ -1,17 +1,21 @@
 import { useEffect, useMemo, useState } from 'react';
-import { FlatList, Pressable, Text, TextInput, View } from 'react-native';
+import { FlatList, Text, TextInput, View } from 'react-native';
 
+import Avatar from './Avatar';
 import BottomSheetPanel from './BottomSheetPanel';
+import ListRow from './ListRow';
+import { useProfilesStore } from '../store/profiles.store';
 import { conversationsApi } from '../shared/api/conversations.api';
 import { groupsApi, type GroupView } from '../shared/api/groups.api';
 import { useContactsStore } from '../store/contacts.store';
 import type { ConversationTarget } from '../shared/chat/actions';
 
 /** T7.2: choose where a forwarded message goes: a recent chat, a saved contact, or a group. */
-type Row = { key: string; title: string; subtitle: string; target: ConversationTarget };
+type Row = { key: string; title: string; subtitle: string; peerUserId: string | null; target: ConversationTarget };
 
 export default function ForwardPicker({ myUserId, excludePeerKey, onClose, onPick }: { myUserId: string; excludePeerKey?: string | null; onClose: () => void; onPick: (target: ConversationTarget) => void }) {
   const savedContactsByUser = useContactsStore((s) => s.savedContactsByUser);
+  const profiles = useProfilesStore((s) => s.byUser);
   const [query, setQuery] = useState('');
   const [conversations, setConversations] = useState<Array<{ peerUserId: string; peerUsername: string }>>([]);
   const [groups, setGroups] = useState<GroupView[]>([]);
@@ -41,21 +45,21 @@ export default function ForwardPicker({ myUserId, excludePeerKey, onClose, onPic
       const key = 'group:' + g.groupId;
       if (key === excludePeerKey) continue;
       seen.add(key);
-      out.push({ key, title: g.name, subtitle: `${g.members.length} members · group`, target: { kind: 'group', group: g } });
+      out.push({ key, title: g.name, subtitle: `${g.members.length} members · group`, peerUserId: null, target: { kind: 'group', group: g } });
     }
     for (const c of conversations) {
       if (c.peerUserId === excludePeerKey || seen.has(c.peerUserId)) continue;
       seen.add(c.peerUserId);
-      out.push({ key: c.peerUserId, title: c.peerUsername || c.peerUserId, subtitle: 'Recent chat', target: { kind: 'peer', peerUserId: c.peerUserId } });
+      out.push({ key: c.peerUserId, title: profiles[c.peerUserId]?.name?.trim() || c.peerUsername || c.peerUserId, subtitle: 'Recent chat', peerUserId: c.peerUserId, target: { kind: 'peer', peerUserId: c.peerUserId } });
     }
     for (const s of savedContactsByUser[myUserId] ?? []) {
       if (s.peerUserId === excludePeerKey || seen.has(s.peerUserId)) continue;
       seen.add(s.peerUserId);
-      out.push({ key: s.peerUserId, title: s.peerUsername || s.peerUserId, subtitle: 'Saved contact', target: { kind: 'peer', peerUserId: s.peerUserId } });
+      out.push({ key: s.peerUserId, title: profiles[s.peerUserId]?.name?.trim() || s.peerUsername || s.peerUserId, subtitle: 'Saved contact', peerUserId: s.peerUserId, target: { kind: 'peer', peerUserId: s.peerUserId } });
     }
     const q = query.trim().toLowerCase();
     return q ? out.filter((r) => r.title.toLowerCase().includes(q)) : out;
-  }, [conversations, excludePeerKey, groups, myUserId, query, savedContactsByUser]);
+  }, [conversations, excludePeerKey, groups, myUserId, profiles, query, savedContactsByUser]);
 
   return (
     <BottomSheetPanel title="Forward to" onClose={onClose}>
@@ -69,18 +73,14 @@ export default function ForwardPicker({ myUserId, excludePeerKey, onClose, onPic
           keyboardShouldPersistTaps="handled"
           ListEmptyComponent={<Text className="px-1 py-3 text-xs text-muted">{loading ? 'Loading…' : 'No chat matches.'}</Text>}
           renderItem={({ item }) => (
-            <Pressable onPress={() => onPick(item.target)} className="flex-row items-center py-2 active:opacity-80">
-              <View className="mr-3 h-9 w-9 items-center justify-center rounded-full bg-primary-soft">
-                <Text className="text-sm font-semibold text-primary">{item.title.slice(0, 1).toUpperCase()}</Text>
-              </View>
-              <View className="flex-1">
-                <Text className="text-sm font-semibold text-text" numberOfLines={1}>
-                  {item.title}
-                </Text>
-                <Text className="text-xs text-muted">{item.subtitle}</Text>
-              </View>
-              <Text className="text-xs font-semibold text-primary">Send</Text>
-            </Pressable>
+            <ListRow
+              avatar={<Avatar name={item.title} profile={item.peerUserId ? profiles[item.peerUserId] ?? null : null} size="list" />}
+              title={item.title}
+              subtitle={item.subtitle}
+              trailing={<Text className="text-xs font-semibold text-primary">Send</Text>}
+              padded={false}
+              onPress={() => onPick(item.target)}
+            />
           )}
         />
       </View>
