@@ -20,6 +20,12 @@ export type ThemeColorSet = {
   success: string;
   warning: string;
   danger: string;
+  /** B3: the outgoing bubble and its text pair; the incoming bubble and its hairline. */
+  bubbleOut: string;
+  bubbleOutText: string;
+  bubbleOutMuted: string;
+  bubbleIn: string;
+  bubbleInBorder: string;
 };
 
 const rgb = (triplet: string): string => `rgb(${triplet.trim().split(/\s+/).join(', ')})`;
@@ -38,6 +44,11 @@ export function themeColorSet(t: ThemeColors): ThemeColorSet {
     success: rgb(t['--color-success']),
     warning: rgb(t['--color-warning']),
     danger: rgb(t['--color-danger']),
+    bubbleOut: rgb(t['--color-bubble-out']),
+    bubbleOutText: rgb(t['--color-bubble-out-text']),
+    bubbleOutMuted: rgb(t['--color-bubble-out-muted']),
+    bubbleIn: rgb(t['--color-bubble-in']),
+    bubbleInBorder: rgb(t['--color-bubble-in-border']),
   };
 }
 

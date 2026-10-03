@@ -48,12 +48,10 @@ const MIN_BARS = 16;
 const BAR_WIDTH = 3;
 const BAR_GAP = 2;
 const WAVE_HEIGHT = 28;
-/** The note fills the bubble: at most 80 % of the screen less the bubble's horizontal padding. */
+/** B3: a voice bubble is a fixed ~75 % of the screen (never edge to edge); the note fills it less the bubble's own padding. */
 const NOTE_MAX_WIDTH = 300;
 const NOTE_MIN_WIDTH = 200;
-// MessageBubble is max-w-[80%] of the message row, which sits inside the list's px-3; its own px-4 is inside the 80 %.
-const LIST_HORIZONTAL_PADDING = 24;
-const BUBBLE_MAX_FRACTION = 0.8;
+const BUBBLE_MAX_FRACTION = 0.75;
 const BUBBLE_PADDING = 32;
 
 type Playback = {
@@ -80,11 +78,7 @@ export default function VoiceNoteView({
     NOTE_MAX_WIDTH,
     Math.max(
       NOTE_MIN_WIDTH,
-      Math.floor(
-        (windowWidth - LIST_HORIZONTAL_PADDING) * BUBBLE_MAX_FRACTION,
-      ) -
-        BUBBLE_PADDING -
-        1,
+      Math.floor(windowWidth * BUBBLE_MAX_FRACTION) - BUBBLE_PADDING - 1,
     ),
   );
   // null = not checked yet. An own upload or a blob seen earlier in this process starts as local (A2).
@@ -220,7 +214,8 @@ export default function VoiceNoteView({
 
   const fill = duration > 0 ? Math.min(1, playback.positionMs / duration) : 0;
   const active = playback.state !== 'idle';
-  const barColor = mine ? colors.background : colors.primary;
+  // B3: the waveform and the play button take the accent on both bubbles; on an outgoing bubble the icon is the bubble colour
+  const barColor = colors.primary;
   const label = error
     ? error.text
     : downloading !== null
@@ -233,7 +228,7 @@ export default function VoiceNoteView({
   const labelTone = error?.warning
     ? 'text-danger'
     : mine
-    ? 'text-background/80'
+    ? 'text-bubble-out-muted'
     : 'text-muted';
   const checking = local === null && downloading === null;
   const icon = local === false
@@ -259,15 +254,13 @@ export default function VoiceNoteView({
         hitSlop={6}
       >
         <View
-          className={`h-11 w-11 items-center justify-center rounded-full ${
-            mine ? 'bg-background' : 'bg-primary'
-          }`}
+          className="h-11 w-11 items-center justify-center rounded-full bg-primary"
           style={checking ? styles.checking : undefined}
         >
           {downloading !== null ? (
             <Text
               className={`text-[14px] font-semibold ${
-                mine ? 'text-primary' : 'text-background'
+                mine ? 'text-bubble-out' : 'text-background'
               }`}
             >
               …
@@ -277,7 +270,7 @@ export default function VoiceNoteView({
               lib="Lucide"
               name={icon}
               size={20}
-              color={mine ? colors.primary : colors.background}
+              color={mine ? colors.bubbleOut : colors.background}
             />
           )}
         </View>
@@ -333,12 +326,12 @@ export default function VoiceNoteView({
             >
               <View
                 className={`ml-2 h-7 min-w-[44px] items-center justify-center rounded-full px-2.5 ${
-                  mine ? 'bg-background/20' : 'bg-primary/15'
+                  mine ? 'bg-bubble-out-text/15' : 'bg-primary/15'
                 }`}
               >
                 <Text
                   className={`text-[13px] font-bold ${
-                    mine ? 'text-background' : 'text-primary'
+                    mine ? 'text-bubble-out-text' : 'text-primary'
                   }`}
                 >{`${speed}×`}</Text>
               </View>

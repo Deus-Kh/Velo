@@ -18,7 +18,12 @@ module.exports = {
         success: "rgb(var(--color-success) / <alpha-value>)",
         warning: "rgb(var(--color-warning) / <alpha-value>)",
         danger: "rgb(var(--color-danger) / <alpha-value>)",
-        
+        // B3: message bubbles, per theme (see src/theme/theme.ts)
+        "bubble-out": "rgb(var(--color-bubble-out) / <alpha-value>)",
+        "bubble-out-text": "rgb(var(--color-bubble-out-text) / <alpha-value>)",
+        "bubble-out-muted": "rgb(var(--color-bubble-out-muted) / <alpha-value>)",
+        "bubble-in": "rgb(var(--color-bubble-in) / <alpha-value>)",
+        "bubble-in-border": "rgb(var(--color-bubble-in-border) / <alpha-value>)",
       },
     },
   },

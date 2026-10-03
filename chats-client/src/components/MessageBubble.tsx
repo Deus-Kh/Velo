@@ -28,20 +28,9 @@ function statusIconName(status: MessageStatus): LucideIconName | null {
   }
 }
 
-function getStatusColor(status: MessageStatus, mine: boolean) {
-  switch (status) {
-    case 'sending':
-      return mine ? 'rgba(255,255,255,0.92)' : '#F59E0B';
-    case 'delivered':
-      return mine ? 'rgba(255,255,255,0.92)' : '#2DD4BF';
-    case 'read':
-      return mine ? 'rgba(255,255,255,0.92)' : '#22C55E';
-    case 'failed':
-      return '#F87171';
-    case 'sent':
-    default:
-      return mine ? 'rgba(255,255,255,0.92)' : '#94A3B8';
-  }
+/** B3: the status icon takes the outgoing bubble's muted text colour; failure is the danger tone (B14 adds the read accent). */
+function getStatusColor(status: MessageStatus, colors: { bubbleOutMuted: string; danger: string }) {
+  return status === 'failed' ? colors.danger : colors.bubbleOutMuted;
 }
 
 function formatMessageTime(timestamp: number) {
@@ -103,11 +92,13 @@ export default function MessageBubble({
   const statusIcon = statusIconName(status);
   const timeLabel = formatMessageTime(timestamp);
   const swipeableRef = useRef<SwipeableMethods | null>(null);
-  const bubbleTone = mine ? 'bg-primary' : 'bg-surface-elevated';
-  const footerTextTone = mine ? 'text-background/65' : 'text-muted';
-  const statusColor = getStatusColor(status, mine);
+  // B3: bubble tokens per theme (src/theme/theme.ts): outgoing is the accent at reduced saturation
+  // with its own text pair, incoming the elevated surface with a hairline where the theme wants one
+  const bubbleTone = mine ? 'bg-bubble-out' : 'border border-bubble-in-border bg-bubble-in';
+  const footerTextTone = mine ? 'text-bubble-out-muted' : 'text-muted';
+  const statusColor = getStatusColor(status, colors);
   const showMeta = Boolean(timeLabel) || Boolean(statusIcon);
-  const messageTextTone = mine ? 'text-background' : 'text-text';
+  const messageTextTone = mine ? 'text-bubble-out-text' : 'text-text';
   const hasReactions = Boolean(reactions && reactions.length > 0);
   const compactMeta =
     showMeta &&
@@ -118,10 +109,10 @@ export default function MessageBubble({
     !attachment &&
     !text.includes('\n') &&
     text.trim().length <= 24;
-  const replyPreviewSurfaceClass = mine ? 'bg-[#0A6F80]' : 'bg-surface';
-  const replyPreviewAccentClass = mine ? 'bg-white/75' : 'bg-primary';
-  const replyPreviewTitleTone = mine ? 'text-white' : 'text-primary';
-  const replyPreviewTextTone = mine ? 'text-white/82' : 'text-muted';
+  const replyPreviewSurfaceClass = mine ? 'bg-bubble-out-text/10' : 'bg-surface';
+  const replyPreviewAccentClass = 'bg-primary';
+  const replyPreviewTitleTone = 'text-primary';
+  const replyPreviewTextTone = mine ? 'text-bubble-out-muted' : 'text-muted';
   const replySwipeTriggeredRef = useRef(false);
   const inlineMeta = Boolean(attachmentMetaInline && attachment && !text && !deleted && showMeta);
 
@@ -176,7 +167,7 @@ export default function MessageBubble({
         <View className="mt-1 flex-row items-center">
           {replyPreview.icon ? (
             <View className="mr-1.5">
-              <Icon lib="Lucide" name={replyPreview.icon} size={13} color={mine ? '#FFFFFF' : colors.muted} />
+              <Icon lib="Lucide" name={replyPreview.icon} size={13} color={mine ? colors.bubbleOutMuted : colors.muted} />
             </View>
           ) : null}
           <Text numberOfLines={2} className={`shrink text-[12px] leading-[18px] ${replyPreviewTextTone}`}>
@@ -192,7 +183,7 @@ export default function MessageBubble({
       disabled={!onPress}
       onPress={onPress}
       className={`relative mb-1.5 max-w-[80%] rounded-[20px] px-4 py-2.5 ${
-        mine ? 'self-end rounded-br-[8px] bg-primary' : 'self-start rounded-bl-[8px] bg-surface-elevated'
+        mine ? 'self-end rounded-br-[8px]' : 'self-start rounded-bl-[8px]'
       } ${replyPreview ? 'min-w-[156px]' : ''} ${bubbleTone} ${onPress ? 'active:opacity-80' : ''}`}
     >
       {compactMeta ? (
@@ -212,8 +203,8 @@ export default function MessageBubble({
           {replyPreviewNode}
           {forwarded && !deleted ? (
             <View className="mb-0.5 flex-row items-center">
-              <Icon lib="Lucide" name="corner-up-right" size={12} color={mine ? colors.background : colors.primary} />
-              <Text className={`ml-1 text-[11px] font-semibold ${mine ? 'text-background/70' : 'text-primary'}`}>Forwarded</Text>
+              <Icon lib="Lucide" name="corner-up-right" size={12} color={mine ? colors.bubbleOutMuted : colors.primary} />
+              <Text className={`ml-1 text-[11px] font-semibold ${mine ? 'text-bubble-out-muted' : 'text-primary'}`}>Forwarded</Text>
             </View>
           ) : null}
           {!deleted && attachment ? (
@@ -225,7 +216,7 @@ export default function MessageBubble({
             )
           ) : null}
           {deleted ? (
-            <Text className={`text-[15px] italic leading-[21px] ${mine ? 'text-background/75' : 'text-muted'}`}>This message was deleted</Text>
+            <Text className={`text-[15px] italic leading-[21px] ${mine ? 'text-bubble-out-muted' : 'text-muted'}`}>This message was deleted</Text>
           ) : text || !attachment ? (
             <Text className={`text-[15px] leading-[21px] ${messageTextTone}`}>
               {text}
@@ -243,7 +234,7 @@ export default function MessageBubble({
               {reactions!.map((r) => (
                 <View
                   key={r.emoji}
-                  className={`flex-row items-center rounded-full px-2 py-0.5 ${r.mine ? (mine ? 'bg-white/30' : 'bg-primary/20') : mine ? 'bg-white/15' : 'bg-black/10'}`}
+                  className={`flex-row items-center rounded-full px-2 py-0.5 ${r.mine ? (mine ? 'bg-bubble-out-text/25' : 'bg-primary/20') : mine ? 'bg-bubble-out-text/12' : 'bg-text/10'}`}
                 >
                   <Text className="text-[13px]">{r.emoji}</Text>
                   {r.count > 1 ? <Text className={`ml-1 text-[11px] font-semibold ${messageTextTone}`}>{r.count}</Text> : null}
