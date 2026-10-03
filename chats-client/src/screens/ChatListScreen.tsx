@@ -8,12 +8,13 @@ import {
   FlatList,
   Pressable,
   ActivityIndicator,
+  BackHandler,
   RefreshControl,
 } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import ScreenHeader from '../components/ScreenHeader';
+import ScreenHeader, { HeaderIconButton } from '../components/ScreenHeader';
 import SectionEyebrow from '../components/SectionEyebrow';
 import type { ConversationListItem } from '../shared/api/conversations.api';
 import { useAuthStore } from '../store/auth.store';
@@ -57,11 +58,14 @@ const ARCHIVE_REVEAL_HORIZONTAL_TOLERANCE = 10;
 export default function ChatListScreen({
   onOpenChat,
   onOpenGroup,
+  onNewChat,
   recentlyClosedChatPeerUserId,
   onHandledClosedChat,
 }: {
   onOpenChat: ChatOpenHandler;
   onOpenGroup: GroupOpenHandler;
+  /** B2: the header's "new chat" action; the tabs host switches to the New Chat tab. */
+  onNewChat: () => void;
   recentlyClosedChatPeerUserId: string | null;
   onHandledClosedChat: () => void;
 }) {
@@ -79,6 +83,10 @@ export default function ChatListScreen({
   const profiles = useProfilesStore((s) => s.byUser); // T7.7
 
   const [q, setQ] = useState('');
+  // B2: the search field lives behind the header's search icon; Back or the x closes it
+  const [searchOpen, setSearchOpen] = useState(false);
+  const searchInputRef = useRef<TextInput>(null);
+  const searchFocusedRef = useRef(false);
   const [selectedConversationAction, setSelectedConversationAction] =
     useState<SelectedConversationAction | null>(null);
   const [showArchivedView, setShowArchivedView] = useState(false);
@@ -119,11 +127,31 @@ export default function ChatListScreen({
     groupList,
   });
 
-  const headerSubtitle = showingSearch
-    ? 'Find a contact and open an encrypted conversation.'
-    : showArchivedView
-      ? 'Archived conversations stay out of the main list until you bring them back.'
-      : 'Private conversations, secured end to end.';
+  const openSearch = useCallback(() => {
+    searchFocusedRef.current = false;
+    setSearchOpen(true);
+  }, []);
+  const closeSearch = useCallback(() => {
+    setQ('');
+    setSearchOpen(false);
+  }, []);
+  // A8: focus once the field has a layout; an earlier focus does not raise the keyboard
+  const focusSearchOnLayout = useCallback(() => {
+    if (searchFocusedRef.current) return;
+    searchFocusedRef.current = true;
+    requestAnimationFrame(() => searchInputRef.current?.focus());
+  }, []);
+
+  // Back closes the search field, then the archived view; otherwise it is not ours (A7).
+  useEffect(() => {
+    if (!searchOpen && !showArchivedView) return undefined;
+    const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
+      if (searchOpen) closeSearch();
+      else setShowArchivedView(false);
+      return true;
+    });
+    return () => subscription.remove();
+  }, [closeSearch, searchOpen, showArchivedView]);
   // B1: flat rows span the full width; only the section labels carry side padding
   const listContentContainerStyle = useMemo(
     () => ({
@@ -249,37 +277,46 @@ export default function ChatListScreen({
     <View className="flex-1 bg-background" style={{ paddingTop: insets.top }}>
       <ScreenHeader
         title={showArchivedView ? 'Archived' : 'Chats'}
-        subtitle={headerSubtitle}
         actions={
+          // B2: the header keeps the title, a search icon and a "new chat" action; "Log out" lives in Settings → Account
           showArchivedView ? (
-            <Pressable
-              onPress={() => setShowArchivedView(false)}
-              className="h-10 w-10 items-center justify-center rounded-full border border-border bg-surface-elevated active:opacity-80"
-            >
-              <Icon lib="Lucide" name="chevron-left" size={22} color={colors.text} />
-            </Pressable>
-          ) : null
-          // B2: no "Log out" in the chat-list header; the confirmed one lives in Settings → Account
+            <HeaderIconButton icon="chevron-left" label="Back to chats" onPress={() => setShowArchivedView(false)} />
+          ) : (
+            <View className="flex-row items-center gap-2">
+              <HeaderIconButton icon="search" label="Search" onPress={openSearch} testID="chat-list-search" />
+              <HeaderIconButton icon="square-pen" label="New chat" onPress={onNewChat} testID="chat-list-new-chat" />
+            </View>
+          )
         }
       />
-      <View className="px-4">
-        <View
-          className={`mt-3 rounded-[20px] border border-border bg-surface-elevated px-4 ${
-            interfaceDensity === 'compact' ? 'py-0.5' : 'py-1'
-          }`}
-        >
-          <TextInput
-            value={q}
-            onChangeText={setQ}
-            placeholder="Search contacts"
-            placeholderTextColor="#94A3B8"
-            selectionColor="#2DD4BF"
-            cursorColor="#2DD4BF"
-            underlineColorAndroid="transparent"
-            className="py-3 text-[15px] text-text"
-          />
+      {searchOpen ? (
+        <View className="px-4">
+          <View
+            className={`mt-3 flex-row items-center rounded-[20px] border border-border bg-surface-elevated pl-4 pr-2 ${
+              interfaceDensity === 'compact' ? 'py-0.5' : 'py-1'
+            }`}
+          >
+            <Icon lib="Lucide" name="search" size={18} color={colors.muted} />
+            <TextInput
+              ref={searchInputRef}
+              onLayout={focusSearchOnLayout}
+              value={q}
+              onChangeText={setQ}
+              placeholder="Search"
+              placeholderTextColor="#94A3B8"
+              selectionColor="#2DD4BF"
+              cursorColor="#2DD4BF"
+              underlineColorAndroid="transparent"
+              autoCapitalize="none"
+              returnKeyType="search"
+              className="ml-2 flex-1 py-3 text-[15px] text-text"
+            />
+            <Pressable onPress={closeSearch} accessibilityRole="button" accessibilityLabel="Close search" className="h-9 w-9 items-center justify-center rounded-full active:opacity-80">
+              <Icon lib="Lucide" name="x" size={18} color={colors.muted} />
+            </Pressable>
+          </View>
         </View>
-      </View>
+      ) : null}
 
       {showInitialConversationSkeleton ? (
         <ChatListSkeleton compact={interfaceDensity === 'compact'} />
@@ -343,7 +380,10 @@ export default function ChatListScreen({
         <ArchivedRow
           count={archivedConversations.length}
           unreadCount={archivedUnreadCount}
-          onPress={() => setShowArchivedView(true)}
+          onPress={() => {
+            closeSearch();
+            setShowArchivedView(true);
+          }}
         />
       ) : null}
 

@@ -1,5 +1,9 @@
 import type { ReactNode } from 'react';
-import { View, Text } from 'react-native';
+import { Pressable, View, Text } from 'react-native';
+
+import { Icon } from './Icon';
+import { useThemeColors } from '../theme/useThemeColors';
+import type { LucideIconName } from '../shared/chat/describeMessage';
 
 export default function ScreenHeader({
   title,
@@ -22,5 +26,31 @@ export default function ScreenHeader({
         {actions ? <View className="shrink-0 pt-1">{actions}</View> : null}
       </View>
     </View>
+  );
+}
+
+/** A round icon button in a screen header's action slot (search, new chat, back). */
+export function HeaderIconButton({
+  icon,
+  label,
+  onPress,
+  testID,
+}: {
+  icon: LucideIconName;
+  label: string;
+  onPress: () => void;
+  testID?: string;
+}) {
+  const colors = useThemeColors();
+  return (
+    <Pressable
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      testID={testID}
+      className="h-10 w-10 items-center justify-center rounded-full border border-border bg-surface-elevated active:opacity-80"
+    >
+      <Icon lib="Lucide" name={icon} size={20} color={colors.text} />
+    </Pressable>
   );
 }

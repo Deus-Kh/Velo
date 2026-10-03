@@ -14,7 +14,12 @@ type PasswordDraft = {
   newPassword: string;
 };
 
-/** Settings → Account: change password inline, log out (confirmed), delete account (sheet owned by the screen). */
+/**
+ * Settings → Account: change password inline, delete account (sheet owned by
+ * the screen), and at the very bottom the two ways out (roadmap §8.1 B2):
+ * "Log out" keeps the keys and messages on this phone and is not red;
+ * "Log out and erase local data" is. Each has its own confirmation.
+ */
 export default function AccountSection({ userId, onOpenDeleteAccount }: { userId: string | null; onOpenDeleteAccount: () => void }) {
   const logout = useAuthStore((s) => s.logout);
   const [editingPassword, setEditingPassword] = useState(false);
@@ -29,12 +34,22 @@ export default function AccountSection({ userId, onOpenDeleteAccount }: { userId
   const confirmLogout = () => {
     Alert.alert(
       'Log out?',
-      'Keep local data to sign back in with your sessions intact, or erase it so nothing on this device can decrypt your messages.',
+      'Your keys and messages stay on this phone. Sign back in and your chats continue where they were.',
       [
         { text: 'Cancel', style: 'cancel' },
         { text: 'Log out', onPress: () => { logout(); } },
+      ],
+    );
+  };
+
+  const confirmLogoutAndErase = () => {
+    Alert.alert(
+      'Log out and erase local data?',
+      'Your keys, secure sessions and stored messages are removed from this phone. Nothing left here can read your messages. This cannot be undone.',
+      [
+        { text: 'Cancel', style: 'cancel' },
         {
-          text: 'Log out and erase local data',
+          text: 'Erase and log out',
           style: 'destructive',
           onPress: () => { logout({ eraseLocalData: true }); },
         },
@@ -100,7 +115,7 @@ export default function AccountSection({ userId, onOpenDeleteAccount }: { userId
     <>
       <SectionEyebrow
         title="Account"
-        description="Session-ending actions for this device."
+        description="Your password, and the ways to leave this phone."
       />
       <SettingsGroup>
         {editingPassword ? (
@@ -147,13 +162,6 @@ export default function AccountSection({ userId, onOpenDeleteAccount }: { userId
           />
         )}
         <SettingsRow
-          title="Log out"
-          subtitle="Ends the current application session on this device."
-          onPress={confirmLogout}
-          value="Exit"
-          danger
-        />
-        <SettingsRow
           title="Delete account"
           subtitle="Removes everything the server holds for you and erases this device. Cannot be undone."
           onPress={onOpenDeleteAccount}
@@ -164,6 +172,21 @@ export default function AccountSection({ userId, onOpenDeleteAccount }: { userId
       </SettingsGroup>
       {passwordError ? <InfoNote>{passwordError}</InfoNote> : null}
       {passwordStatus ? <InfoNote>{passwordStatus}</InfoNote> : null}
+
+      <SettingsGroup>
+        <SettingsRow
+          title="Log out"
+          subtitle="Your keys and messages stay on this phone, so signing back in restores your chats."
+          onPress={confirmLogout}
+        />
+        <SettingsRow
+          title="Log out and erase local data"
+          subtitle="Removes your keys, sessions and stored messages from this phone. Nothing left here can read your messages."
+          onPress={confirmLogoutAndErase}
+          danger
+          last
+        />
+      </SettingsGroup>
     </>
   );
 }

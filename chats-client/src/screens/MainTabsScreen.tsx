@@ -326,6 +326,7 @@ export default function MainTabsScreen() {
             <ChatListScreen
               onOpenChat={openChat}
               onOpenGroup={openGroup}
+              onNewChat={() => setTab('new-chat')}
               recentlyClosedChatPeerUserId={recentlyClosedChatPeerUserId}
               onHandledClosedChat={() => setRecentlyClosedChatPeerUserId(null)}
             />
