@@ -1307,6 +1307,8 @@ const hasNavigationButtons = insets.bottom >= 40;
         />
       ) : null}
 
+      {/* A8: the search sheet replaces the composer while it is open (the sheet's own field takes the keyboard) */}
+      {showSearchSheet ? null : (
       <View className={`px-3 ${composerPaddingTopClass}`}
         style={{ paddingBottom: keyboardShown ?  hasNavigationButtons ? keyboardHeight+insets.bottom+5: insets.bottom +5: insets.bottom + 8}}
       >
@@ -1428,6 +1430,7 @@ const hasNavigationButtons = insets.bottom >= 40;
           )}
         </VoiceComposer>
       </View>
+      )}
     </KeyboardAvoidingView>
   );
 }

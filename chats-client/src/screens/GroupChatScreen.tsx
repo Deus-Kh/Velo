@@ -541,6 +541,8 @@ export default function GroupChatScreen({ groupId, initialName, jumpToMessageId,
         </BottomSheetPanel>
       ) : null}
 
+      {/* A8: the search sheet replaces the composer while it is open */}
+      {sheet === 'search' ? null : (
       <View
         className={`px-3 ${interfaceDensity === 'compact' ? 'pt-1.5' : 'pt-2'}`}
         style={{ paddingBottom: keyboardShown ? (hasNavigationButtons ? keyboardHeight + insets.bottom + 5 : insets.bottom + 5) : insets.bottom + 8 }}
@@ -614,6 +616,7 @@ export default function GroupChatScreen({ groupId, initialName, jumpToMessageId,
           )}
         </VoiceComposer>
       </View>
+      )}
     </KeyboardAvoidingView>
   );
 }

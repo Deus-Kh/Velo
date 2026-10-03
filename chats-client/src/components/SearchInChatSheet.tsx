@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { FlatList, Pressable, Text, TextInput, View } from 'react-native';
 
 import BottomSheetPanel from './BottomSheetPanel';
@@ -9,6 +9,17 @@ export default function SearchInChatSheet({ myUserId, peerKey, senderName, onJum
   const [query, setQuery] = useState('');
   const [hits, setHits] = useState<SearchHit[]>([]);
   const [searching, setSearching] = useState(false);
+  const inputRef = useRef<TextInput>(null);
+  const focusedOnceRef = useRef(false);
+
+  // A8: focus on the field's first layout, one frame later. `autoFocus` asked for the keyboard
+  // before the sheet had a frame (the sheet then landed under it on a first open), and a focus
+  // scheduled before the native view is attached raises no keyboard at all.
+  const focusOnFirstLayout = () => {
+    if (focusedOnceRef.current) return;
+    focusedOnceRef.current = true;
+    requestAnimationFrame(() => inputRef.current?.focus());
+  };
 
   useEffect(() => {
     const q = query.trim();
@@ -37,7 +48,7 @@ export default function SearchInChatSheet({ myUserId, peerKey, senderName, onJum
   return (
     <BottomSheetPanel title="Search in chat" onClose={onClose}>
       <View className="rounded-[16px] border border-border bg-surface/92 px-4">
-        <TextInput value={query} onChangeText={setQuery} placeholder="Search messages on this device" placeholderTextColor="#94A3B8" autoFocus autoCapitalize="none" className="py-3 text-[15px] text-text" />
+        <TextInput ref={inputRef} onLayout={focusOnFirstLayout} value={query} onChangeText={setQuery} placeholder="Search messages on this device" placeholderTextColor="#94A3B8" autoCapitalize="none" returnKeyType="search" className="py-3 text-[15px] text-text" />
       </View>
       <View className="mt-2 max-h-80">
         <FlatList
