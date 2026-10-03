@@ -238,7 +238,6 @@ export default function ChatListScreen({
 }) {
   const insets = useSafeAreaInsets();
   const colors = useThemeColors();
-  const logout = useAuthStore((s) => s.logout);
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
   const myUserId = useAuthStore((s) => s.userId);
   const interfaceDensity = useAppearanceStore((s) => s.interfaceDensity);
@@ -822,16 +821,8 @@ export default function ChatListScreen({
             >
               <Icon lib="Lucide" name="chevron-left" size={22} color={colors.text} />
             </Pressable>
-          ) : (
-            <Pressable
-              onPress={() => logout()}
-              className={`rounded-full border border-border px-4 ${interfaceDensity === 'compact' ? 'py-1.5' : 'py-2'} active:opacity-80 ${
-                surfaceStyle === 'glass' ? 'bg-surface/80' : 'bg-surface-elevated'
-              }`}
-            >
-              <Text className="text-sm font-semibold text-text">Log out</Text>
-            </Pressable>
-          )
+          ) : null
+          // B2: no "Log out" in the chat-list header; the confirmed one lives in Settings → Account
         }
       />
       <View className="px-4">
