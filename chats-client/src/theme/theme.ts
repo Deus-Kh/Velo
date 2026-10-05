@@ -23,6 +23,9 @@ export type ThemeColors = {
   "--color-toggle-track-on": string;
   "--color-toggle-thumb-off": string;
   "--color-toggle-thumb-on": string;
+  /** B10: selected navigation tab treatment. */
+  "--color-tab-active": string;
+  "--color-tab-active-icon": string;
 };
 
 export const lightTheme: ThemeColors = {
@@ -49,6 +52,8 @@ export const lightTheme: ThemeColors = {
   "--color-toggle-track-on": "14 116 144",
   "--color-toggle-thumb-off": "226 232 240",
   "--color-toggle-thumb-on": "255 255 255",
+  "--color-tab-active": "186 230 225",
+  "--color-tab-active-icon": "14 116 144",
 };
 
 export const darkTheme: ThemeColors = {
@@ -74,4 +79,6 @@ export const darkTheme: ThemeColors = {
   "--color-toggle-track-on": "45 212 191",
   "--color-toggle-thumb-off": "241 245 249",
   "--color-toggle-thumb-on": "255 255 255",
+  "--color-tab-active": "18 34 54",
+  "--color-tab-active-icon": "45 212 191",
 };

@@ -30,6 +30,8 @@ export type ThemeColorSet = {
   toggleTrackOn: string;
   toggleThumbOff: string;
   toggleThumbOn: string;
+  tabActive: string;
+  tabActiveIcon: string;
 };
 
 const rgb = (triplet: string): string => `rgb(${triplet.trim().split(/\s+/).join(', ')})`;
@@ -57,6 +59,8 @@ export function themeColorSet(t: ThemeColors): ThemeColorSet {
     toggleTrackOn: rgb(t['--color-toggle-track-on']),
     toggleThumbOff: rgb(t['--color-toggle-thumb-off']),
     toggleThumbOn: rgb(t['--color-toggle-thumb-on']),
+    tabActive: rgb(t['--color-tab-active']),
+    tabActiveIcon: rgb(t['--color-tab-active-icon']),
   };
 }
 

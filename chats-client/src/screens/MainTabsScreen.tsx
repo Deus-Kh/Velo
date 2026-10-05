@@ -29,11 +29,7 @@ import { useExpirySweeper } from '../shared/chat/useExpirySweeper';
 import { useBlocksSync } from '../shared/chat/blocks';
 import { useProfilesSync } from '../shared/chat/profile';
 import { Icon } from '../components/Icon';
-
-import { useColorScheme } from 'react-native';
-
-
-
+import { useThemeColors } from '../theme/useThemeColors';
 
 type TabKey = 'chats' | 'new-chat' | 'settings';
 
@@ -71,26 +67,20 @@ function TabButton({
 }) {
   const interfaceDensity = useAppearanceStore((s) => s.interfaceDensity);
 
-  const scheme = useColorScheme();
-
-  const isDark = scheme === 'dark';
-
-
-  const themeColors = isDark? {primary: '#f1f5f9', muted: '#94a3b8'}:{primary: '#0f172a', muted: '#64748b'};
-
-
+  const colors = useThemeColors();
 
   return (
     <Pressable
       onPress={onPress}
       className={`flex-1 items-center justify-center rounded-[16px] px-2 active:opacity-80 ${
         interfaceDensity === 'compact' ? 'py-2' : 'py-2.5'
-      } ${active ? 'bg-surface-elevated' : ''}`}
+      }`}
+      style={active ? { backgroundColor: colors.tabActive } : undefined}
     >
       <Icon
         {...icon}
         size={active ? 20 : 18}
-        color={active ? themeColors.primary : themeColors.muted}
+        color={active ? colors.tabActiveIcon : colors.muted}
       />
       <Text className={`mt-0.5 text-xs font-medium ${active ? 'text-text' : 'text-muted'}`}>
         {label}
