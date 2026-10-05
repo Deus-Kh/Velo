@@ -2,6 +2,8 @@ import React, { useRef, isValidElement } from 'react';
 import { Pressable, Text, View } from 'react-native';
 import { Icon } from './Icon';
 import { useThemeColors } from '../theme/useThemeColors';
+import { useAppearanceStore } from '../store/appearance.store';
+import { densityTokens } from '../theme/density';
 import type { LucideIconName } from '../shared/chat/describeMessage';
 import ReanimatedSwipeable, {
   SwipeDirection,
@@ -89,6 +91,8 @@ export default function MessageBubble({
   onSwipeReply?: (() => void) | undefined;
 }) {
   const colors = useThemeColors();
+  const interfaceDensity = useAppearanceStore((s) => s.interfaceDensity);
+  const density = densityTokens(interfaceDensity);
   const statusIcon = statusIconName(status);
   const timeLabel = formatMessageTime(timestamp);
   const swipeableRef = useRef<SwipeableMethods | null>(null);
@@ -182,15 +186,19 @@ export default function MessageBubble({
     <Pressable
       disabled={!onPress}
       onPress={onPress}
-      className={`relative mb-1.5 max-w-[80%] rounded-[20px] px-4 py-2.5 ${
+      className={`relative mb-1.5 max-w-[80%] rounded-[20px] ${
         mine ? 'self-end rounded-br-[8px]' : 'self-start rounded-bl-[8px]'
       } ${replyPreview ? 'min-w-[156px]' : ''} ${bubbleTone} ${onPress ? 'active:opacity-80' : ''}`}
+      style={{ paddingHorizontal: density.bubbleHorizontalPadding, paddingVertical: density.bubbleVerticalPadding }}
     >
       {compactMeta ? (
         <View className="flex-row items-end">
           <View className="shrink">
             {replyPreviewNode}
-            <Text className={`text-[15px] leading-[21px] ${messageTextTone}`}>
+            <Text
+              className={messageTextTone}
+              style={{ fontSize: density.messageFontSize, lineHeight: density.messageLineHeight }}
+            >
               {text}
             </Text>
           </View>
@@ -218,7 +226,10 @@ export default function MessageBubble({
           {deleted ? (
             <Text className={`text-[15px] italic leading-[21px] ${mine ? 'text-bubble-out-muted' : 'text-muted'}`}>This message was deleted</Text>
           ) : text || !attachment ? (
-            <Text className={`text-[15px] leading-[21px] ${messageTextTone}`}>
+            <Text
+              className={messageTextTone}
+              style={{ fontSize: density.messageFontSize, lineHeight: density.messageLineHeight }}
+            >
               {text}
             </Text>
           ) : null}

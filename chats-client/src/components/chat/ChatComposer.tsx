@@ -10,6 +10,7 @@ import VoiceComposer from '../VoiceComposer';
 import type { Recording } from '../../shared/media/voiceNotes';
 import type { DescribableMessage } from '../../shared/chat/describeMessage';
 import { useAppearanceStore } from '../../store/appearance.store';
+import { densityTokens } from '../../theme/density';
 
 /**
  * C1: the 1:1 chat's composer: the reply / edit / upload bars, the reason
@@ -53,6 +54,7 @@ export default function ChatComposer({
 }) {
   const interfaceDensity = useAppearanceStore((s) => s.interfaceDensity);
   const surfaceStyle = useAppearanceStore((s) => s.surfaceStyle);
+  const density = densityTokens(interfaceDensity);
 
   const composerSurfaceClass =
     surfaceStyle === 'glass' ? 'bg-surface/84' : 'bg-surface-elevated';
@@ -108,7 +110,8 @@ export default function ChatComposer({
             selectionColor="#2DD4BF"
             cursorColor="#2DD4BF"
             underlineColorAndroid="transparent"
-            className={`max-h-32 text-[15px] leading-6 text-text ${composerInputMinHeightClass}`}
+            className={`max-h-32 text-text ${composerInputMinHeightClass}`}
+            style={{ fontSize: density.messageFontSize, lineHeight: density.messageLineHeight + 4 }}
             returnKeyType="send"
             onSubmitEditing={onSend}
             editable={editable}
