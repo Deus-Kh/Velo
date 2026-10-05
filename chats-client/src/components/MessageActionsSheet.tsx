@@ -1,19 +1,9 @@
 import { Pressable, Text, View } from 'react-native';
 
-import BottomSheetPanel from './BottomSheetPanel';
+import BottomSheetPanel, { BottomSheetAction } from './BottomSheetPanel';
 
 /** T7.2: the long-press sheet shared by the 1:1 and group chats. */
 export const QUICK_REACTIONS = ['\u{1F44D}', '❤️', '\u{1F602}', '\u{1F62E}', '\u{1F622}', '\u{1F64F}'];
-
-function Row({ title, subtitle, tone = 'text', onPress }: { title: string; subtitle?: string; tone?: 'text' | 'warning' | 'danger'; onPress: () => void }) {
-  const titleTone = tone === 'danger' ? 'text-danger' : tone === 'warning' ? 'text-warning' : 'text-text';
-  return (
-    <Pressable onPress={onPress} className="rounded-[18px] px-3 py-3 active:opacity-80">
-      <Text className={`text-[15px] font-medium ${titleTone}`}>{title}</Text>
-      {subtitle ? <Text className="mt-1 text-[13px] leading-5 text-muted">{subtitle}</Text> : null}
-    </Pressable>
-  );
-}
 
 export default function MessageActionsSheet({
   snippet,
@@ -69,16 +59,16 @@ export default function MessageActionsSheet({
         </View>
       ) : null}
 
-      {onReply && !deleted ? <Row title="Reply" subtitle="Quote this message in your next outgoing reply." onPress={onReply} /> : null}
-      {!deleted ? <Row title="Copy" subtitle="Copy this message text to your clipboard." onPress={onCopy} /> : null}
-      {!deleted && !failed ? <Row title="Forward" subtitle="Send this text to another chat. The recipient sees who wrote it and when." onPress={onForward} /> : null}
-      {mine && onEdit && !deleted && !failed ? <Row title="Edit" subtitle="Change the text on every device that received it." onPress={onEdit} /> : null}
-      {mine && failed && onRetry ? <Row title="Retry send" subtitle="Attempt to send this failed message again." tone="warning" onPress={onRetry} /> : null}
-      <Row title="Delete for me" subtitle="Remove it from this device only." onPress={onDeleteForMe} />
+      {onReply && !deleted ? <BottomSheetAction icon="corner-up-left" label="Reply" onPress={onReply} /> : null}
+      {!deleted ? <BottomSheetAction icon="copy" label="Copy" onPress={onCopy} /> : null}
+      {!deleted && !failed ? <BottomSheetAction icon="forward" label="Forward" onPress={onForward} /> : null}
+      {mine && onEdit && !deleted && !failed ? <BottomSheetAction icon="pencil" label="Edit" onPress={onEdit} /> : null}
+      {mine && failed && onRetry ? <BottomSheetAction icon="refresh-cw" label="Retry send" tone="warning" onPress={onRetry} /> : null}
+      <BottomSheetAction icon="trash-2" label="Delete for me" onPress={onDeleteForMe} />
       {mine && onDeleteForEveryone && !deleted && !failed ? (
-        <Row title="Delete for everyone" subtitle="Asks the other side's devices to remove it. They honour the request, but the message may already have been read." tone="danger" onPress={onDeleteForEveryone} />
+        <BottomSheetAction icon="trash-2" label="Delete for everyone" tone="danger" onPress={onDeleteForEveryone} />
       ) : null}
-      <Row title="Cancel" onPress={onClose} />
+      <BottomSheetAction icon="x" label="Cancel" onPress={onClose} />
     </BottomSheetPanel>
   );
 }

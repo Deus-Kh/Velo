@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import Clipboard from '@react-native-clipboard/clipboard';
 import {
   ActivityIndicator,
+  Alert,
   FlatList,
   KeyboardAvoidingView,
   Platform,
@@ -509,7 +510,6 @@ export default function ChatScreen({
           onToggleBlock={handleToggleBlock}
           onReport={() => setShowReportSheet(true)}
           onJumpToLatest={scrollToBottom}
-          onSendPhoto={handleSendPhoto}
           onSearch={() => setShowSearchSheet(true)}
           onTimer={() => setShowTimerSheet(true)}
           onResetSession={resetSession}
@@ -546,11 +546,31 @@ export default function ChatScreen({
                 }}
                 onDeleteForMe={() => {
                   handleCloseMessageActions();
-                  if (full) deleteLocally(full).catch((e) => console.warn('[ChatScreen] delete failed:', e));
+                  if (!full) return;
+                  Alert.alert('Delete for me?', 'This removes the message from this device only.', [
+                    { text: 'Cancel', style: 'cancel' },
+                    {
+                      text: 'Delete',
+                      style: 'destructive',
+                      onPress: () => deleteLocally(full).catch((e) => console.warn('[ChatScreen] delete failed:', e)),
+                    },
+                  ]);
                 }}
                 onDeleteForEveryone={() => {
                   handleCloseMessageActions();
-                  if (full) deleteEverywhere(full).catch((e) => console.warn('[ChatScreen] delete for everyone failed:', e));
+                  if (!full) return;
+                  Alert.alert(
+                    'Delete for everyone?',
+                    'This asks the other side’s devices to remove it, but it may already have been read.',
+                    [
+                      { text: 'Cancel', style: 'cancel' },
+                      {
+                        text: 'Delete',
+                        style: 'destructive',
+                        onPress: () => deleteEverywhere(full).catch((e) => console.warn('[ChatScreen] delete for everyone failed:', e)),
+                      },
+                    ],
+                  );
                 }}
                 onRetry={() => {
                   handleCloseMessageActions();
