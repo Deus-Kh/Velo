@@ -12,8 +12,8 @@ import ReanimatedSwipeable, {
 
 type MessageStatus = 'sending' | 'sent' | 'delivered' | 'read' | 'failed' | undefined;
 
-/** Delivery state as a Lucide icon (B14 adds the read colour): a clock while sending, one check sent, two delivered / read, an alert on failure. */
-function statusIconName(status: MessageStatus): LucideIconName | null {
+/** Delivery state as a Lucide icon: a clock while sending, one check sent, two delivered / read, an alert on failure. */
+export function statusIconName(status: MessageStatus): LucideIconName | null {
   switch (status) {
     case 'sending':
       return 'clock';
@@ -30,9 +30,14 @@ function statusIconName(status: MessageStatus): LucideIconName | null {
   }
 }
 
-/** B3: the status icon takes the outgoing bubble's muted text colour; failure is the danger tone (B14 adds the read accent). */
-function getStatusColor(status: MessageStatus, colors: { bubbleOutMuted: string; danger: string }) {
-  return status === 'failed' ? colors.danger : colors.bubbleOutMuted;
+/** B14: read receipts use the accent so delivered and read remain visually distinct. */
+export function getStatusColor(
+  status: MessageStatus,
+  colors: { bubbleOutMuted: string; primary: string; danger: string },
+) {
+  if (status === 'failed') return colors.danger;
+  if (status === 'read') return colors.primary;
+  return colors.bubbleOutMuted;
 }
 
 function formatMessageTime(timestamp: number) {
