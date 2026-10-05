@@ -204,7 +204,11 @@ export default function NewChatScreen({
   const verifiedConversations = useMemo(
     () =>
       conversations
-        .filter((conversation) => trustedPeerUserIdSet.has(conversation.peerUserId))
+        .filter(
+          (conversation) =>
+            trustedPeerUserIdSet.has(conversation.peerUserId) &&
+            !savedContactIdSet.has(conversation.peerUserId),
+        )
         .sort((a, b) => {
           const recentDelta =
             recentContactIds.indexOf(a.peerUserId) - recentContactIds.indexOf(b.peerUserId);
@@ -220,7 +224,20 @@ export default function NewChatScreen({
 
           return b.lastMessageAt - a.lastMessageAt;
         }),
-    [conversations, recentContactIds, trustedPeerUserIdSet],
+    [conversations, recentContactIds, savedContactIdSet, trustedPeerUserIdSet],
+  );
+
+  const visibleRecentConversations = useMemo(
+    () =>
+      recentConversations.filter(
+        (conversation) =>
+          !savedContactIdSet.has(conversation.peerUserId) &&
+          !verifiedConversations.some(
+            (verifiedConversation) =>
+              verifiedConversation.peerUserId === conversation.peerUserId,
+          ),
+      ),
+    [recentConversations, savedContactIdSet, verifiedConversations],
   );
 
   const discoverSections = useMemo<DiscoverSection[]>(() => {
@@ -464,10 +481,7 @@ export default function NewChatScreen({
 
   return (
     <View className="flex-1 bg-background" style={{ paddingTop: insets.top }}>
-      <ScreenHeader
-        title="New Chat"
-        subtitle="Start a private conversation with a saved or verified contact."
-      />
+      <ScreenHeader title="New Chat" />
       <View className="px-4">
         <View className="mt-2.5 rounded-[20px] border border-border bg-surface/82 px-4 py-1">
           <TextInput
@@ -561,17 +575,10 @@ export default function NewChatScreen({
               id: `verified-${conversation.conversationId}`,
               conversation,
             })),
-            ...(recentConversations.length > 0
+            ...(visibleRecentConversations.length > 0
               ? [{ type: 'section' as const, id: 'recent-header' as const }]
               : []),
-            ...recentConversations
-              .filter(
-                (conversation) =>
-                  !verifiedConversations.some(
-                    (verifiedConversation) =>
-                      verifiedConversation.peerUserId === conversation.peerUserId,
-                  ),
-              )
+            ...visibleRecentConversations
               .map((conversation) => ({
                 type: 'recent-contact' as const,
                 id: `recent-${conversation.conversationId}`,

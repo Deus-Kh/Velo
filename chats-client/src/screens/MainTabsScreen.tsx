@@ -1,5 +1,5 @@
 import { ComponentProps, useCallback, useEffect, useRef, useState } from 'react';
-import { View, Text, Pressable, ScrollView, NativeSyntheticEvent, NativeScrollEvent } from 'react-native';
+import { Keyboard, View, Text, Pressable, ScrollView, NativeSyntheticEvent, NativeScrollEvent } from 'react-native';
 import { useSafeAreaInsets, useSafeAreaFrame } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -106,6 +106,16 @@ export default function MainTabsScreen() {
   const [tab, setTab] = useState<TabKey>('chats');
   const [activeChat, setActiveChat] = useState<ActiveChat | null>(null);
   const [recentlyClosedChatPeerUserId, setRecentlyClosedChatPeerUserId] = useState<string | null>(null);
+  const [keyboardVisible, setKeyboardVisible] = useState(false);
+
+  useEffect(() => {
+    const show = Keyboard.addListener('keyboardDidShow', () => setKeyboardVisible(true));
+    const hide = Keyboard.addListener('keyboardDidHide', () => setKeyboardVisible(false));
+    return () => {
+      show.remove();
+      hide.remove();
+    };
+  }, []);
 
   const overlayTranslateX = useSharedValue(frame.width);
   const swipeStartedFromEdge = useSharedValue(false);
@@ -340,12 +350,13 @@ export default function MainTabsScreen() {
           </View>
         </ScrollView>
 
-        <View
-          className={`border-t border-border px-3 ${interfaceDensity === 'compact' ? 'pt-1.5' : 'pt-2'} ${
-            surfaceStyle === 'glass' ? 'bg-background-alt/88' : 'bg-background-alt'
-          }`}
-          style={{ paddingBottom: Math.max(insets.bottom, 12) }}
-        >
+        {!keyboardVisible ? (
+          <View
+              className={`border-t border-border px-3 ${interfaceDensity === 'compact' ? 'pt-1.5' : 'pt-2'} ${
+                surfaceStyle === 'glass' ? 'bg-background-alt/88' : 'bg-background-alt'
+              }`}
+              style={{ paddingBottom: Math.max(insets.bottom, 12) }}
+            >
           <View
             className={`flex-row rounded-[20px] border border-border ${
               surfaceStyle === 'glass' ? 'bg-surface/82' : 'bg-surface-elevated'
@@ -360,8 +371,9 @@ export default function MainTabsScreen() {
                 onPress={() => setTab(item.key)}
               />
             ))}
-          </View>
+            </View>
         </View>
+        ) : null}
       </Animated.View>
 
       {activeChat ? (
