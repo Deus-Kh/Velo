@@ -44,6 +44,7 @@ import PresencePill from '../components/chat/PresencePill';
 import InlineChatNotice from '../components/chat/InlineChatNotice';
 import MessageList from '../components/chat/MessageList';
 import ChatActionsSheet from '../components/chat/ChatActionsSheet';
+import AttachmentSheet from '../components/chat/AttachmentSheet';
 import ChatComposer from '../components/chat/ChatComposer';
 import type { UploadState } from '../components/chat/UploadProgressBar';
 import { buildMessageListItems, type MessageListItem } from '../shared/chat/messageListItems';
@@ -150,6 +151,7 @@ export default function ChatScreen({
   const [editTarget, setEditTarget] = useState<UIMessage | null>(null);
   const [forwardTarget, setForwardTarget] = useState<UIMessage | null>(null);
   const [showComposerActions, setShowComposerActions] = useState(false);
+  const [showChatActions, setShowChatActions] = useState(false);
   const [selectedMessageAction, setSelectedMessageAction] = useState<SelectedMessageAction | null>(null);
   const [replyTarget, setReplyTarget] = useState<SelectedMessageAction | null>(null);
   const flatListRef = useRef<FlatList<MessageListItem>>(null);
@@ -187,6 +189,7 @@ export default function ChatScreen({
         },
       },
       { open: showComposerActions, close: () => setShowComposerActions(false) },
+      { open: showChatActions, close: () => setShowChatActions(false) },
       { open: showTimerSheet, close: () => setShowTimerSheet(false) },
       { open: showReportSheet, close: () => setShowReportSheet(false) },
       { open: showSearchSheet, close: () => setShowSearchSheet(false) },
@@ -288,6 +291,9 @@ export default function ChatScreen({
   const handleCloseComposerActions = useCallback(() => {
     setShowComposerActions(false);
   }, []);
+  const handleCloseChatActions = useCallback(() => {
+    setShowChatActions(false);
+  }, []);
 
   const handleToggleBlock = useCallback(() => {
     if (!myUserId) return;
@@ -384,11 +390,16 @@ export default function ChatScreen({
         }
         subtitle={presenceMeta.subtitle}
         actions={
-          peerVerified ? null : (
-            <HeaderAction onPress={onVerify}>
-              <Text className="text-sm font-semibold text-text">Verify</Text>
+          <View className="flex-row items-center gap-2">
+            {!peerVerified ? (
+              <HeaderAction onPress={onVerify}>
+                <Text className="text-sm font-semibold text-text">Verify</Text>
+              </HeaderAction>
+            ) : null}
+            <HeaderAction onPress={() => setShowChatActions(true)} horizontalPadding="px-3">
+              <Icon lib="Lucide" name="ellipsis-vertical" size={20} color={colors.text} />
             </HeaderAction>
-          )
+          </View>
         }
       >
         {presenceMeta.pillLabel ? (
@@ -481,12 +492,19 @@ export default function ChatScreen({
       )}
 
       {showComposerActions ? (
+        <AttachmentSheet
+          onClose={handleCloseComposerActions}
+          onSendPhoto={handleSendPhoto}
+        />
+      ) : null}
+
+      {showChatActions ? (
         <ChatActionsSheet
           peerBlocked={peerBlocked}
           verified={peerVerified}
           timerSeconds={timer.timerSeconds}
           sessionResetRequired={sessionHealth.status === 'reset_required'}
-          onClose={handleCloseComposerActions}
+          onClose={handleCloseChatActions}
           onVerify={onVerify}
           onToggleBlock={handleToggleBlock}
           onReport={() => setShowReportSheet(true)}
