@@ -26,6 +26,10 @@ export type ThemeColorSet = {
   bubbleOutMuted: string;
   bubbleIn: string;
   bubbleInBorder: string;
+  toggleTrackOff: string;
+  toggleTrackOn: string;
+  toggleThumbOff: string;
+  toggleThumbOn: string;
 };
 
 const rgb = (triplet: string): string => `rgb(${triplet.trim().split(/\s+/).join(', ')})`;
@@ -49,6 +53,10 @@ export function themeColorSet(t: ThemeColors): ThemeColorSet {
     bubbleOutMuted: rgb(t['--color-bubble-out-muted']),
     bubbleIn: rgb(t['--color-bubble-in']),
     bubbleInBorder: rgb(t['--color-bubble-in-border']),
+    toggleTrackOff: rgb(t['--color-toggle-track-off']),
+    toggleTrackOn: rgb(t['--color-toggle-track-on']),
+    toggleThumbOff: rgb(t['--color-toggle-thumb-off']),
+    toggleThumbOn: rgb(t['--color-toggle-thumb-on']),
   };
 }
 

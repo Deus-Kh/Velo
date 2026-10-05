@@ -18,6 +18,11 @@ export type ThemeColors = {
   "--color-bubble-in": string;
   /** A hairline around incoming bubbles; equal to the bubble colour where no line is wanted. */
   "--color-bubble-in-border": string;
+  /** B5: native settings switch colors. */
+  "--color-toggle-track-off": string;
+  "--color-toggle-track-on": string;
+  "--color-toggle-thumb-off": string;
+  "--color-toggle-thumb-on": string;
 };
 
 export const lightTheme: ThemeColors = {
@@ -40,6 +45,10 @@ export const lightTheme: ThemeColors = {
   // a white card with a hairline
   "--color-bubble-in": "255 255 255",
   "--color-bubble-in-border": "226 232 240",
+  "--color-toggle-track-off": "51 65 85",
+  "--color-toggle-track-on": "14 116 144",
+  "--color-toggle-thumb-off": "226 232 240",
+  "--color-toggle-thumb-on": "255 255 255",
 };
 
 export const darkTheme: ThemeColors = {
@@ -61,4 +70,8 @@ export const darkTheme: ThemeColors = {
   "--color-bubble-out-muted": "190 214 212",
   "--color-bubble-in": "18 34 54",
   "--color-bubble-in-border": "18 34 54",
+  "--color-toggle-track-off": "100 116 139",
+  "--color-toggle-track-on": "45 212 191",
+  "--color-toggle-thumb-off": "241 245 249",
+  "--color-toggle-thumb-on": "255 255 255",
 };
