@@ -2,6 +2,9 @@ import type { RefObject } from 'react';
 import { ActivityIndicator, FlatList, Text, View, type NativeScrollEvent, type NativeSyntheticEvent } from 'react-native';
 
 import AttachmentView from '../AttachmentView';
+import { cachedMediaDataUri } from '../../shared/media/mediaStore';
+import { isImage } from '../../shared/media/attachments';
+import type { ViewerImage } from '../ImageViewer';
 import MessageBubble from '../MessageBubble';
 import SystemMessagePill from './SystemMessagePill';
 import { summarizeReactions } from '../../shared/chat/actions';
@@ -67,8 +70,20 @@ export default function MessageList({
   onEndReached: () => void;
   onOpenMessageActions: (message: UIMessage) => void;
   onSwipeReply: (message: UIMessage) => void;
-  onOpenImage: (uri: string) => void;
+  onOpenImage: (images: ViewerImage[], initialIndex: number) => void;
 }) {
+  const openImage = (uri: string) => {
+    const images = messages.flatMap<ViewerImage>((message) => {
+      if (!message.attachment || !isImage(message.attachment)) return [];
+      const cached = cachedMediaDataUri(message.attachment.blobId);
+      return cached ? [{ uri: cached, caption: message.text || undefined }] : [];
+    });
+    const currentIndex = images.findIndex((image) => image.uri === uri);
+    onOpenImage(
+      currentIndex >= 0 ? images : [{ uri }],
+      currentIndex >= 0 ? currentIndex : 0,
+    );
+  };
   const scrollToMessageId = (targetMessageId: string | null) => {
     if (!targetMessageId) return;
 
@@ -127,7 +142,7 @@ export default function MessageList({
             edited={Boolean(item.message.editedAt)}
             deleted={Boolean(item.message.deletedAt)}
             forwarded={Boolean(item.message.forwardedFrom)}
-            attachment={item.message.attachment && myUserId ? <AttachmentView myUserId={String(myUserId)} meta={item.message.attachment} mine={item.message.mine} onOpen={onOpenImage} /> : undefined}
+            attachment={item.message.attachment && myUserId ? <AttachmentView myUserId={String(myUserId)} meta={item.message.attachment} mine={item.message.mine} onOpen={openImage} /> : undefined}
             attachmentMetaInline={Boolean(item.message.attachment && isAudio(item.message.attachment))}
             replyPreview={replyPreview}
             onReplyPreviewPress={

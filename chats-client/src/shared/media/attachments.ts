@@ -32,16 +32,18 @@ export const IMAGE_MAX_EDGE = 1600;
 export type PickedImage = { bytes: Uint8Array; contentType: string; width?: number; height?: number; name?: string };
 
 /** The photo picker, downscaled by the library; metadata is stripped here before anything else happens. */
-export async function pickImage(): Promise<PickedImage | null> {
-  const res = await launchImageLibrary({ mediaType: 'photo', maxWidth: IMAGE_MAX_EDGE, maxHeight: IMAGE_MAX_EDGE, quality: 0.8, includeBase64: true, selectionLimit: 1 });
-  if (res.didCancel || !res.assets || res.assets.length === 0) return null;
-  const asset = res.assets[0]!;
-  if (!asset.base64) throw new Error(res.errorMessage || 'The picker returned no image data');
-  const raw = decodeBase64(asset.base64);
-  const stripped = stripImageMetadata(raw);
-  const contentType = (asset.type && /^image\//i.test(asset.type) ? asset.type : stripped.kind === 'png' ? 'image/png' : 'image/jpeg').toLowerCase();
-  if (stripped.bytes.length > MAX_ATTACHMENT_BYTES) throw new Error('This image is too large to send (8 MB max)');
-  return { bytes: stripped.bytes, contentType, width: asset.width, height: asset.height, name: asset.fileName };
+export async function pickImages(): Promise<PickedImage[]> {
+  const res = await launchImageLibrary({ mediaType: 'photo', maxWidth: IMAGE_MAX_EDGE, maxHeight: IMAGE_MAX_EDGE, quality: 0.8, includeBase64: true, selectionLimit: 0 });
+  if (res.didCancel || !res.assets || res.assets.length === 0) return [];
+
+  return res.assets.map((asset) => {
+    if (!asset.base64) throw new Error(res.errorMessage || 'The picker returned no image data');
+    const raw = decodeBase64(asset.base64);
+    const stripped = stripImageMetadata(raw);
+    const contentType = (asset.type && /^image\//i.test(asset.type) ? asset.type : stripped.kind === 'png' ? 'image/png' : 'image/jpeg').toLowerCase();
+    if (stripped.bytes.length > MAX_ATTACHMENT_BYTES) throw new Error('This image is too large to send (8 MB max)');
+    return { bytes: stripped.bytes, contentType, width: asset.width, height: asset.height, name: asset.fileName };
+  });
 }
 
 export type UploadParams = {

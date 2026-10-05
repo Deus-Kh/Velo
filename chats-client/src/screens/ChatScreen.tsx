@@ -27,7 +27,8 @@ import { blockPeer, reportPeer, unblockPeer } from '../shared/chat/blocks';
 import Avatar from '../components/Avatar';
 import SearchInChatSheet from '../components/SearchInChatSheet';
 import ImageViewer from '../components/ImageViewer';
-import { pickImage, sendAttachmentMessage, uploadAttachment } from '../shared/media/attachments';
+import type { ViewerImage } from '../components/ImageViewer';
+import { pickImages, sendAttachmentMessage, uploadAttachment } from '../shared/media/attachments';
 import { describeMessageForQuote } from '../shared/chat/describeMessage';
 import { useLayeredBackHandler } from '../shared/ui/layeredBack';
 import { prewarmSafetyNumber } from '../shared/chat/safetyNumber';
@@ -114,7 +115,8 @@ export default function ChatScreen({
   const [showTimerSheet, setShowTimerSheet] = useState(false);
   const [showReportSheet, setShowReportSheet] = useState(false);
   const [showSearchSheet, setShowSearchSheet] = useState(false);
-  const [viewerUri, setViewerUri] = useState<string | null>(null);
+  const [viewerImages, setViewerImages] = useState<ViewerImage[]>([]);
+  const [viewerIndex, setViewerIndex] = useState(0);
   const [uploadState, setUploadState] = useState<UploadState | null>(null);
   const [peerTrusted, setPeerTrusted] = useState(false);
 
@@ -241,22 +243,25 @@ export default function ChatScreen({
   const handleSendPhoto = useCallback(async () => {
     if (!myUserId || uploadState) return;
     try {
-      const picked = await pickImage();
-      if (!picked) return;
-      setUploadState({ label: 'Encrypting photo…', progress: null });
+      const picked = await pickImages();
+      if (picked.length === 0) return;
       const caption = text.trim();
-      const content = await uploadAttachment({
-        myUserId: String(myUserId),
-        bytes: picked.bytes,
-        contentType: picked.contentType,
-        width: picked.width,
-        height: picked.height,
-        name: picked.name,
-        caption,
-        onProgress: (loaded, total) => setUploadState({ label: 'Uploading encrypted photo…', progress: total > 0 ? loaded / total : null }),
-      });
-      setUploadState({ label: 'Sending…', progress: null });
-      await sendAttachmentMessage({ myUserId: String(myUserId), target: { kind: 'peer', peerUserId }, content });
+      for (let index = 0; index < picked.length; index += 1) {
+        const image = picked[index]!;
+        setUploadState({ label: `Encrypting photo ${index + 1} of ${picked.length}…`, progress: null });
+        const content = await uploadAttachment({
+          myUserId: String(myUserId),
+          bytes: image.bytes,
+          contentType: image.contentType,
+          width: image.width,
+          height: image.height,
+          name: image.name,
+          caption: index === 0 ? caption : undefined,
+          onProgress: (loaded, total) => setUploadState({ label: `Uploading photo ${index + 1} of ${picked.length}…`, progress: total > 0 ? loaded / total : null }),
+        });
+        setUploadState({ label: `Sending photo ${index + 1} of ${picked.length}…`, progress: null });
+        await sendAttachmentMessage({ myUserId: String(myUserId), target: { kind: 'peer', peerUserId }, content });
+      }
       if (caption) setText('');
     } catch (e: any) {
       console.warn('[ChatScreen] photo send failed:', e);
@@ -474,7 +479,10 @@ export default function ChatScreen({
             onEndReached={handleEndReached}
             onOpenMessageActions={handleOpenMessageActions}
             onSwipeReply={handleReplyToSpecificMessage}
-            onOpenImage={setViewerUri}
+            onOpenImage={(images, initialIndex) => {
+              setViewerImages(images);
+              setViewerIndex(initialIndex);
+            }}
           />
 
           {showScrollToBottom ? (
@@ -582,7 +590,7 @@ export default function ChatScreen({
           })()
         : null}
 
-      <ImageViewer uri={viewerUri} onClose={() => setViewerUri(null)} />
+      <ImageViewer images={viewerImages} initialIndex={viewerIndex} onClose={() => setViewerImages([])} />
 
       {showSearchSheet && myUserId ? (
         <SearchInChatSheet

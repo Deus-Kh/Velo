@@ -22,8 +22,9 @@ import { formatTimer } from '../shared/chat/disappearing';
 import Avatar from '../components/Avatar';
 import SearchInChatSheet from '../components/SearchInChatSheet';
 import AttachmentView from '../components/AttachmentView';
-import ImageViewer from '../components/ImageViewer';
-import { isAudio, pickImage, sendAttachmentMessage, uploadAttachment } from '../shared/media/attachments';
+import ImageViewer, { type ViewerImage } from '../components/ImageViewer';
+import { isAudio, isImage, pickImages, sendAttachmentMessage, uploadAttachment } from '../shared/media/attachments';
+import { cachedMediaDataUri } from '../shared/media/mediaStore';
 import { describeMessageForQuote } from '../shared/chat/describeMessage';
 import { Icon } from '../components/Icon';
 import { useLayeredBackHandler } from '../shared/ui/layeredBack';
@@ -76,7 +77,8 @@ export default function GroupChatScreen({ groupId, initialName, jumpToMessageId,
   const [sheet, setSheet] = useState<MemberSheet>(null);
   const [selected, setSelected] = useState<GroupUIMessage | null>(null);
   const [jumpTarget, setJumpTarget] = useState<string | null>(jumpToMessageId ?? null);
-  const [viewerUri, setViewerUri] = useState<string | null>(null);
+  const [viewerImages, setViewerImages] = useState<ViewerImage[]>([]);
+  const [viewerIndex, setViewerIndex] = useState(0);
   const [uploadState, setUploadState] = useState<UploadState | null>(null);
   const colors = useThemeColors();
   const [editTarget, setEditTarget] = useState<GroupUIMessage | null>(null);
@@ -141,13 +143,16 @@ export default function GroupChatScreen({ groupId, initialName, jumpToMessageId,
   const onSendPhoto = useCallback(async () => {
     if (!myUserId || !group || uploadState) return;
     try {
-      const picked = await pickImage();
-      if (!picked) return;
-      setUploadState({ label: 'Encrypting photo…', progress: null });
+      const picked = await pickImages();
+      if (picked.length === 0) return;
       const caption = text.trim();
-      const content = await uploadAttachment({ myUserId: String(myUserId), bytes: picked.bytes, contentType: picked.contentType, width: picked.width, height: picked.height, name: picked.name, caption, onProgress: (l, t) => setUploadState({ label: 'Uploading encrypted photo…', progress: t > 0 ? l / t : null }) });
-      setUploadState({ label: 'Sending…', progress: null });
-      await sendAttachmentMessage({ myUserId: String(myUserId), target: { kind: 'group', group }, content });
+      for (let index = 0; index < picked.length; index += 1) {
+        const image = picked[index]!;
+        setUploadState({ label: `Encrypting photo ${index + 1} of ${picked.length}…`, progress: null });
+        const content = await uploadAttachment({ myUserId: String(myUserId), bytes: image.bytes, contentType: image.contentType, width: image.width, height: image.height, name: image.name, caption: index === 0 ? caption : undefined, onProgress: (l, t) => setUploadState({ label: `Uploading photo ${index + 1} of ${picked.length}…`, progress: t > 0 ? l / t : null }) });
+        setUploadState({ label: `Sending photo ${index + 1} of ${picked.length}…`, progress: null });
+        await sendAttachmentMessage({ myUserId: String(myUserId), target: { kind: 'group', group }, content });
+      }
       if (caption) setText('');
     } catch (e: any) {
       console.warn('[groups] photo send failed:', e);
@@ -308,7 +313,16 @@ export default function GroupChatScreen({ groupId, initialName, jumpToMessageId,
                     edited={Boolean(item.editedAt)}
                     deleted={Boolean(item.deletedAt)}
                     forwarded={Boolean(item.forwardedFrom)}
-                    attachment={item.attachment && myUserId ? <AttachmentView myUserId={String(myUserId)} meta={item.attachment} mine={item.mine} onOpen={setViewerUri} /> : undefined}
+                    attachment={item.attachment && myUserId ? <AttachmentView myUserId={String(myUserId)} meta={item.attachment} mine={item.mine} onOpen={(uri) => {
+                      const images = messages.flatMap<ViewerImage>((message) => {
+                        if (!message.attachment || !isImage(message.attachment)) return [];
+                        const cached = cachedMediaDataUri(message.attachment.blobId);
+                        return cached ? [{ uri: cached, caption: message.text || undefined }] : [];
+                      });
+                      const initialIndex = images.findIndex((image) => image.uri === uri);
+                      setViewerImages(initialIndex >= 0 ? images : [{ uri }]);
+                      setViewerIndex(initialIndex >= 0 ? initialIndex : 0);
+                    }} /> : undefined}
                     attachmentMetaInline={Boolean(item.attachment && isAudio(item.attachment))}
                     onPress={() => setSelected(item)}
                   />
@@ -436,7 +450,7 @@ export default function GroupChatScreen({ groupId, initialName, jumpToMessageId,
         </BottomSheetPanel>
       ) : null}
 
-      <ImageViewer uri={viewerUri} onClose={() => setViewerUri(null)} />
+      <ImageViewer images={viewerImages} initialIndex={viewerIndex} onClose={() => setViewerImages([])} />
 
       {sheet === 'search' && myUserId ? (
         <SearchInChatSheet

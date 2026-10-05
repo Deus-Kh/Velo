@@ -4,7 +4,7 @@ import ReactNativeBlobUtil from 'react-native-blob-util';
 import { decodeBase64 } from 'tweetnacl-util';
 import { attachmentDecrypt } from '@velo/protocol';
 import type { BlobTarget } from '../../api/attachments.api';
-import { downloadAttachment, metaOf, uploadAttachment } from '../attachments';
+import { downloadAttachment, metaOf, pickImages, uploadAttachment } from '../attachments';
 import { deleteAllMediaForUser, deleteMedia, hasMedia, loadMedia, mediaDataUri, mediaPath, saveMedia } from '../mediaStore';
 import type { BlobTransport } from '../transport';
 
@@ -68,6 +68,23 @@ beforeEach(async () => {
 });
 
 describe('T8.3 media store', () => {
+  it('requests multi-select and preserves every picked image', async () => {
+    const picker = jest.requireMock('react-native-image-picker').launchImageLibrary as jest.Mock;
+    const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=';
+    picker.mockResolvedValueOnce({
+      assets: [
+        { base64: png, type: 'image/png', width: 1, height: 1, fileName: 'one.png' },
+        { base64: png, type: 'image/png', width: 1, height: 1, fileName: 'two.png' },
+      ],
+    });
+
+    const picked = await pickImages();
+
+    expect(picked).toHaveLength(2);
+    expect(picked.map((image) => image.name)).toEqual(['one.png', 'two.png']);
+    expect(picker).toHaveBeenCalledWith(expect.objectContaining({ selectionLimit: 0 }));
+  });
+
   it('keeps media sealed under the account key and opens it only for that account', async () => {
     const blobId = 'a'.repeat(32);
     const plain = bytes(5000);

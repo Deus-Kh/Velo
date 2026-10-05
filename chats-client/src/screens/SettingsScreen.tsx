@@ -83,7 +83,7 @@ export default function SettingsScreen() {
         <View className="px-4">
           <ScreenHeader
             title={page === 'main' ? 'Settings' : PAGE_TITLES[page]}
-            actions={
+            leading={
               page !== 'main' ? (
                 <HeaderIconButton icon="chevron-left" label="Back to Settings" onPress={() => setPage('main')} />
               ) : undefined
