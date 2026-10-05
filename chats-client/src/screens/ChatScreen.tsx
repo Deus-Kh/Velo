@@ -13,6 +13,7 @@ import {
   Keyboard,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useFocusEffect } from '@react-navigation/native';
 
 import ForwardPicker from '../components/ForwardPicker';
 import MessageActionsSheet from '../components/MessageActionsSheet';
@@ -37,6 +38,8 @@ import type { ReplyReference, UIMessage } from '../shared/chat/types';
 import { useAuthStore } from '../store/auth.store';
 import { describeSessionHealth } from '../shared/chat/sessionHealthPresentation';
 import ChatHeader, { HeaderAction } from '../components/chat/ChatHeader';
+import { Icon } from '../components/Icon';
+import { useThemeColors } from '../theme/useThemeColors';
 import PresencePill from '../components/chat/PresencePill';
 import InlineChatNotice from '../components/chat/InlineChatNotice';
 import MessageList from '../components/chat/MessageList';
@@ -50,6 +53,7 @@ import { useOutgoingTyping } from '../shared/chat/useOutgoingTyping';
 import { useScrollToLatest } from '../shared/chat/useScrollToLatest';
 import { useJumpToMessage } from '../shared/chat/useJumpToMessage';
 import { makeConversationId, useMarkConversationRead } from '../shared/chat/useMarkConversationRead';
+import { getTrustedIdentity } from '../shared/storage/trustedIdentities';
 
 type SelectedMessageAction = {
   id: string;
@@ -83,6 +87,7 @@ export default function ChatScreen({
 }) {
   const myUserId = useAuthStore((s) => s.userId);
   const insets = useSafeAreaInsets();
+  const colors = useThemeColors();
 
   const {
     socketReady,
@@ -109,6 +114,7 @@ export default function ChatScreen({
   const [showSearchSheet, setShowSearchSheet] = useState(false);
   const [viewerUri, setViewerUri] = useState<string | null>(null);
   const [uploadState, setUploadState] = useState<UploadState | null>(null);
+  const [peerTrusted, setPeerTrusted] = useState(false);
 
   // A10: with a pinned contact, compute the safety number in the background now, so the
   // Verify screen opens with it ready instead of spending seconds of SHA-512 on first use.
@@ -116,6 +122,27 @@ export default function ChatScreen({
     if (!myUserId) return;
     prewarmSafetyNumber({ myUserId: String(myUserId), peerUserId });
   }, [myUserId, peerUserId]);
+
+  useFocusEffect(
+    useCallback(() => {
+      let active = true;
+      if (!myUserId) {
+        setPeerTrusted(false);
+        return undefined;
+      }
+      getTrustedIdentity({ myUserId: String(myUserId), peerUserId })
+        .then((identity) => {
+          if (active) setPeerTrusted(Boolean(identity));
+        })
+        .catch((error) => {
+          if (active) setPeerTrusted(false);
+          console.warn('[ChatScreen] Failed to read trusted contact:', error);
+        });
+      return () => {
+        active = false;
+      };
+    }, [myUserId, peerUserId]),
+  );
   const [reportBusy, setReportBusy] = useState(false);
   const peerBlocked = useBlocksStore((s) => (myUserId ? s.blockedByUser[String(myUserId)] : undefined)?.includes(peerUserId) ?? false);
 
@@ -183,6 +210,7 @@ export default function ChatScreen({
     socketReady,
     sessionHealth,
   });
+  const peerVerified = peerTrusted && sessionHealth.status !== 'identity_changed';
 
   const onSend = async () => {
     if (!trimmedText) return;
@@ -347,11 +375,20 @@ export default function ChatScreen({
         onClose={onClose}
         avatar={<Avatar name={conversationName} profile={peerProfile} size="md" className="mr-3" />}
         title={conversationName}
+        titleAccessory={
+          peerVerified ? (
+            <View className="ml-1.5">
+              <Icon lib="Ionicons" name="checkmark-circle" size={18} color={colors.primary} />
+            </View>
+          ) : null
+        }
         subtitle={presenceMeta.subtitle}
         actions={
-          <HeaderAction onPress={onVerify}>
-            <Text className="text-sm font-semibold text-text">Verify</Text>
-          </HeaderAction>
+          peerVerified ? null : (
+            <HeaderAction onPress={onVerify}>
+              <Text className="text-sm font-semibold text-text">Verify</Text>
+            </HeaderAction>
+          )
         }
       >
         {presenceMeta.pillLabel ? (
@@ -446,6 +483,7 @@ export default function ChatScreen({
       {showComposerActions ? (
         <ChatActionsSheet
           peerBlocked={peerBlocked}
+          verified={peerVerified}
           timerSeconds={timer.timerSeconds}
           sessionResetRequired={sessionHealth.status === 'reset_required'}
           onClose={handleCloseComposerActions}

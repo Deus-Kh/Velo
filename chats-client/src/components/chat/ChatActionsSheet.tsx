@@ -9,6 +9,7 @@ import { formatTimer } from '../../shared/chat/disappearing';
  */
 export default function ChatActionsSheet({
   peerBlocked,
+  verified,
   timerSeconds,
   sessionResetRequired,
   onClose,
@@ -22,6 +23,7 @@ export default function ChatActionsSheet({
   onResetSession,
 }: {
   peerBlocked: boolean;
+  verified: boolean;
   timerSeconds: number | null;
   sessionResetRequired: boolean;
   onClose: () => void;
@@ -36,18 +38,20 @@ export default function ChatActionsSheet({
 }) {
   return (
     <BottomSheetPanel title="Chat Actions" onClose={onClose}>
-      <Pressable
-        onPress={() => {
-          onClose();
-          onVerify();
-        }}
-        className="rounded-[18px] px-3 py-3 active:opacity-80"
-      >
-        <Text className="text-[15px] font-medium text-text">Verify contact</Text>
-        <Text className="mt-1 text-[13px] leading-5 text-muted">
-          Review identity fingerprints and trust this contact on this device.
-        </Text>
-      </Pressable>
+      {!verified ? (
+        <Pressable
+          onPress={() => {
+            onClose();
+            onVerify();
+          }}
+          className="rounded-[18px] px-3 py-3 active:opacity-80"
+        >
+          <Text className="text-[15px] font-medium text-text">Verify contact</Text>
+          <Text className="mt-1 text-[13px] leading-5 text-muted">
+            Review identity fingerprints and trust this contact on this device.
+          </Text>
+        </Pressable>
+      ) : null}
 
       <Pressable
         onPress={() => {
