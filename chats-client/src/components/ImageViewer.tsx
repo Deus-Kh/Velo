@@ -79,7 +79,12 @@ export default function ImageViewer({
         runOnJS(onClose)();
         return;
       }
-      if (scale.value === 1 && Math.abs(event.translationX) > 100 && Math.abs(event.translationX) > Math.abs(event.translationY)) {
+      const horizontalDistance = Math.abs(event.translationX);
+      const horizontalVelocity = Math.abs(event.velocityX);
+      const swipeDistance = Math.max(72, width * 0.18);
+      const isHorizontalSwipe = Math.abs(event.translationX) > Math.abs(event.translationY);
+      const isQuickHorizontalSwipe = horizontalVelocity > 650 && horizontalDistance > 36;
+      if (scale.value === 1 && isHorizontalSwipe && (horizontalDistance > swipeDistance || isQuickHorizontalSwipe)) {
         const nextIndex = event.translationX < 0
           ? Math.min(activeIndex.value + 1, images.length - 1)
           : Math.max(activeIndex.value - 1, 0);
