@@ -93,7 +93,7 @@ function ImageAttachment({ myUserId, meta, mine, onOpen }: { myUserId: string; m
   if (uri && isImage(meta)) {
     return (
       <Pressable onPress={() => onOpen?.(uri)} accessibilityLabel="Open the photo" className="mb-1 overflow-hidden rounded-[14px]" style={{ width: frame.width, height: frame.height }}>
-        <Image source={{ uri }} style={{ width: frame.width, height: frame.height }} resizeMode="cover" accessibilityLabel="Photo" />
+        <Image source={{ uri }} style={{ width: frame.width, height: frame.height }} resizeMode="contain" accessibilityLabel="Photo" />
       </Pressable>
     );
   }

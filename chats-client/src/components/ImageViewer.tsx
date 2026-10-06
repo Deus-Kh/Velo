@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Image, Modal, Pressable, Text, View, useWindowDimensions } from 'react-native';
-import { Gesture, GestureDetector } from 'react-native-gesture-handler';
+import { Gesture, GestureDetector, GestureHandlerRootView } from 'react-native-gesture-handler';
 import Animated, { runOnJS, useAnimatedStyle, useSharedValue, withSpring } from 'react-native-reanimated';
 
 export type ViewerImage = {
@@ -20,6 +20,7 @@ export default function ImageViewer({
 }) {
   const { width, height } = useWindowDimensions();
   const [index, setIndex] = useState(initialIndex);
+  const activeIndex = useSharedValue(initialIndex);
   const scale = useSharedValue(1);
   const savedScale = useSharedValue(1);
   const translateX = useSharedValue(0);
@@ -29,6 +30,7 @@ export default function ImageViewer({
 
   useEffect(() => {
     setIndex(initialIndex);
+    activeIndex.value = initialIndex;
     if (images.length === 0) {
       scale.value = 1;
       savedScale.value = 1;
@@ -37,7 +39,7 @@ export default function ImageViewer({
       savedTranslateX.value = 0;
       savedTranslateY.value = 0;
     }
-  }, [images.length, initialIndex, scale, savedScale, translateX, translateY, savedTranslateX, savedTranslateY]);
+  }, [images.length, initialIndex, activeIndex, scale, savedScale, translateX, translateY, savedTranslateX, savedTranslateY]);
 
   const resetZoom = () => {
     'worklet';
@@ -61,6 +63,9 @@ export default function ImageViewer({
     });
 
   const pan = Gesture.Pan()
+    .minDistance(12)
+    .activeOffsetX([-18, 18])
+    .activeOffsetY([-18, 18])
     .onStart(() => {
       savedTranslateX.value = translateX.value;
       savedTranslateY.value = translateY.value;
@@ -75,8 +80,11 @@ export default function ImageViewer({
         return;
       }
       if (scale.value === 1 && Math.abs(event.translationX) > 100 && Math.abs(event.translationX) > Math.abs(event.translationY)) {
-        const nextIndex = event.translationX < 0 ? Math.min(index + 1, images.length - 1) : Math.max(index - 1, 0);
-        if (nextIndex !== index) {
+        const nextIndex = event.translationX < 0
+          ? Math.min(activeIndex.value + 1, images.length - 1)
+          : Math.max(activeIndex.value - 1, 0);
+        if (nextIndex !== activeIndex.value) {
+          activeIndex.value = nextIndex;
           runOnJS(setIndex)(nextIndex);
         }
         translateX.value = withSpring(0);
@@ -99,7 +107,7 @@ export default function ImageViewer({
       }
     });
 
-  const gestures = Gesture.Simultaneous(Gesture.Exclusive(doubleTap, pan), pinch);
+  const gestures = Gesture.Simultaneous(doubleTap, pan, pinch);
   const imageStyle = useAnimatedStyle(() => ({
     transform: [
       { translateX: translateX.value },
@@ -112,7 +120,8 @@ export default function ImageViewer({
 
   return (
     <Modal visible={images.length > 0} transparent animationType="fade" onRequestClose={onClose}>
-      <View className="flex-1 items-center justify-center bg-black">
+      <GestureHandlerRootView style={{ flex: 1 }}>
+        <View className="flex-1 items-center justify-center bg-black">
         <GestureDetector gesture={gestures}>
           <Animated.View className="items-center justify-center" style={imageStyle}>
             {current ? <Image source={{ uri: current.uri }} style={{ width, height: height * 0.85 }} resizeMode="contain" accessibilityLabel="Photo, full screen" /> : null}
@@ -126,7 +135,8 @@ export default function ImageViewer({
         <Pressable onPress={onClose} accessibilityRole="button" accessibilityLabel="Close photo" className="absolute right-4 top-12 rounded-full bg-white/15 px-3 py-1.5">
           <Text className="text-sm font-semibold text-white">Close</Text>
         </Pressable>
-      </View>
+        </View>
+      </GestureHandlerRootView>
     </Modal>
   );
 }
