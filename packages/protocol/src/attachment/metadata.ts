@@ -40,7 +40,7 @@ function reducedExifOrientation(segment: Uint8Array): Uint8Array | null {
     if (entry + 12 > segment.length || u16(entry) !== 0x0112 || u16(entry + 2) !== 3 || u32(entry + 4) !== 1) continue;
     const orientation = u16(entry + 8);
     if (orientation < 1 || orientation > 8) return null;
-    const out = new Uint8Array(4 + 6 + 8 + 2 + 12 + 4);
+    const out = new Uint8Array(36);
     out.set([0xff, 0xe1, 0, out.length - 2, 0x45, 0x78, 0x69, 0x66, 0, 0], 0);
     const t = 10;
     out.set(little ? [0x49, 0x49] : [0x4d, 0x4d], t);

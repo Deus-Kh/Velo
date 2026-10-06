@@ -160,6 +160,18 @@ describe('T8.1 metadata stripping', () => {
     expect(Array.from(r.bytes)).toContain(0x45);
     expect(stripImageMetadata(r.bytes).removed).toBe(0);
   });
+
+  it('JPEG: reduces big-endian EXIF orientation without overflowing the output buffer', () => {
+    const exif = seg(0xe1, [
+      0x45, 0x78, 0x69, 0x66, 0, 0,
+      0x4d, 0x4d, 0, 42, 0, 0, 0, 8,
+      0, 1,
+      0x01, 0x12, 0, 3, 0, 0, 0, 1, 0, 0, 0, 6,
+      0, 0, 0, 0,
+    ]);
+    const jpeg = new Uint8Array([0xff, 0xd8, ...exif, 0xff, 0xda, 0, 4, 1, 0, 0xaa, 0xff, 0xd9]);
+    expect(() => stripImageMetadata(jpeg)).not.toThrow();
+  });
 });
 
 describe('T8.1 attachment content', () => {
