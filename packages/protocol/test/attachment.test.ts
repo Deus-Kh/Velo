@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import nacl from 'tweetnacl';
 import { encodeBase64 } from 'tweetnacl-util';
 import { protocolErrorCode } from '../src/errors';
-import { decodeContent, encodeContent, isActionContent, isAttachmentContent, isControlContent } from '../src/content/envelope';
+import { decodeContent, encodeContent, isActionContent, isAttachmentContent, isControlContent, MAX_ALBUM_SIZE } from '../src/content/envelope';
 import { attachmentDecrypt, attachmentEncrypt } from '../src/attachment/cipher';
 import { ATTACHMENT_CHUNK_BYTES, ATTACHMENT_MAC_BYTES, MAX_ATTACHMENT_BYTES, chunkNonce, expandAttachmentKey, generateAttachmentKey } from '../src/attachment/keys';
 import { jpegOrientation, stripImageMetadata } from '../src/attachment/metadata';
@@ -298,6 +298,25 @@ describe('T8.1 attachment content', () => {
     expect(decodeContent(encodeContent({ ...note, waveform: encodeBase64(bytes(64, 2)) }))).toMatchObject({ waveform: encodeBase64(bytes(64, 2)) });
     const base = `"v":1,"kind":"attachment","blobId":"b","key":"${key}","digest":"${digest}","size":10,"contentType":"audio/mp4"`;
     for (const w of ['""', '"not base64!!"', `"${encodeBase64(bytes(65))}"`, '[1,2,3]', '7']) expect(codeOf(() => decodeContent('{' + base + ',"waveform":' + w + '}')), w.slice(0, 30)).toBe('STORAGE_CORRUPTION');
+  });
+
+  it('photos sent together carry an album (id, index < count, 2..10); a malformed album is refused', () => {
+    const photo = { v: 1, kind: 'attachment', blobId: 'p', key, digest, size: 10, contentType: 'image/jpeg', album: { id: 'a1b2c3', index: 2, count: 3 } } as const;
+    expect(decodeContent(encodeContent(photo))).toEqual(photo);
+    expect(decodeContent(encodeContent({ ...photo, album: { id: 'x', index: 9, count: MAX_ALBUM_SIZE } }))).toMatchObject({ album: { index: 9, count: 10 } });
+    const base = `"v":1,"kind":"attachment","blobId":"b","key":"${key}","digest":"${digest}","size":10,"contentType":"image/jpeg"`;
+    const bad = [
+      '{"id":"","index":0,"count":2}',
+      `{"id":"${'i'.repeat(65)}","index":0,"count":2}`,
+      '{"id":"a","index":2,"count":2}',
+      '{"id":"a","index":-1,"count":2}',
+      '{"id":"a","index":0,"count":1}',
+      '{"id":"a","index":0,"count":11}',
+      '{"id":"a","index":0.5,"count":2}',
+      '{"id":7,"index":0,"count":2}',
+      '"album"',
+    ];
+    for (const album of bad) expect(codeOf(() => decodeContent('{' + base + ',"album":' + album + '}')), album).toBe('STORAGE_CORRUPTION');
   });
 });
 

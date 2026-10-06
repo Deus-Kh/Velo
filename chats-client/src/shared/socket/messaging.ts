@@ -12,9 +12,10 @@ import { receiveIncoming } from '../chat/incoming';
 import { handleInboundAction } from '../chat/actions';
 import { isBlockedLocally } from '../../store/blocks.store';
 import type { AttachmentMeta } from '../storage/messageStore';
+import { attachmentMetaOf } from '../media/attachmentMeta';
 import { ensureV2Session } from '../crypto/sessionBootstrap';
 import { reportDecryptFailure } from '../api/telemetry.api';
-import { ProtocolError, protocolErrorCode, type ProtocolErrorCode, type RatchetSessionV2, encodeContent, decodeContent, isControlContent, isAttachmentContent, textContent, type Content, type AttachmentContent } from '@velo/protocol';
+import { ProtocolError, protocolErrorCode, type ProtocolErrorCode, type RatchetSessionV2, encodeContent, decodeContent, isControlContent, isAttachmentContent, textContent, type Content } from '@velo/protocol';
 import type { X3DHInitPacket } from '../crypto/x3dh';
 
 function requireMyUserId(): string {
@@ -265,11 +266,3 @@ export async function subscribeToMessages(onMessage: (m: {
 }
 
 /** T8.3: what the store keeps for an attachment message (the key stays inside the sealed record). */
-function attachmentMetaOf(c: AttachmentContent): AttachmentMeta {
-  const meta: AttachmentMeta = { blobId: c.blobId, key: c.key, digest: c.digest, size: c.size, contentType: c.contentType };
-  if (c.width !== undefined) meta.width = c.width;
-  if (c.height !== undefined) meta.height = c.height;
-  if (c.durationMs !== undefined) meta.durationMs = c.durationMs;
-  if (c.name !== undefined) meta.name = c.name;
-  return meta;
-}

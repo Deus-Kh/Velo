@@ -7,6 +7,7 @@ import {
   jpegOrientation,
   stripImageMetadata,
   MAX_ATTACHMENT_BYTES,
+  type AttachmentAlbum,
   type AttachmentContent,
 } from '@velo/protocol';
 import { attachmentsApi } from '../api/attachments.api';
@@ -18,6 +19,7 @@ import { sendContentMessage } from '../socket/messaging';
 import { upsertStoredMessage, type AttachmentMeta, type StoredMessage } from '../storage/messageStore';
 import { dataUriFor, rememberDataUri, saveMedia } from './mediaStore';
 import { displayDimensions } from './photoDimensions';
+import { attachmentMetaOf } from './attachmentMeta';
 import { xhrTransport, type BlobTransport, type ProgressFn } from './transport';
 
 /**
@@ -67,6 +69,8 @@ export type UploadParams = {
   waveform?: string;
   name?: string;
   caption?: string;
+  /** photos picked together (albumPlan) */
+  album?: AttachmentAlbum;
   onProgress?: ProgressFn;
   transport?: BlobTransport;
 };
@@ -101,6 +105,7 @@ export async function uploadAttachment(p: UploadParams): Promise<AttachmentConte
   if (p.waveform) content.waveform = p.waveform;
   if (p.name) content.name = p.name;
   if (p.caption?.trim()) content.caption = p.caption.trim();
+  if (p.album) content.album = { ...p.album };
   key.fill(0);
   return content;
 }
@@ -122,13 +127,7 @@ export async function downloadAttachment(p: { myUserId: string; meta: Attachment
 }
 
 export function metaOf(content: AttachmentContent): AttachmentMeta {
-  const meta: AttachmentMeta = { blobId: content.blobId, key: content.key, digest: content.digest, size: content.size, contentType: content.contentType };
-  if (content.width !== undefined) meta.width = content.width;
-  if (content.height !== undefined) meta.height = content.height;
-  if (content.durationMs !== undefined) meta.durationMs = content.durationMs;
-  if (content.waveform !== undefined) meta.waveform = content.waveform;
-  if (content.name !== undefined) meta.name = content.name;
-  return meta;
+  return attachmentMetaOf(content);
 }
 
 export function contentOf(meta: AttachmentMeta, caption?: string | null): AttachmentContent {

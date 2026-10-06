@@ -13,6 +13,11 @@ const MAX_HEIGHT_CAP = 400;
 export const PHOTO_MIN_WIDTH = 150;
 const MIN_HEIGHT = 100;
 
+/** The widest a photo (or an album) is drawn in this window. */
+export function photoMaxWidth(windowWidth: number): number {
+  return Math.max(PHOTO_MIN_WIDTH, Math.min(MAX_WIDTH_CAP, Math.floor(windowWidth * MAX_WIDTH_FRACTION)));
+}
+
 export function photoFrame(
   size: { width?: number; height?: number },
   windowWidth: number,
@@ -20,7 +25,7 @@ export function photoFrame(
 ): { width: number; height: number } {
   const w = size.width && size.width > 0 ? size.width : 4;
   const h = size.height && size.height > 0 ? size.height : 3;
-  const maxWidth = Math.max(PHOTO_MIN_WIDTH, Math.min(MAX_WIDTH_CAP, Math.floor(windowWidth * MAX_WIDTH_FRACTION)));
+  const maxWidth = photoMaxWidth(windowWidth);
   const maxHeight = Math.max(MIN_HEIGHT, Math.min(MAX_HEIGHT_CAP, Math.floor(windowHeight * MAX_HEIGHT_FRACTION)));
   const scale = Math.min(maxWidth / w, maxHeight / h);
   return {

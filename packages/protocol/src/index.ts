@@ -123,6 +123,7 @@ export {
   MAX_IMAGE_DIMENSION,
   MAX_ATTACHMENT_DURATION_MS,
   MAX_ATTACHMENT_WAVEFORM_BYTES,
+  MAX_ALBUM_SIZE,
   type Content,
   type TextContent,
   type ControlContent,
@@ -135,6 +136,7 @@ export {
   type ProfileContent,
   type ProfileAvatar,
   type AttachmentContent,
+  type AttachmentAlbum,
   type SenderKeyDistributionContent,
   type SenderKeyRequestContent,
 } from './content/envelope';

@@ -29,6 +29,7 @@ import SearchInChatSheet from '../components/SearchInChatSheet';
 import ImageViewer from '../components/ImageViewer';
 import type { ViewerImage } from '../components/ImageViewer';
 import { pickImages, sendAttachmentMessage, uploadAttachment } from '../shared/media/attachments';
+import { albumPlan } from '../shared/media/albums';
 import { describeMessageForQuote } from '../shared/chat/describeMessage';
 import { useLayeredBackHandler } from '../shared/ui/layeredBack';
 import { prewarmSafetyNumber } from '../shared/chat/safetyNumber';
@@ -247,6 +248,8 @@ export default function ChatScreen({
       const picked = await pickImages();
       if (picked.length === 0) return;
       const caption = text.trim();
+      // photos picked together are tagged as albums and drawn as one bubble
+      const albums = albumPlan(picked.length);
       for (let index = 0; index < picked.length; index += 1) {
         const image = picked[index]!;
         setUploadState({ label: `Encrypting photo ${index + 1} of ${picked.length}…`, progress: null });
@@ -258,6 +261,7 @@ export default function ChatScreen({
           height: image.height,
           name: image.name,
           caption: index === 0 ? caption : undefined,
+          album: albums[index],
           onProgress: (loaded, total) => setUploadState({ label: `Uploading photo ${index + 1} of ${picked.length}…`, progress: total > 0 ? loaded / total : null }),
         });
         setUploadState({ label: `Sending photo ${index + 1} of ${picked.length}…`, progress: null });

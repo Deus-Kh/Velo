@@ -26,12 +26,23 @@ function formatBytes(n: number): string {
   return `${(n / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-export default function AttachmentView(props: { myUserId: string; meta: AttachmentMeta; mine: boolean; onOpen?: (uri: string) => void; trailing?: React.ReactNode }) {
+type ImageProps = {
+  myUserId: string;
+  meta: AttachmentMeta;
+  mine: boolean;
+  onOpen?: (uri: string) => void;
+  /** the photo fills the whole bubble, so a long press is the way to the message's actions */
+  onLongPress?: () => void;
+  /** an album tile: this exact frame instead of the photo's own */
+  frame?: { width: number; height: number };
+};
+
+export default function AttachmentView(props: ImageProps & { trailing?: React.ReactNode }) {
   if (isAudio(props.meta)) return <VoiceNoteView myUserId={props.myUserId} meta={props.meta} mine={props.mine} trailing={props.trailing} />; // T8.4
   return <ImageAttachment {...props} />;
 }
 
-function ImageAttachment({ myUserId, meta, mine, onOpen }: { myUserId: string; meta: AttachmentMeta; mine: boolean; onOpen?: (uri: string) => void }) {
+function ImageAttachment({ myUserId, meta, mine, onOpen, onLongPress, frame: tileFrame }: ImageProps) {
   // An own photo (or one shown earlier in this process) renders at once from the cache; otherwise
   // the placeholder shows the dimensions and size, and offers a download only once the file
   // check has said the photo is not on the device (A2).
@@ -41,7 +52,7 @@ function ImageAttachment({ myUserId, meta, mine, onOpen }: { myUserId: string; m
   const [error, setError] = useState<{ text: string; warning: boolean } | null>(null);
   const startedRef = useRef(false);
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
-  const frame = photoFrame(meta, windowWidth, windowHeight);
+  const frame = tileFrame ?? photoFrame(meta, windowWidth, windowHeight);
 
   const download = async () => {
     if (startedRef.current) return;
@@ -79,7 +90,7 @@ function ImageAttachment({ myUserId, meta, mine, onOpen }: { myUserId: string; m
 
   if (uri && isImage(meta)) {
     return (
-      <Pressable onPress={() => onOpen?.(uri)} accessibilityLabel="Open the photo" style={{ width: frame.width, height: frame.height }}>
+      <Pressable onPress={() => onOpen?.(uri)} onLongPress={onLongPress} delayLongPress={350} accessibilityLabel="Open the photo" style={{ width: frame.width, height: frame.height }}>
         <Image source={{ uri }} style={{ width: frame.width, height: frame.height }} resizeMode="cover" accessibilityLabel="Photo" />
       </Pressable>
     );
@@ -90,6 +101,8 @@ function ImageAttachment({ myUserId, meta, mine, onOpen }: { myUserId: string; m
       onPress={() => {
         if (checked && progress === null && !uri) download();
       }}
+      onLongPress={onLongPress}
+      delayLongPress={350}
       accessibilityLabel="Download the attachment"
       className={`items-center justify-center ${mine ? 'bg-bubble-out' : 'bg-bubble-in'}`}
       style={{ width: frame.width, height: frame.height }}

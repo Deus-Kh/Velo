@@ -37,6 +37,17 @@ export const MAX_IMAGE_DIMENSION = 16_384;
 export const MAX_ATTACHMENT_DURATION_MS = 24 * 60 * 60 * 1000;
 /** Voice-note waveform (base64): at most this many bytes, one 0..255 level per bar. */
 export const MAX_ATTACHMENT_WAVEFORM_BYTES = 64;
+/** Photos sent together are shown as one album of at most this many. */
+export const MAX_ALBUM_SIZE = 10;
+const MAX_ALBUM_ID_LENGTH = 64;
+
+/**
+ * Photos sent together (an album): each photo is still its own message, so
+ * replies, reactions and deletion stay per photo; receivers draw messages
+ * that share an `id` as one grid. `index` orders them, `count` is how many
+ * were sent. A client that does not know the field shows separate photos.
+ */
+export type AttachmentAlbum = { id: string; index: number; count: number };
 
 /** Names a message both sides know: its sender and the sender's client id (stable across the send/ack cycle). */
 export type MessageRef = { senderUserId: string; clientMessageId: string };
@@ -84,6 +95,7 @@ export type AttachmentContent = {
   /** base64, ≤ 64 bytes: loudness per bar, drawn in the voice bubble (T8.4) */
   waveform?: string;
   caption?: string;
+  album?: AttachmentAlbum;
 };
 
 export type ControlContent = SenderKeyDistributionContent | SenderKeyRequestContent;
@@ -197,7 +209,20 @@ function requireAttachment(c: Record<string, unknown>): AttachmentContent {
   if (waveform !== undefined) out.waveform = waveform;
   const caption = optionalText(c.caption, MAX_CAPTION_LENGTH, 'attachment.caption');
   if (caption !== undefined) out.caption = caption;
+  const album = optionalAlbum(c.album);
+  if (album !== undefined) out.album = album;
   return out;
+}
+
+function optionalAlbum(value: unknown): AttachmentAlbum | undefined {
+  if (value === undefined || value === null) return undefined;
+  const a = value as Record<string, unknown>;
+  if (typeof a !== 'object' || typeof a.id !== 'string' || a.id.length === 0 || a.id.length > MAX_ALBUM_ID_LENGTH) throw malformed('attachment.album');
+  const count = a.count;
+  const index = a.index;
+  if (typeof count !== 'number' || !Number.isInteger(count) || count < 2 || count > MAX_ALBUM_SIZE) throw malformed('attachment.album');
+  if (typeof index !== 'number' || !Number.isInteger(index) || index < 0 || index >= count) throw malformed('attachment.album');
+  return { id: a.id, index, count };
 }
 
 function requireEmoji(emoji: string): string {

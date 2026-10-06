@@ -73,6 +73,7 @@ export default function MessageBubble({
   attachment,
   attachmentMetaInline,
   photoSize,
+  mediaFrame,
 }: {
   text: string;
   mine: boolean;
@@ -89,6 +90,8 @@ export default function MessageBubble({
   attachmentMetaInline?: boolean;
   /** The attachment is a photo of this size: the bubble lays it out edge to edge (Telegram-style). */
   photoSize?: { width?: number; height?: number } | null;
+  /** The attachment is an album grid of exactly this size; laid out like a photo. */
+  mediaFrame?: { width: number; height: number } | null;
   replyPreview?: {
     title: string;
     text: string;
@@ -132,7 +135,7 @@ export default function MessageBubble({
   // A photo fills the bubble edge to edge; the bubble is exactly as wide as the photo, so a caption
   // wraps at the photo's width. Without a caption the time sits on the photo, and a photo with
   // nothing else around it has no bubble colour at all.
-  const photo = photoSize && attachment && !deleted ? photoFrame(photoSize, windowWidth, windowHeight) : null;
+  const photo = !attachment || deleted ? null : mediaFrame ?? (photoSize ? photoFrame(photoSize, windowWidth, windowHeight) : null);
   const metaOnPhoto = Boolean(photo && !text && showMeta);
   const photoOnly = Boolean(photo && !text && !replyPreview && !forwarded && !hasReactions);
 
