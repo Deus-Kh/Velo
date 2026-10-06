@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type React from 'react';
 import { Image, Pressable, Text, View, useWindowDimensions } from 'react-native';
+import { photoFrame } from '../shared/media/photoFrame';
 import { protocolErrorCode } from '@velo/protocol';
 import { AUTO_DOWNLOAD_BYTES, downloadAttachment, isImage } from '../shared/media/attachments';
 import { cachedMediaDataUri, mediaDataUri } from '../shared/media/mediaStore';
@@ -14,24 +15,10 @@ import { isAudio } from '../shared/media/attachments';
  * a placeholder with the dimensions, downloaded at once when small, on tap
  * otherwise; every integrity failure is shown in the security-warning tone.
  */
-/** B3: a photo bubble is at most ~75 % of the screen (the bubble's own padding is inside that), never edge to edge. */
-const MAX_W_CAP = 300;
-const MAX_H = 320;
-const BUBBLE_MAX_FRACTION = 0.75;
-const BUBBLE_PADDING = 32;
-
-export function photoMaxWidth(windowWidth: number): number {
-  return Math.min(MAX_W_CAP, Math.max(160, Math.floor(windowWidth * BUBBLE_MAX_FRACTION) - BUBBLE_PADDING));
-}
-
-export function frameFor(meta: AttachmentMeta, maxWidth: number): { width: number; height: number } {
-  const w = meta.width && meta.width > 0 ? meta.width : 4;
-  const h = meta.height && meta.height > 0 ? meta.height : 3;
-  const scale = Math.min(maxWidth / w, MAX_H / h, 1e9);
-  const width = Math.max(120, Math.round(w * scale));
-  const height = Math.max(90, Math.round(h * scale));
-  return { width: Math.min(width, maxWidth), height: Math.min(height, MAX_H) };
-}
+/**
+ * A photo fills its bubble edge to edge (Telegram-style); the bubble clips the corners and
+ * sizes itself with the same photoFrame, so the photo needs no margin or rounding of its own.
+ */
 
 function formatBytes(n: number): string {
   if (n < 1024) return `${n} B`;
@@ -53,8 +40,8 @@ function ImageAttachment({ myUserId, meta, mine, onOpen }: { myUserId: string; m
   const [progress, setProgress] = useState<number | null>(null);
   const [error, setError] = useState<{ text: string; warning: boolean } | null>(null);
   const startedRef = useRef(false);
-  const { width: windowWidth } = useWindowDimensions();
-  const frame = frameFor(meta, photoMaxWidth(windowWidth));
+  const { width: windowWidth, height: windowHeight } = useWindowDimensions();
+  const frame = photoFrame(meta, windowWidth, windowHeight);
 
   const download = async () => {
     if (startedRef.current) return;
@@ -92,8 +79,8 @@ function ImageAttachment({ myUserId, meta, mine, onOpen }: { myUserId: string; m
 
   if (uri && isImage(meta)) {
     return (
-      <Pressable onPress={() => onOpen?.(uri)} accessibilityLabel="Open the photo" className="mb-1 overflow-hidden rounded-[14px]" style={{ width: frame.width, height: frame.height }}>
-        <Image source={{ uri }} style={{ width: frame.width, height: frame.height }} resizeMode="contain" accessibilityLabel="Photo" />
+      <Pressable onPress={() => onOpen?.(uri)} accessibilityLabel="Open the photo" style={{ width: frame.width, height: frame.height }}>
+        <Image source={{ uri }} style={{ width: frame.width, height: frame.height }} resizeMode="cover" accessibilityLabel="Photo" />
       </Pressable>
     );
   }
@@ -104,8 +91,8 @@ function ImageAttachment({ myUserId, meta, mine, onOpen }: { myUserId: string; m
         if (checked && progress === null && !uri) download();
       }}
       accessibilityLabel="Download the attachment"
-      className={`mb-1 items-center justify-center rounded-[14px] ${mine ? 'bg-bubble-out-text/10' : 'bg-text/10'}`}
-      style={{ width: frame.width, height: Math.min(frame.height, 160) }}
+      className={`items-center justify-center ${mine ? 'bg-bubble-out' : 'bg-bubble-in'}`}
+      style={{ width: frame.width, height: frame.height }}
     >
       {progress !== null ? (
         <>

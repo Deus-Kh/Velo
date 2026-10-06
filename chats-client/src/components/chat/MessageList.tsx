@@ -144,6 +144,7 @@ export default function MessageList({
             forwarded={Boolean(item.message.forwardedFrom)}
             attachment={item.message.attachment && myUserId ? <AttachmentView myUserId={String(myUserId)} meta={item.message.attachment} mine={item.message.mine} onOpen={openImage} /> : undefined}
             attachmentMetaInline={Boolean(item.message.attachment && isAudio(item.message.attachment))}
+            photoSize={item.message.attachment && isImage(item.message.attachment) ? item.message.attachment : null}
             replyPreview={replyPreview}
             onReplyPreviewPress={
               replyPreview?.targetMessageId

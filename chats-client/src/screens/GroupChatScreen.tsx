@@ -324,6 +324,7 @@ export default function GroupChatScreen({ groupId, initialName, jumpToMessageId,
                       setViewerIndex(initialIndex >= 0 ? initialIndex : 0);
                     }} /> : undefined}
                     attachmentMetaInline={Boolean(item.attachment && isAudio(item.attachment))}
+                    photoSize={item.attachment && isImage(item.attachment) ? item.attachment : null}
                     onPress={() => setSelected(item)}
                   />
                 </View>
