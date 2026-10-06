@@ -56,7 +56,7 @@ import { useOutgoingTyping } from '../shared/chat/useOutgoingTyping';
 import { useScrollToLatest } from '../shared/chat/useScrollToLatest';
 import { useJumpToMessage } from '../shared/chat/useJumpToMessage';
 import { makeConversationId, useMarkConversationRead } from '../shared/chat/useMarkConversationRead';
-import { getTrustedIdentity } from '../shared/storage/trustedIdentities';
+import { isIdentityVerified } from '../shared/storage/trustedIdentities';
 
 type SelectedMessageAction = {
   id: string;
@@ -134,9 +134,10 @@ export default function ChatScreen({
         setPeerTrusted(false);
         return undefined;
       }
-      getTrustedIdentity({ myUserId: String(myUserId), peerUserId })
-        .then((identity) => {
-          if (active) setPeerTrusted(Boolean(identity));
+      // C2: only a contact the user marked as verified counts, not the silent first-contact pin.
+      isIdentityVerified({ myUserId: String(myUserId), peerUserId })
+        .then((verified) => {
+          if (active) setPeerTrusted(verified);
         })
         .catch((error) => {
           if (active) setPeerTrusted(false);

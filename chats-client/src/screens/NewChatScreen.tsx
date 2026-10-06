@@ -28,7 +28,7 @@ import { useAuthStore } from '../store/auth.store';
 import { useContactsStore, type SavedContact } from '../store/contacts.store';
 import { useProfilesStore } from '../store/profiles.store';
 import { DIRECTORY_SEARCH_MIN_LENGTH, filterLocalContacts } from '../shared/contacts/searchLocal';
-import { listTrustedPeerUserIds } from '../shared/storage/trustedIdentities';
+import { listVerifiedPeerUserIds } from '../shared/storage/trustedIdentities';
 import { contactSubtitle, formatHandle, shortSecureId } from '../shared/utils/identity';
 
 // B1: flat rows span the full width; only the section labels carry side padding
@@ -419,7 +419,7 @@ export default function NewChatScreen({
     try {
       const [conversationRes, trustedIds] = await Promise.all([
         conversationsApi.list(),
-        listTrustedPeerUserIds(myUserId),
+        listVerifiedPeerUserIds(myUserId),
       ]);
 
       setConversations(conversationRes.data.items);

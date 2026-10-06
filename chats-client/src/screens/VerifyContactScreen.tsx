@@ -14,7 +14,13 @@ import { keysApi } from '../shared/api/keys.api';
 import { ensureIdentityKeyPairForUser } from '../shared/crypto/identityKeys';
 import { ensureIdentityDhKeyPairForUser } from '../shared/crypto/identityDhKeys';
 import { verifyIdentityBinding, type Identity, type SafetyNumber } from '@velo/protocol';
-import { getTrustedIdentity, setTrustedIdentity, clearTrustedIdentity, type TrustedIdentity } from '../shared/storage/trustedIdentities';
+import {
+  getIdentityTrust,
+  markIdentityVerified,
+  clearIdentityVerification,
+  clearTrustedIdentity,
+  type IdentityTrust,
+} from '../shared/storage/trustedIdentities';
 import { resolveVerifyView, type ServerIdentityState } from '../shared/chat/verifyState';
 import { withTimeout } from '../shared/utils/withTimeout';
 import { getSafetyNumber } from '../shared/chat/safetyNumber';
@@ -45,7 +51,7 @@ export default function VerifyContactScreen({ route, navigation }: Props) {
   const peerProfile = useProfilesStore((s) => s.byUser[peerUserId] ?? null);
 
   const [myIdentity, setMyIdentity] = useState<Identity | null>(null);
-  const [trusted, setTrusted] = useState<TrustedIdentity | null>(null);
+  const [trust, setTrust] = useState<IdentityTrust | null>(null);
   const [localReady, setLocalReady] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
   const [server, setServer] = useState<ServerIdentityState>({ kind: 'pending' });
@@ -61,10 +67,10 @@ export default function VerifyContactScreen({ route, navigation }: Props) {
         return;
       }
       try {
-        const [mySign, myDh, pin] = await Promise.all([ensureIdentityKeyPairForUser(myUserId), ensureIdentityDhKeyPairForUser(myUserId), getTrustedIdentity({ myUserId, peerUserId })]);
+        const [mySign, myDh, pin] = await Promise.all([ensureIdentityKeyPairForUser(myUserId), ensureIdentityDhKeyPairForUser(myUserId), getIdentityTrust({ myUserId, peerUserId })]);
         if (!alive) return;
         setMyIdentity({ identitySignPublicKey: mySign, identityDhPublicKey: myDh });
-        setTrusted(pin);
+        setTrust(pin);
       } catch (e: any) {
         if (!alive) return;
         setLocalError(e?.message || 'Could not read the keys on this phone');
@@ -107,7 +113,7 @@ export default function VerifyContactScreen({ route, navigation }: Props) {
     };
   }, [peerUserId, attempt]);
 
-  const view = useMemo(() => resolveVerifyView(trusted, server), [trusted, server]);
+  const view = useMemo(() => resolveVerifyView(trust, server), [trust, server]);
 
   // The number for the identity on screen: cached, or computed in chunks with progress.
   const [computed, setComputed] = useState<SafetyNumber | null>(null);
@@ -144,27 +150,35 @@ export default function VerifyContactScreen({ route, navigation }: Props) {
   const statusTone = view.status === 'verified' ? 'success' : view.status === 'changed' ? 'danger' : 'warning';
   const guidance =
     view.status === 'verified'
-      ? 'You marked this identity as trusted on this phone. Compare the number again only if your contact reinstalled the app.'
+      ? 'You compared this number and marked the contact as verified on this phone. Compare it again only if your contact reinstalled the app.'
       : view.status === 'changed'
         ? 'The saved identity no longer matches. This happens after a reinstall or a new phone, or if someone is interfering. Compare the number with your contact before accepting.'
         : 'Compare these digits with your contact over a call or in person. If they match, mark the contact as verified.';
 
+  // C2: the only place a contact becomes verified. The user has just compared the number for
+  // the server-confirmed identity on screen, so exactly those keys are pinned as verified.
   const onTrust = useCallback(async () => {
     if (!myUserId || server.kind !== 'ok') return;
-    await setTrustedIdentity({
+    await markIdentityVerified({
       myUserId,
       peerUserId,
       identitySignPublicKey: server.identity.identitySignPublicKey,
       identityDhPublicKey: server.identity.identityDhPublicKey,
     });
-    setTrusted({ ...server.identity });
+    setTrust({ identity: { ...server.identity }, verified: true });
   }, [myUserId, peerUserId, server]);
 
+  // Verified: withdraw the verification and keep the pin. Changed: drop the old pin (as before).
   const onClearTrust = useCallback(async () => {
     if (!myUserId) return;
+    if (view.status === 'verified') {
+      await clearIdentityVerification({ myUserId, peerUserId });
+      setTrust((current) => (current ? { ...current, verified: false } : current));
+      return;
+    }
     await clearTrustedIdentity({ myUserId, peerUserId });
-    setTrusted(null);
-  }, [myUserId, peerUserId]);
+    setTrust(null);
+  }, [myUserId, peerUserId, view.status]);
 
   const retry = useCallback(() => setAttempt((n) => n + 1), []);
 
@@ -266,7 +280,7 @@ export default function VerifyContactScreen({ route, navigation }: Props) {
               ) : null}
               {view.status === 'verified' || view.status === 'changed' ? (
                 <Pressable onPress={onClearTrust} accessibilityRole="button" className="flex-1 rounded-[18px] border border-border bg-surface-elevated px-4 py-3.5 active:opacity-80">
-                  <Text className="text-center font-semibold text-text">Clear trust</Text>
+                  <Text className="text-center font-semibold text-text">{view.status === 'verified' ? 'Remove verification' : 'Clear trust'}</Text>
                 </Pressable>
               ) : null}
             </View>

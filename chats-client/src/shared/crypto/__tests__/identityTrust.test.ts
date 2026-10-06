@@ -5,7 +5,7 @@ import { encodeBase64 } from 'tweetnacl-util';
 import { isProtocolError, signIdentityBinding, type BoundIdentity, type X3DHInitPacket } from '@velo/protocol';
 import { keysApi } from '../../api/keys.api';
 import { acceptNewIdentity, authenticateInitiator, enforcePinnedIdentity, fetchBoundIdentity } from '../identityTrust';
-import { getTrustedIdentity, setTrustedIdentity } from '../../storage/trustedIdentities';
+import { getTrustedIdentity, isIdentityVerified, markIdentityVerified, setTrustedIdentity } from '../../storage/trustedIdentities';
 import { saveSession, loadSession } from '../../storage/sessionStore';
 import { initInitiatorSession } from '@velo/protocol';
 
@@ -160,5 +160,21 @@ describe('acceptNewIdentity', () => {
     expect(await loadSession({ myUserId: ME, peerUserId: PEER })).toBeNull();
     // T2.14: accepting a new identity never deletes history or the legacy archive; the migration owns that.
     expect((await AsyncStorage.getAllKeys()).filter((k) => k.startsWith('v2mk:'))).toHaveLength(1);
+  });
+});
+
+describe('verification in the crypto path (C2)', () => {
+  it('the silent first-contact pin is not a verification, a matching contact keeps one, and an accepted key change drops it', async () => {
+    const a = identity(0xb0);
+    await enforcePinnedIdentity({ myUserId: ME, peerUserId: PEER, presented: a });
+    expect(await isIdentityVerified({ myUserId: ME, peerUserId: PEER })).toBe(false);
+
+    await markIdentityVerified({ myUserId: ME, peerUserId: PEER, identitySignPublicKey: a.identitySignPublicKey, identityDhPublicKey: a.identityDhPublicKey });
+    await enforcePinnedIdentity({ myUserId: ME, peerUserId: PEER, presented: a });
+    expect(await isIdentityVerified({ myUserId: ME, peerUserId: PEER })).toBe(true);
+
+    serverHas(identity(0xc0));
+    await acceptNewIdentity({ myUserId: ME, peerUserId: PEER });
+    expect(await isIdentityVerified({ myUserId: ME, peerUserId: PEER })).toBe(false);
   });
 });
