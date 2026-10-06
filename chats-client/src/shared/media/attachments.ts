@@ -17,6 +17,7 @@ import { ensureV2Session } from '../crypto/sessionBootstrap';
 import { sendContentMessage } from '../socket/messaging';
 import { upsertStoredMessage, type AttachmentMeta, type StoredMessage } from '../storage/messageStore';
 import { dataUriFor, rememberDataUri, saveMedia } from './mediaStore';
+import { displayDimensions } from './photoDimensions';
 import { xhrTransport, type BlobTransport, type ProgressFn } from './transport';
 
 /**
@@ -43,13 +44,13 @@ export async function pickImages(): Promise<PickedImage[]> {
     const stripped = stripImageMetadata(raw);
     const contentType = (asset.type && /^image\//i.test(asset.type) ? asset.type : stripped.kind === 'png' ? 'image/png' : 'image/jpeg').toLowerCase();
     if (stripped.bytes.length > MAX_ATTACHMENT_BYTES) throw new Error('This image is too large to send (8 MB max)');
-    const orientation = jpegOrientation(raw);
-    const rotated = orientation >= 5 && orientation <= 8;
+    // The picker already reports upright sizes for the common rotations; see displayDimensions.
+    const { width, height } = displayDimensions(asset.width, asset.height, jpegOrientation(raw));
     return {
       bytes: stripped.bytes,
       contentType,
-      width: rotated ? asset.height : asset.width,
-      height: rotated ? asset.width : asset.height,
+      width,
+      height,
       name: asset.fileName,
     };
   });
