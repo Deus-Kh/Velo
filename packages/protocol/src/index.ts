@@ -174,4 +174,4 @@ export {
   type ExpandedAttachmentKeys,
 } from './attachment/keys';
 export { attachmentEncrypt, attachmentDecrypt, type EncryptedAttachment } from './attachment/cipher';
-export { stripImageMetadata, type StripResult } from './attachment/metadata';
+export { jpegOrientation, stripImageMetadata, type StripResult } from './attachment/metadata';

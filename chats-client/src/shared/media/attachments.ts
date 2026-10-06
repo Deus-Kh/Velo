@@ -4,6 +4,7 @@ import {
   attachmentDecrypt,
   attachmentEncrypt,
   generateAttachmentKey,
+  jpegOrientation,
   stripImageMetadata,
   MAX_ATTACHMENT_BYTES,
   type AttachmentContent,
@@ -42,7 +43,15 @@ export async function pickImages(): Promise<PickedImage[]> {
     const stripped = stripImageMetadata(raw);
     const contentType = (asset.type && /^image\//i.test(asset.type) ? asset.type : stripped.kind === 'png' ? 'image/png' : 'image/jpeg').toLowerCase();
     if (stripped.bytes.length > MAX_ATTACHMENT_BYTES) throw new Error('This image is too large to send (8 MB max)');
-    return { bytes: stripped.bytes, contentType, width: asset.width, height: asset.height, name: asset.fileName };
+    const orientation = jpegOrientation(raw);
+    const rotated = orientation >= 5 && orientation <= 8;
+    return {
+      bytes: stripped.bytes,
+      contentType,
+      width: rotated ? asset.height : asset.width,
+      height: rotated ? asset.width : asset.height,
+      name: asset.fileName,
+    };
   });
 }
 

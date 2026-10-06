@@ -5,7 +5,7 @@ import { protocolErrorCode } from '../src/errors';
 import { decodeContent, encodeContent, isActionContent, isAttachmentContent, isControlContent } from '../src/content/envelope';
 import { attachmentDecrypt, attachmentEncrypt } from '../src/attachment/cipher';
 import { ATTACHMENT_CHUNK_BYTES, ATTACHMENT_MAC_BYTES, MAX_ATTACHMENT_BYTES, chunkNonce, expandAttachmentKey, generateAttachmentKey } from '../src/attachment/keys';
-import { stripImageMetadata } from '../src/attachment/metadata';
+import { jpegOrientation, stripImageMetadata } from '../src/attachment/metadata';
 import { hmacSha256 } from '../src/primitives/kdf';
 
 /**
@@ -142,6 +142,23 @@ describe('T8.1 metadata stripping', () => {
     expect(Array.from(r.bytes)).toEqual([...sig, ...ihdr, ...idat, ...iend]);
     const other = new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8, 9]);
     expect(stripImageMetadata(other)).toEqual({ bytes: other, removed: 0, kind: 'other' });
+  });
+
+  it('JPEG: keeps only EXIF orientation and reports rotated dimensions', () => {
+    const exif = seg(0xe1, [
+      0x45, 0x78, 0x69, 0x66, 0, 0,
+      0x49, 0x49, 42, 0, 8, 0, 0, 0,
+      1, 0,
+      0x12, 0x01, 3, 0, 1, 0, 0, 0, 6, 0, 0, 0,
+      0, 0, 0, 0,
+    ]);
+    const jpeg = new Uint8Array([0xff, 0xd8, ...exif, 0xff, 0xda, 0, 4, 1, 0, 0xaa, 0xff, 0xd9]);
+    const r = stripImageMetadata(jpeg);
+    expect(r.removed).toBe(0);
+    expect(jpegOrientation(jpeg)).toBe(6);
+    expect(jpegOrientation(r.bytes)).toBe(6);
+    expect(Array.from(r.bytes)).toContain(0x45);
+    expect(stripImageMetadata(r.bytes).removed).toBe(0);
   });
 });
 
