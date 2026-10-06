@@ -161,17 +161,101 @@ describe('T8.1 metadata stripping', () => {
     expect(stripImageMetadata(r.bytes).removed).toBe(0);
   });
 
-  it('JPEG: reduces big-endian EXIF orientation without overflowing the output buffer', () => {
+  it('JPEG: keeps a minimal big-endian EXIF orientation as is', () => {
+    // A SHORT value sits in the first two bytes of the 4-byte value field, in the file's byte order.
     const exif = seg(0xe1, [
       0x45, 0x78, 0x69, 0x66, 0, 0,
       0x4d, 0x4d, 0, 42, 0, 0, 0, 8,
       0, 1,
-      0x01, 0x12, 0, 3, 0, 0, 0, 1, 0, 0, 0, 6,
+      0x01, 0x12, 0, 3, 0, 0, 0, 1, 0, 6, 0, 0,
       0, 0, 0, 0,
     ]);
     const jpeg = new Uint8Array([0xff, 0xd8, ...exif, 0xff, 0xda, 0, 4, 1, 0, 0xaa, 0xff, 0xd9]);
-    expect(() => stripImageMetadata(jpeg)).not.toThrow();
+    const r = stripImageMetadata(jpeg);
+    expect(r.removed).toBe(0);
+    expect(jpegOrientation(jpeg)).toBe(6);
+    expect(jpegOrientation(r.bytes)).toBe(6);
   });
+
+  /**
+   * A camera-like APP1: IFD0 holds Make (ASCII, stored out of line), the
+   * orientation (SHORT) and DateTime (ASCII, out of line), in either byte order.
+   */
+  function cameraExif(little: boolean, orientation: number): number[] {
+    const make = Array.from(new TextEncoder().encode('SecretCam '));
+    const date = Array.from(new TextEncoder().encode('2026:10:06 12:00:00 '));
+    const entries = 3;
+    const ifdSize = 2 + entries * 12 + 4;
+    const makeAt = 8 + ifdSize;
+    const dateAt = makeAt + make.length;
+    const tiff = new Uint8Array(dateAt + date.length);
+    const v = new DataView(tiff.buffer);
+    tiff.set(little ? [0x49, 0x49] : [0x4d, 0x4d], 0);
+    v.setUint16(2, 42, little);
+    v.setUint32(4, 8, little);
+    v.setUint16(8, entries, little);
+    const entry = (n: number, tag: number, type: number, count: number, fill: (at: number) => void) => {
+      const at = 10 + n * 12;
+      v.setUint16(at, tag, little);
+      v.setUint16(at + 2, type, little);
+      v.setUint32(at + 4, count, little);
+      fill(at + 8);
+    };
+    entry(0, 0x010f, 2, make.length, (at) => v.setUint32(at, makeAt, little));
+    entry(1, 0x0112, 3, 1, (at) => v.setUint16(at, orientation, little));
+    entry(2, 0x0132, 2, date.length, (at) => v.setUint32(at, dateAt, little));
+    v.setUint32(10 + entries * 12, 0, little);
+    tiff.set(make, makeAt);
+    tiff.set(date, dateAt);
+    return seg(0xe1, [0x45, 0x78, 0x69, 0x66, 0, 0, ...tiff]);
+  }
+
+  /** Independent reader for the test: every IFD0 tag of the first APP1, read through DataView. */
+  function readIfd0(jpeg: Uint8Array): { tags: number[]; orientation: number | null; app1Length: number; declared: number } {
+    let i = 2;
+    while (jpeg[i] === 0xff && jpeg[i + 1] !== 0xe1 && jpeg[i + 1] !== 0xda) i += 2 + ((jpeg[i + 2]! << 8) | jpeg[i + 3]!);
+    if (jpeg[i + 1] !== 0xe1) throw new Error('no APP1');
+    const declared = (jpeg[i + 2]! << 8) | jpeg[i + 3]!;
+    const t = i + 10;
+    const v = new DataView(jpeg.buffer, jpeg.byteOffset + t, declared - 8);
+    const little = v.getUint8(0) === 0x49;
+    expect(v.getUint16(2, little)).toBe(42);
+    const ifd = v.getUint32(4, little);
+    const count = v.getUint16(ifd, little);
+    const tags: number[] = [];
+    let orientation: number | null = null;
+    for (let n = 0; n < count; n += 1) {
+      const at = ifd + 2 + n * 12;
+      const tag = v.getUint16(at, little);
+      tags.push(tag);
+      if (tag === 0x0112) orientation = v.getUint16(at + 8, little);
+    }
+    expect(v.getUint32(ifd + 2 + count * 12, little)).toBe(0); // no further IFDs
+    return { tags, orientation, app1Length: declared, declared };
+  }
+
+  for (const little of [true, false]) {
+    const order = little ? 'little-endian (II)' : 'big-endian (MM)';
+    it(`JPEG: reduces a ${order} camera EXIF to a valid orientation-only block, for every orientation`, () => {
+      for (let orientation = 1; orientation <= 8; orientation += 1) {
+        const jpeg = new Uint8Array([0xff, 0xd8, ...cameraExif(little, orientation), 0xff, 0xda, 0, 4, 1, 0, 0xaa, 0xff, 0xd9]);
+        expect(jpegOrientation(jpeg)).toBe(orientation);
+        const r = stripImageMetadata(jpeg);
+        expect(r.removed).toBe(1);
+        expect(new TextDecoder().decode(r.bytes)).not.toContain('SecretCam');
+        expect(new TextDecoder().decode(r.bytes)).not.toContain('2026:10:06');
+        const ifd0 = readIfd0(r.bytes);
+        expect(ifd0.tags).toEqual([0x0112]);
+        expect(ifd0.orientation).toBe(orientation);
+        expect(ifd0.declared).toBe(34); // 36-byte segment: marker 2 + length 2 + "Exif  " 6 + TIFF header 8 + count 2 + entry 12 + next IFD 4
+        expect(r.bytes[2 + 36]).toBe(0xff); // the scan follows directly
+        expect(r.bytes[2 + 37]).toBe(0xda);
+        expect(r.bytes[r.bytes.length - 1]).toBe(0xd9);
+        expect(jpegOrientation(r.bytes)).toBe(orientation);
+        expect(stripImageMetadata(r.bytes).removed).toBe(0); // already minimal
+      }
+    });
+  }
 });
 
 describe('T8.1 attachment content', () => {
