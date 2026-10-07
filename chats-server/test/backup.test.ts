@@ -52,8 +52,14 @@ describe('T4.9 backup and restore', () => {
       clientMessageId: 'backup-1',
       createdAtClient: 1_700_000_000_000,
       seq: 1,
-      expiresAt: messageExpiry(1_700_000_000_000),
+      // From now, not from createdAtClient: an already-past expiresAt lets the
+      // TTL monitor delete the message mid-test.
+      expiresAt: messageExpiry(),
     });
+    // Mongoose builds indexes in the background on first use; a build still in
+    // flight recreates its collection right after the drop below.
+    const mongoose = (await import('mongoose')).default;
+    await Promise.all(mongoose.modelNames().map((name) => mongoose.model(name).init()));
 
     const before = await everything();
     expect(Object.keys(before).length).toBeGreaterThanOrEqual(4);
