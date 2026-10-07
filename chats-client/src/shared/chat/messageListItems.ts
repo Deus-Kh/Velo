@@ -1,12 +1,22 @@
 import type { UIMessage } from './types';
+import { albumKeyOf, groupAlbumRuns } from '../media/albums';
 
 /**
  * C1: the chat screen's list model. Messages are grouped under day
- * separators and reversed for the inverted list (newest first).
+ * separators and reversed for the inverted list (newest first). Photos sent
+ * together as an album become one item with its messages in album order.
  */
 export type MessageListItem =
   | { type: 'message'; id: string; message: UIMessage }
+  | { type: 'album'; id: string; messages: UIMessage[] }
   | { type: 'separator'; id: string; label: string };
+
+/** The message item or album item that holds this message. */
+export function itemHoldsMessage(item: MessageListItem, messageId: string): boolean {
+  if (item.type === 'message') return item.message.id === messageId;
+  if (item.type === 'album') return item.messages.some((m) => m.id === messageId);
+  return false;
+}
 
 export function formatDayLabel(timestamp: number, now: Date = new Date()): string {
   const date = new Date(timestamp);
@@ -28,7 +38,8 @@ export function buildMessageListItems(messages: UIMessage[]): MessageListItem[] 
   const items: MessageListItem[] = [];
   let previousDayKey: string | null = null;
 
-  for (const message of messages) {
+  for (const entry of groupAlbumRuns(messages, albumKeyOf, (m) => m.attachment?.album?.index ?? 0)) {
+    const message = Array.isArray(entry) ? entry[0]! : entry;
     const date = new Date(message.createdAt);
     const dayKey = `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`;
 
@@ -41,11 +52,15 @@ export function buildMessageListItems(messages: UIMessage[]): MessageListItem[] 
       previousDayKey = dayKey;
     }
 
-    items.push({
-      type: 'message',
-      id: message.id,
-      message,
-    });
+    if (Array.isArray(entry)) {
+      items.push({ type: 'album', id: `album-${message.id}`, messages: entry });
+    } else {
+      items.push({
+        type: 'message',
+        id: message.id,
+        message,
+      });
+    }
   }
 
   return items.reverse();

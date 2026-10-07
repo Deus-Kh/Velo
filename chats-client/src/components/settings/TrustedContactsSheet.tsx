@@ -4,7 +4,7 @@ import { FlatList, Text, View } from 'react-native';
 import Avatar from '../Avatar';
 import BottomSheetPanel from '../BottomSheetPanel';
 import ListRow from '../ListRow';
-import { listTrustedPeerUserIds } from '../../shared/storage/trustedIdentities';
+import { listVerifiedPeerUserIds } from '../../shared/storage/trustedIdentities';
 import { shortSecureId } from '../../shared/utils/identity';
 import { useContactsStore } from '../../store/contacts.store';
 import { useProfilesStore } from '../../store/profiles.store';
@@ -21,7 +21,7 @@ export default function TrustedContactsSheet({ myUserId, onClose }: { myUserId: 
 
   useEffect(() => {
     let cancelled = false;
-    listTrustedPeerUserIds(myUserId)
+    listVerifiedPeerUserIds(myUserId)
       .then((list) => {
         if (!cancelled) setIds(list);
       })

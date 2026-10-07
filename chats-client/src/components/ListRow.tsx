@@ -5,6 +5,7 @@ import { Icon } from './Icon';
 import { useThemeColors } from '../theme/useThemeColors';
 import { useAppearanceStore } from '../store/appearance.store';
 import type { LucideIconName } from '../shared/chat/describeMessage';
+import { densityTokens } from '../theme/density';
 
 /**
  * The unified list row (roadmap §8.1 B1; design roadmap §3.5): a flat row
@@ -59,6 +60,7 @@ export default function ListRow({
 }) {
   const colors = useThemeColors();
   const compact = useAppearanceStore((s) => s.interfaceDensity) === 'compact';
+  const density = densityTokens(compact ? 'compact' : 'comfortable');
   const toneClass =
     subtitleTone === 'warning' ? 'text-warning' : subtitleTone === 'danger' ? 'text-danger' : subtitleTone === 'primary' ? 'text-primary' : 'text-muted';
   const toneColor =
@@ -74,7 +76,8 @@ export default function ListRow({
         accessibilityRole={onPress ? 'button' : undefined}
         accessibilityLabel={accessibilityLabel ?? title}
         testID={testID}
-        className={`flex-row items-center ${padded ? 'px-4' : ''} ${compact ? 'py-2' : 'py-3'} active:bg-background-alt`}
+        className={`flex-row items-center ${padded ? 'px-4' : ''} active:bg-background-alt`}
+        style={{ paddingVertical: density.rowVerticalPadding }}
       >
         {avatar ? <View className="mr-3">{avatar}</View> : null}
 

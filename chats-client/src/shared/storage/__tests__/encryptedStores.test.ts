@@ -2,7 +2,17 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Keychain from 'react-native-keychain';
 import { loadSession, saveSession } from '../sessionStore';
 import { deleteOneTimePreKeySecret, getOneTimePreKeySecret, storeOneTimePreKeySecret } from '../oneTimePreKeys';
-import { clearTrustedIdentity, getTrustedIdentity, setTrustedIdentity } from '../trustedIdentities';
+import {
+  clearIdentityVerification,
+  clearTrustedIdentity,
+  getIdentityTrust,
+  getTrustedIdentity,
+  isIdentityVerified,
+  listVerifiedPeerUserIds,
+  markIdentityVerified,
+  setTrustedIdentity,
+} from '../trustedIdentities';
+import { macFor } from '../sealed';
 import { listPendingMessages, removePendingMessage, upsertPendingMessage } from '../pendingMessageStore';
 import { getOrCreateSessionMasterKey } from '../../crypto/sessionMasterKey';
 import type { RatchetSessionV2 } from '@velo/protocol';
@@ -142,7 +152,7 @@ describe('trustedIdentities', () => {
 
     const key = `trusted-identity:${ME}:${PEER}`;
     const record = JSON.parse((await AsyncStorage.getItem(key))!);
-    expect(record.v).toBe(2);
+    expect(record.v).toBe(3);
     record.identityDhPublicKey = 'ATTACKERDH';
     await AsyncStorage.setItem(key, JSON.stringify(record));
     const warn = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
@@ -165,12 +175,75 @@ describe('trustedIdentities', () => {
     expect(await getTrustedIdentity({ myUserId: ME, peerUserId: '65f000000000000000000003' })).toBeNull();
     warn.mockRestore();
 
-    // Upgrading to a v2 pin replaces the record.
+    // Upgrading to a full pin replaces the record.
     await setTrustedIdentity({ myUserId: ME, peerUserId: PEER, identitySignPublicKey: 'LEGACYKEY+/==', identityDhPublicKey: 'NEWDH' });
-    expect(JSON.parse((await AsyncStorage.getItem(key))!).v).toBe(2);
+    expect(JSON.parse((await AsyncStorage.getItem(key))!).v).toBe(3);
 
     await clearTrustedIdentity({ myUserId: ME, peerUserId: PEER });
     expect(await getTrustedIdentity({ myUserId: ME, peerUserId: PEER })).toBeNull();
+  });
+});
+
+describe('trustedIdentities: verified flag (C2)', () => {
+  const OTHER = '65f000000000000000000003';
+  const keys = { myUserId: ME, peerUserId: PEER, identitySignPublicKey: 'PEERSIGN', identityDhPublicKey: 'PEERDH' };
+
+  it('a new pin is not a verification; only markIdentityVerified makes a contact verified', async () => {
+    await setTrustedIdentity(keys);
+    expect(await isIdentityVerified({ myUserId: ME, peerUserId: PEER })).toBe(false);
+    expect(await listVerifiedPeerUserIds(ME)).toEqual([]);
+
+    await markIdentityVerified(keys);
+    expect(await getIdentityTrust({ myUserId: ME, peerUserId: PEER })).toEqual({
+      identity: { identitySignPublicKey: 'PEERSIGN', identityDhPublicKey: 'PEERDH' },
+      verified: true,
+    });
+    // The crypto path still sees the same pin.
+    expect(await getTrustedIdentity({ myUserId: ME, peerUserId: PEER })).toEqual({ identitySignPublicKey: 'PEERSIGN', identityDhPublicKey: 'PEERDH' });
+
+    await setTrustedIdentity({ myUserId: ME, peerUserId: OTHER, identitySignPublicKey: 'OTHERSIGN', identityDhPublicKey: 'OTHERDH' });
+    expect(await listVerifiedPeerUserIds(ME)).toEqual([PEER]);
+  });
+
+  it('a re-pin (key change) resets the verification', async () => {
+    await markIdentityVerified(keys);
+    await setTrustedIdentity({ ...keys, identitySignPublicKey: 'NEWSIGN', identityDhPublicKey: 'NEWDH' });
+    expect(await getIdentityTrust({ myUserId: ME, peerUserId: PEER })).toEqual({
+      identity: { identitySignPublicKey: 'NEWSIGN', identityDhPublicKey: 'NEWDH' },
+      verified: false,
+    });
+  });
+
+  it('removing the verification keeps the pin', async () => {
+    await markIdentityVerified(keys);
+    await clearIdentityVerification({ myUserId: ME, peerUserId: PEER });
+    expect(await getIdentityTrust({ myUserId: ME, peerUserId: PEER })).toEqual({
+      identity: { identitySignPublicKey: 'PEERSIGN', identityDhPublicKey: 'PEERDH' },
+      verified: false,
+    });
+  });
+
+  it('flipping the stored flag without the master key voids the pin instead of verifying it', async () => {
+    await setTrustedIdentity(keys);
+    const key = `trusted-identity:${ME}:${PEER}`;
+    const record = JSON.parse((await AsyncStorage.getItem(key))!);
+    expect(record.verified).toBe(false);
+    record.verified = true;
+    await AsyncStorage.setItem(key, JSON.stringify(record));
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+    expect(await getIdentityTrust({ myUserId: ME, peerUserId: PEER })).toBeNull();
+    expect(await listVerifiedPeerUserIds(ME)).toEqual([]);
+    warn.mockRestore();
+  });
+
+  it('a pin saved before the flag existed (v2) loads as not verified', async () => {
+    const mk = await getOrCreateSessionMasterKey(ME);
+    const record = { v: 2, identitySignPublicKey: 'PEERSIGN', identityDhPublicKey: 'PEERDH', mac: macFor(mk, 'velo-trusted-identity-v2', [ME, PEER, 'PEERSIGN', 'PEERDH']) };
+    await AsyncStorage.setItem(`trusted-identity:${ME}:${PEER}`, JSON.stringify(record));
+    expect(await getIdentityTrust({ myUserId: ME, peerUserId: PEER })).toEqual({
+      identity: { identitySignPublicKey: 'PEERSIGN', identityDhPublicKey: 'PEERDH' },
+      verified: false,
+    });
   });
 });
 

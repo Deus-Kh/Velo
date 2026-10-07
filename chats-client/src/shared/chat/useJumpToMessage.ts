@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type RefObject } from 'react';
 import type { FlatList } from 'react-native';
-import type { MessageListItem } from './messageListItems';
+import { itemHoldsMessage, type MessageListItem } from './messageListItems';
 
 /**
  * T7.8 / C1: jump to a message from search. If it is loaded the list
@@ -29,7 +29,7 @@ export function useJumpToMessage({
 
   useEffect(() => {
     if (!jumpTarget || historyLoading) return;
-    const idx = items.findIndex((item) => item.type === 'message' && item.message.id === jumpTarget);
+    const idx = items.findIndex((item) => itemHoldsMessage(item, jumpTarget));
     if (idx >= 0) {
       setTimeout(() => listRef.current?.scrollToIndex({ index: idx, animated: true, viewPosition: 0.5 }), 80);
       setJumpTarget(null);

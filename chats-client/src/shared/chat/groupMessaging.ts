@@ -7,6 +7,7 @@ import { loadPeerSenderKey, savePeerSenderKey, saveOwnSenderKey } from '../stora
 import { upsertStoredMessage, type AttachmentMeta, type StoredMessage } from '../storage/messageStore';
 import { distributeSenderKey, ensureOwnSenderKey, requestSenderKey } from './groupKeys';
 import { reportDecryptFailure } from '../api/telemetry.api';
+import { attachmentMetaOf } from '../media/attachmentMeta';
 
 /**
  * Group messages on the device (T6.4). Sending: make sure every member has
@@ -162,7 +163,7 @@ export async function ingestGroupItems(params: {
         readAt: null,
         replyTo: null,
         forwardedFrom: c.kind === 'text' ? (c.forwardedFrom ?? null) : null,
-        attachment: c.kind === 'attachment' ? { blobId: c.blobId, key: c.key, digest: c.digest, size: c.size, contentType: c.contentType, ...(c.width !== undefined ? { width: c.width } : {}), ...(c.height !== undefined ? { height: c.height } : {}), ...(c.durationMs !== undefined ? { durationMs: c.durationMs } : {}), ...(c.name !== undefined ? { name: c.name } : {}) } : null, // T8.3
+        attachment: c.kind === 'attachment' ? attachmentMetaOf(c) : null, // T8.3
       };
       await upsertStoredMessage({ myUserId, peerUserId: peerKey, message: stored });
       received.push(stored);

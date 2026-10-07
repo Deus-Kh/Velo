@@ -1,5 +1,5 @@
 import { checkIdentity, type Identity } from '@velo/protocol';
-import type { TrustedIdentity } from '../storage/trustedIdentities';
+import type { IdentityTrust, TrustedIdentity } from '../storage/trustedIdentities';
 
 /**
  * What the Verify Contact screen shows while and after the server copy of
@@ -7,6 +7,9 @@ import type { TrustedIdentity } from '../storage/trustedIdentities';
  * on this phone is enough to show the safety number at once; the server
  * copy only confirms it or reveals a change. Without a pin there is
  * nothing to show until the server answers.
+ *
+ * C2: "verified" means the user marked these exact keys as verified. A pin
+ * the app saved silently on first contact is "untrusted" (not verified yet).
  */
 export type ServerIdentityState = { kind: 'pending' } | { kind: 'failed'; message: string } | { kind: 'ok'; identity: Identity };
 
@@ -27,17 +30,19 @@ function pinnedIdentity(pin: TrustedIdentity | null): Identity | null {
   return { identitySignPublicKey: pin.identitySignPublicKey, identityDhPublicKey: pin.identityDhPublicKey };
 }
 
-export function resolveVerifyView(pin: TrustedIdentity | null, server: ServerIdentityState): VerifyView {
+export function resolveVerifyView(trust: IdentityTrust | null, server: ServerIdentityState): VerifyView {
+  const pin = trust?.identity ?? null;
+  const verified = trust?.verified ?? false;
   if (server.kind === 'ok') {
     const check = checkIdentity(pin, server.identity);
-    const status: VerifyStatus = check === 'first-contact' ? 'untrusted' : check === 'match' ? 'verified' : 'changed';
+    const status: VerifyStatus = check === 'mismatch' ? 'changed' : check === 'match' && verified ? 'verified' : 'untrusted';
     return { identity: server.identity, status, confirmed: true, note: null };
   }
   const local = pinnedIdentity(pin);
   if (local) {
     return {
       identity: local,
-      status: 'verified',
+      status: verified ? 'verified' : 'untrusted',
       confirmed: false,
       note: server.kind === 'pending' ? 'Shown from the identity saved on this phone. Confirming with the server…' : `Shown from the identity saved on this phone. Could not confirm with the server: ${server.message}`,
     };

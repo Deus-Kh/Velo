@@ -2,10 +2,10 @@ import { describe, expect, it } from 'vitest';
 import nacl from 'tweetnacl';
 import { encodeBase64 } from 'tweetnacl-util';
 import { protocolErrorCode } from '../src/errors';
-import { decodeContent, encodeContent, isActionContent, isAttachmentContent, isControlContent } from '../src/content/envelope';
+import { decodeContent, encodeContent, isActionContent, isAttachmentContent, isControlContent, MAX_ALBUM_SIZE } from '../src/content/envelope';
 import { attachmentDecrypt, attachmentEncrypt } from '../src/attachment/cipher';
 import { ATTACHMENT_CHUNK_BYTES, ATTACHMENT_MAC_BYTES, MAX_ATTACHMENT_BYTES, chunkNonce, expandAttachmentKey, generateAttachmentKey } from '../src/attachment/keys';
-import { stripImageMetadata } from '../src/attachment/metadata';
+import { jpegOrientation, stripImageMetadata } from '../src/attachment/metadata';
 import { hmacSha256 } from '../src/primitives/kdf';
 
 /**
@@ -143,6 +143,119 @@ describe('T8.1 metadata stripping', () => {
     const other = new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8, 9]);
     expect(stripImageMetadata(other)).toEqual({ bytes: other, removed: 0, kind: 'other' });
   });
+
+  it('JPEG: keeps only EXIF orientation and reports rotated dimensions', () => {
+    const exif = seg(0xe1, [
+      0x45, 0x78, 0x69, 0x66, 0, 0,
+      0x49, 0x49, 42, 0, 8, 0, 0, 0,
+      1, 0,
+      0x12, 0x01, 3, 0, 1, 0, 0, 0, 6, 0, 0, 0,
+      0, 0, 0, 0,
+    ]);
+    const jpeg = new Uint8Array([0xff, 0xd8, ...exif, 0xff, 0xda, 0, 4, 1, 0, 0xaa, 0xff, 0xd9]);
+    const r = stripImageMetadata(jpeg);
+    expect(r.removed).toBe(0);
+    expect(jpegOrientation(jpeg)).toBe(6);
+    expect(jpegOrientation(r.bytes)).toBe(6);
+    expect(Array.from(r.bytes)).toContain(0x45);
+    expect(stripImageMetadata(r.bytes).removed).toBe(0);
+  });
+
+  it('JPEG: keeps a minimal big-endian EXIF orientation as is', () => {
+    // A SHORT value sits in the first two bytes of the 4-byte value field, in the file's byte order.
+    const exif = seg(0xe1, [
+      0x45, 0x78, 0x69, 0x66, 0, 0,
+      0x4d, 0x4d, 0, 42, 0, 0, 0, 8,
+      0, 1,
+      0x01, 0x12, 0, 3, 0, 0, 0, 1, 0, 6, 0, 0,
+      0, 0, 0, 0,
+    ]);
+    const jpeg = new Uint8Array([0xff, 0xd8, ...exif, 0xff, 0xda, 0, 4, 1, 0, 0xaa, 0xff, 0xd9]);
+    const r = stripImageMetadata(jpeg);
+    expect(r.removed).toBe(0);
+    expect(jpegOrientation(jpeg)).toBe(6);
+    expect(jpegOrientation(r.bytes)).toBe(6);
+  });
+
+  /**
+   * A camera-like APP1: IFD0 holds Make (ASCII, stored out of line), the
+   * orientation (SHORT) and DateTime (ASCII, out of line), in either byte order.
+   */
+  function cameraExif(little: boolean, orientation: number): number[] {
+    const make = Array.from(new TextEncoder().encode('SecretCam '));
+    const date = Array.from(new TextEncoder().encode('2026:10:06 12:00:00 '));
+    const entries = 3;
+    const ifdSize = 2 + entries * 12 + 4;
+    const makeAt = 8 + ifdSize;
+    const dateAt = makeAt + make.length;
+    const tiff = new Uint8Array(dateAt + date.length);
+    const v = new DataView(tiff.buffer);
+    tiff.set(little ? [0x49, 0x49] : [0x4d, 0x4d], 0);
+    v.setUint16(2, 42, little);
+    v.setUint32(4, 8, little);
+    v.setUint16(8, entries, little);
+    const entry = (n: number, tag: number, type: number, count: number, fill: (at: number) => void) => {
+      const at = 10 + n * 12;
+      v.setUint16(at, tag, little);
+      v.setUint16(at + 2, type, little);
+      v.setUint32(at + 4, count, little);
+      fill(at + 8);
+    };
+    entry(0, 0x010f, 2, make.length, (at) => v.setUint32(at, makeAt, little));
+    entry(1, 0x0112, 3, 1, (at) => v.setUint16(at, orientation, little));
+    entry(2, 0x0132, 2, date.length, (at) => v.setUint32(at, dateAt, little));
+    v.setUint32(10 + entries * 12, 0, little);
+    tiff.set(make, makeAt);
+    tiff.set(date, dateAt);
+    return seg(0xe1, [0x45, 0x78, 0x69, 0x66, 0, 0, ...tiff]);
+  }
+
+  /** Independent reader for the test: every IFD0 tag of the first APP1, read through DataView. */
+  function readIfd0(jpeg: Uint8Array): { tags: number[]; orientation: number | null; app1Length: number; declared: number } {
+    let i = 2;
+    while (jpeg[i] === 0xff && jpeg[i + 1] !== 0xe1 && jpeg[i + 1] !== 0xda) i += 2 + ((jpeg[i + 2]! << 8) | jpeg[i + 3]!);
+    if (jpeg[i + 1] !== 0xe1) throw new Error('no APP1');
+    const declared = (jpeg[i + 2]! << 8) | jpeg[i + 3]!;
+    const t = i + 10;
+    const v = new DataView(jpeg.buffer, jpeg.byteOffset + t, declared - 8);
+    const little = v.getUint8(0) === 0x49;
+    expect(v.getUint16(2, little)).toBe(42);
+    const ifd = v.getUint32(4, little);
+    const count = v.getUint16(ifd, little);
+    const tags: number[] = [];
+    let orientation: number | null = null;
+    for (let n = 0; n < count; n += 1) {
+      const at = ifd + 2 + n * 12;
+      const tag = v.getUint16(at, little);
+      tags.push(tag);
+      if (tag === 0x0112) orientation = v.getUint16(at + 8, little);
+    }
+    expect(v.getUint32(ifd + 2 + count * 12, little)).toBe(0); // no further IFDs
+    return { tags, orientation, app1Length: declared, declared };
+  }
+
+  for (const little of [true, false]) {
+    const order = little ? 'little-endian (II)' : 'big-endian (MM)';
+    it(`JPEG: reduces a ${order} camera EXIF to a valid orientation-only block, for every orientation`, () => {
+      for (let orientation = 1; orientation <= 8; orientation += 1) {
+        const jpeg = new Uint8Array([0xff, 0xd8, ...cameraExif(little, orientation), 0xff, 0xda, 0, 4, 1, 0, 0xaa, 0xff, 0xd9]);
+        expect(jpegOrientation(jpeg)).toBe(orientation);
+        const r = stripImageMetadata(jpeg);
+        expect(r.removed).toBe(1);
+        expect(new TextDecoder().decode(r.bytes)).not.toContain('SecretCam');
+        expect(new TextDecoder().decode(r.bytes)).not.toContain('2026:10:06');
+        const ifd0 = readIfd0(r.bytes);
+        expect(ifd0.tags).toEqual([0x0112]);
+        expect(ifd0.orientation).toBe(orientation);
+        expect(ifd0.declared).toBe(34); // 36-byte segment: marker 2 + length 2 + "Exif  " 6 + TIFF header 8 + count 2 + entry 12 + next IFD 4
+        expect(r.bytes[2 + 36]).toBe(0xff); // the scan follows directly
+        expect(r.bytes[2 + 37]).toBe(0xda);
+        expect(r.bytes[r.bytes.length - 1]).toBe(0xd9);
+        expect(jpegOrientation(r.bytes)).toBe(orientation);
+        expect(stripImageMetadata(r.bytes).removed).toBe(0); // already minimal
+      }
+    });
+  }
 });
 
 describe('T8.1 attachment content', () => {
@@ -185,6 +298,25 @@ describe('T8.1 attachment content', () => {
     expect(decodeContent(encodeContent({ ...note, waveform: encodeBase64(bytes(64, 2)) }))).toMatchObject({ waveform: encodeBase64(bytes(64, 2)) });
     const base = `"v":1,"kind":"attachment","blobId":"b","key":"${key}","digest":"${digest}","size":10,"contentType":"audio/mp4"`;
     for (const w of ['""', '"not base64!!"', `"${encodeBase64(bytes(65))}"`, '[1,2,3]', '7']) expect(codeOf(() => decodeContent('{' + base + ',"waveform":' + w + '}')), w.slice(0, 30)).toBe('STORAGE_CORRUPTION');
+  });
+
+  it('photos sent together carry an album (id, index < count, 2..10); a malformed album is refused', () => {
+    const photo = { v: 1, kind: 'attachment', blobId: 'p', key, digest, size: 10, contentType: 'image/jpeg', album: { id: 'a1b2c3', index: 2, count: 3 } } as const;
+    expect(decodeContent(encodeContent(photo))).toEqual(photo);
+    expect(decodeContent(encodeContent({ ...photo, album: { id: 'x', index: 9, count: MAX_ALBUM_SIZE } }))).toMatchObject({ album: { index: 9, count: 10 } });
+    const base = `"v":1,"kind":"attachment","blobId":"b","key":"${key}","digest":"${digest}","size":10,"contentType":"image/jpeg"`;
+    const bad = [
+      '{"id":"","index":0,"count":2}',
+      `{"id":"${'i'.repeat(65)}","index":0,"count":2}`,
+      '{"id":"a","index":2,"count":2}',
+      '{"id":"a","index":-1,"count":2}',
+      '{"id":"a","index":0,"count":1}',
+      '{"id":"a","index":0,"count":11}',
+      '{"id":"a","index":0.5,"count":2}',
+      '{"id":7,"index":0,"count":2}',
+      '"album"',
+    ];
+    for (const album of bad) expect(codeOf(() => decodeContent('{' + base + ',"album":' + album + '}')), album).toBe('STORAGE_CORRUPTION');
   });
 });
 

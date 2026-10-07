@@ -3,6 +3,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Keychain from 'react-native-keychain';
 
 import { sessionMasterKeyService } from '../crypto/sessionMasterKey';
+import { listVerifiedPeerUserIds } from '../storage/trustedIdentities';
 
 export type SecurityDiagnostics = {
   identityKeyReady: boolean;
@@ -54,7 +55,8 @@ export function useSecurityDiagnostics(userId: string | null) {
         signedPreKeyReady: Boolean(signedPreKeyCreds),
         sessionMasterKeyReady: Boolean(sessionMasterKeyCreds),
         sessionCount: allKeys.filter((key) => key.startsWith(`session:v2:${userId}:`)).length,
-        trustedContactsCount: allKeys.filter((key) => key.startsWith(`trusted-identity:${userId}:`)).length,
+        // C2: contacts the user marked as verified, not every silent first-contact pin.
+        trustedContactsCount: (await listVerifiedPeerUserIds(userId)).length,
         storedMessagesCount: allKeys.filter((key) => key.startsWith(`msg:v1:${userId}:`)).length,
         oneTimePreKeysCount: allKeys.filter((key) => key.startsWith(`otpk:${userId}:`)).length,
       });

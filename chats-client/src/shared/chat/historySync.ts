@@ -6,6 +6,7 @@ import { receiveIncoming } from './incoming';
 import { reportDecryptFailure } from '../api/telemetry.api';
 import { publishControlContent } from '../socket/messaging';
 import { handleInboundAction } from './actions';
+import { attachmentMetaOf } from '../media/attachmentMeta';
 import { isBlockedLocally } from '../../store/blocks.store';
 
 const SYNC_PAGE = 100;
@@ -95,7 +96,7 @@ export async function ingestUndeliveredItems(params: {
       }
       const record = toStored(it, 'in', content.kind === 'attachment' ? (content.caption ?? '') : content.text);
       if (record && content.kind === 'text' && content.forwardedFrom) record.forwardedFrom = content.forwardedFrom;
-      if (record && content.kind === 'attachment') record.attachment = { blobId: content.blobId, key: content.key, digest: content.digest, size: content.size, contentType: content.contentType, ...(content.width !== undefined ? { width: content.width } : {}), ...(content.height !== undefined ? { height: content.height } : {}), ...(content.durationMs !== undefined ? { durationMs: content.durationMs } : {}), ...(content.name !== undefined ? { name: content.name } : {}) }; // T8.3
+      if (record && content.kind === 'attachment') record.attachment = attachmentMetaOf(content); // T8.3
       if (record) {
         await upsertStoredMessage({ myUserId, peerUserId, message: record });
         received.push(record);

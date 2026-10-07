@@ -8,15 +8,18 @@ import type { LucideIconName } from '../shared/chat/describeMessage';
 export default function ScreenHeader({
   title,
   subtitle,
+  leading,
   actions,
 }: {
   title: string;
   subtitle?: string;
+  leading?: ReactNode;
   actions?: ReactNode;
 }) {
   return (
     <View className="px-4 pt-2">
       <View className="flex-row items-start justify-between gap-3">
+        {leading ? <View className="shrink-0 pt-1">{leading}</View> : null}
         <View className="min-w-0 flex-1">
           <Text className="text-[31px] font-semibold text-text">{title}</Text>
           {subtitle ? (

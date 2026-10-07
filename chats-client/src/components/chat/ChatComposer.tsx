@@ -5,11 +5,11 @@ import ComposerFrame from './ComposerFrame';
 import EditBar from './EditBar';
 import ReplyBar from './ReplyBar';
 import SendIcon from './SendIcon';
-import UploadProgressBar, { type UploadState } from './UploadProgressBar';
 import VoiceComposer from '../VoiceComposer';
 import type { Recording } from '../../shared/media/voiceNotes';
 import type { DescribableMessage } from '../../shared/chat/describeMessage';
 import { useAppearanceStore } from '../../store/appearance.store';
+import { densityTokens } from '../../theme/density';
 
 /**
  * C1: the 1:1 chat's composer: the reply / edit / upload bars, the reason
@@ -29,7 +29,6 @@ export default function ChatComposer({
   onCancelReply,
   editTarget,
   onCancelEdit,
-  uploadState,
   disabledReason,
   onOpenActions,
   onRecorded,
@@ -46,13 +45,13 @@ export default function ChatComposer({
   onCancelReply: () => void;
   editTarget: DescribableMessage | null;
   onCancelEdit: () => void;
-  uploadState: UploadState | null;
   disabledReason: string | null;
   onOpenActions: () => void;
   onRecorded: (recording: Recording) => void;
 }) {
   const interfaceDensity = useAppearanceStore((s) => s.interfaceDensity);
   const surfaceStyle = useAppearanceStore((s) => s.surfaceStyle);
+  const density = densityTokens(interfaceDensity);
 
   const composerSurfaceClass =
     surfaceStyle === 'glass' ? 'bg-surface/84' : 'bg-surface-elevated';
@@ -67,8 +66,6 @@ export default function ChatComposer({
     <ComposerFrame>
       {replyTarget ? <ReplyBar target={replyTarget} conversationName={conversationName} onCancel={onCancelReply} /> : null}
 
-      {uploadState ? <UploadProgressBar state={uploadState} /> : null}
-
       {editTarget ? <EditBar message={editTarget} onCancel={onCancelEdit} /> : null}
 
       {disabledReason ? (
@@ -79,7 +76,6 @@ export default function ChatComposer({
 
       <VoiceComposer
         active={showMic}
-        disabled={Boolean(uploadState)}
         sizeClass={composerButtonSizeClass}
         surfaceClass={composerSurfaceClass}
         onRecorded={onRecorded}
@@ -108,7 +104,8 @@ export default function ChatComposer({
             selectionColor="#2DD4BF"
             cursorColor="#2DD4BF"
             underlineColorAndroid="transparent"
-            className={`max-h-32 text-[15px] leading-6 text-text ${composerInputMinHeightClass}`}
+            className={`max-h-32 text-text ${composerInputMinHeightClass}`}
+            style={{ fontSize: density.messageFontSize, lineHeight: density.messageLineHeight + 4 }}
             returnKeyType="send"
             onSubmitEditing={onSend}
             editable={editable}

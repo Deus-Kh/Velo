@@ -1,4 +1,19 @@
 #!/bin/sh
-# Pre-commit: refuse to commit anything that looks like a secret (T1.15).
+# Pre-commit: refuse to commit anything that looks like a secret (T1.15), and
+# refuse shell scripts that lost their executable bit (Windows checkouts drop
+# it; Linux CI then fails with exit 126).
 # Enable once per clone:  git config core.hooksPath .githooks
+
+not_exec=$(git diff --cached --name-only --diff-filter=ACMR |
+  grep -E '(^|/)gradlew$|\.sh$' |
+  while read -r f; do
+    git ls-files -s -- "$f" | grep -q '^100755' || echo "$f"
+  done)
+if [ -n "$not_exec" ]; then
+  echo "pre-commit: these scripts must be executable in git:" >&2
+  echo "$not_exec" | sed 's/^/  /' >&2
+  echo "fix with: git update-index --chmod=+x <file>" >&2
+  exit 1
+fi
+
 exec node "$(git rev-parse --show-toplevel)/tools/secret-scan.js"

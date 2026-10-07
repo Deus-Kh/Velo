@@ -1,7 +1,10 @@
 import React, { useRef, isValidElement } from 'react';
-import { Pressable, Text, View } from 'react-native';
+import { Pressable, Text, View, useWindowDimensions } from 'react-native';
 import { Icon } from './Icon';
 import { useThemeColors } from '../theme/useThemeColors';
+import { useAppearanceStore } from '../store/appearance.store';
+import { densityTokens } from '../theme/density';
+import { photoFrame } from '../shared/media/photoFrame';
 import type { LucideIconName } from '../shared/chat/describeMessage';
 import ReanimatedSwipeable, {
   SwipeDirection,
@@ -10,8 +13,8 @@ import ReanimatedSwipeable, {
 
 type MessageStatus = 'sending' | 'sent' | 'delivered' | 'read' | 'failed' | undefined;
 
-/** Delivery state as a Lucide icon (B14 adds the read colour): a clock while sending, one check sent, two delivered / read, an alert on failure. */
-function statusIconName(status: MessageStatus): LucideIconName | null {
+/** Delivery state as a Lucide icon: a clock while sending, one check sent, two delivered / read, an alert on failure. */
+export function statusIconName(status: MessageStatus): LucideIconName | null {
   switch (status) {
     case 'sending':
       return 'clock';
@@ -28,9 +31,14 @@ function statusIconName(status: MessageStatus): LucideIconName | null {
   }
 }
 
-/** B3: the status icon takes the outgoing bubble's muted text colour; failure is the danger tone (B14 adds the read accent). */
-function getStatusColor(status: MessageStatus, colors: { bubbleOutMuted: string; danger: string }) {
-  return status === 'failed' ? colors.danger : colors.bubbleOutMuted;
+/** B14: read receipts use the accent so delivered and read remain visually distinct. */
+export function getStatusColor(
+  status: MessageStatus,
+  colors: { bubbleOutMuted: string; primary: string; danger: string },
+) {
+  if (status === 'failed') return colors.danger;
+  if (status === 'read') return colors.primary;
+  return colors.bubbleOutMuted;
 }
 
 function formatMessageTime(timestamp: number) {
@@ -64,6 +72,8 @@ export default function MessageBubble({
   forwarded,
   attachment,
   attachmentMetaInline,
+  photoSize,
+  mediaFrame,
 }: {
   text: string;
   mine: boolean;
@@ -78,6 +88,10 @@ export default function MessageBubble({
   attachment?: React.ReactNode;
   /** T8.4: a voice note takes the time and status on its own last line instead of a row below. */
   attachmentMetaInline?: boolean;
+  /** The attachment is a photo of this size: the bubble lays it out edge to edge (Telegram-style). */
+  photoSize?: { width?: number; height?: number } | null;
+  /** The attachment is an album grid of exactly this size; laid out like a photo. */
+  mediaFrame?: { width: number; height: number } | null;
   replyPreview?: {
     title: string;
     text: string;
@@ -89,6 +103,8 @@ export default function MessageBubble({
   onSwipeReply?: (() => void) | undefined;
 }) {
   const colors = useThemeColors();
+  const interfaceDensity = useAppearanceStore((s) => s.interfaceDensity);
+  const density = densityTokens(interfaceDensity);
   const statusIcon = statusIconName(status);
   const timeLabel = formatMessageTime(timestamp);
   const swipeableRef = useRef<SwipeableMethods | null>(null);
@@ -115,6 +131,13 @@ export default function MessageBubble({
   const replyPreviewTextTone = mine ? 'text-bubble-out-muted' : 'text-muted';
   const replySwipeTriggeredRef = useRef(false);
   const inlineMeta = Boolean(attachmentMetaInline && attachment && !text && !deleted && showMeta);
+  const { width: windowWidth, height: windowHeight } = useWindowDimensions();
+  // A photo fills the bubble edge to edge; the bubble is exactly as wide as the photo, so a caption
+  // wraps at the photo's width. Without a caption the time sits on the photo, and a photo with
+  // nothing else around it has no bubble colour at all.
+  const photo = !attachment || deleted ? null : mediaFrame ?? (photoSize ? photoFrame(photoSize, windowWidth, windowHeight) : null);
+  const metaOnPhoto = Boolean(photo && !text && showMeta);
+  const photoOnly = Boolean(photo && !text && !replyPreview && !forwarded && !hasReactions);
 
   const metaNode = showMeta ? (
     <View className="flex-row items-center">
@@ -130,6 +153,22 @@ export default function MessageBubble({
       {statusIcon && mine ? (
         <View className={timeLabel ? 'ml-1' : ''}>
           <Icon lib="Lucide" name={statusIcon} size={13} color={statusColor} />
+        </View>
+      ) : null}
+    </View>
+  ) : null;
+
+  // the time and status over a photo: light on a dark pill, whatever the theme, so it reads on any picture
+  const photoMetaNode = metaOnPhoto ? (
+    <View
+      pointerEvents="none"
+      className="absolute bottom-2 right-2 flex-row items-center rounded-full bg-black/45 px-2 py-0.5"
+    >
+      {edited ? <Text className="mr-1 text-[11px] italic text-white">edited</Text> : null}
+      {timeLabel ? <Text className="text-[11px] text-white">{timeLabel}</Text> : null}
+      {statusIcon && mine ? (
+        <View className={timeLabel ? 'ml-1' : ''}>
+          <Icon lib="Lucide" name={statusIcon} size={13} color={status === 'failed' ? colors.danger : '#FFFFFF'} />
         </View>
       ) : null}
     </View>
@@ -178,19 +217,82 @@ export default function MessageBubble({
     </ReplyPreviewContainer>
   ) : null;
 
-  const bubbleContent = (
+  const forwardedNode =
+    forwarded && !deleted ? (
+      <View className="mb-0.5 flex-row items-center">
+        <Icon lib="Lucide" name="corner-up-right" size={12} color={mine ? colors.bubbleOutMuted : colors.primary} />
+        <Text className={`ml-1 text-[11px] font-semibold ${mine ? 'text-bubble-out-muted' : 'text-primary'}`}>Forwarded</Text>
+      </View>
+    ) : null;
+
+  const reactionsNode = hasReactions ? (
+    <View className="mt-1.5 flex-row flex-wrap gap-1">
+      {reactions!.map((r) => (
+        <View
+          key={r.emoji}
+          className={`flex-row items-center rounded-full px-2 py-0.5 ${r.mine ? (mine ? 'bg-bubble-out-text/25' : 'bg-primary/20') : mine ? 'bg-bubble-out-text/12' : 'bg-text/10'}`}
+        >
+          <Text className="text-[13px]">{r.emoji}</Text>
+          {r.count > 1 ? <Text className={`ml-1 text-[11px] font-semibold ${messageTextTone}`}>{r.count}</Text> : null}
+        </View>
+      ))}
+    </View>
+  ) : null;
+
+  const padX = density.bubbleHorizontalPadding;
+  const padY = density.bubbleVerticalPadding;
+
+  const bubbleContent = photo ? (
     <Pressable
       disabled={!onPress}
       onPress={onPress}
-      className={`relative mb-1.5 max-w-[80%] rounded-[20px] px-4 py-2.5 ${
+      className={`relative mb-1.5 overflow-hidden rounded-[20px] ${mine ? 'self-end rounded-br-[8px]' : 'self-start rounded-bl-[8px]'} ${
+        photoOnly ? '' : bubbleTone
+      } ${onPress ? 'active:opacity-80' : ''}`}
+      style={{ width: photo.width + (photoOnly || mine ? 0 : 2) }}
+    >
+      {replyPreviewNode || forwardedNode ? (
+        <View className="pb-1.5" style={{ paddingHorizontal: padX, paddingTop: padY }}>
+          {replyPreviewNode}
+          {forwardedNode}
+        </View>
+      ) : null}
+      <View>
+        {attachment}
+        {photoMetaNode}
+      </View>
+      {text ? (
+        <View className="pt-1.5" style={{ paddingHorizontal: padX }}>
+          <Text className={messageTextTone} style={{ fontSize: density.messageFontSize, lineHeight: density.messageLineHeight }}>
+            {text}
+          </Text>
+        </View>
+      ) : null}
+      {showMeta && !metaOnPhoto ? (
+        <View className="mt-1 flex-row items-center self-end" style={{ paddingHorizontal: padX }}>
+          {metaNode}
+        </View>
+      ) : null}
+      {reactionsNode ? <View style={{ paddingHorizontal: padX }}>{reactionsNode}</View> : null}
+      {text || hasReactions ? <View style={{ height: padY }} /> : null}
+    </Pressable>
+  ) : (
+    <Pressable
+      disabled={!onPress}
+      onPress={onPress}
+      className={`relative mb-1.5 max-w-[80%] rounded-[20px] ${
         mine ? 'self-end rounded-br-[8px]' : 'self-start rounded-bl-[8px]'
       } ${replyPreview ? 'min-w-[156px]' : ''} ${bubbleTone} ${onPress ? 'active:opacity-80' : ''}`}
+      style={{ paddingHorizontal: density.bubbleHorizontalPadding, paddingVertical: density.bubbleVerticalPadding }}
     >
       {compactMeta ? (
         <View className="flex-row items-end">
           <View className="shrink">
             {replyPreviewNode}
-            <Text className={`text-[15px] leading-[21px] ${messageTextTone}`}>
+            <Text
+              className={messageTextTone}
+              style={{ fontSize: density.messageFontSize, lineHeight: density.messageLineHeight }}
+            >
               {text}
             </Text>
           </View>
@@ -201,12 +303,7 @@ export default function MessageBubble({
       ) : (
         <>
           {replyPreviewNode}
-          {forwarded && !deleted ? (
-            <View className="mb-0.5 flex-row items-center">
-              <Icon lib="Lucide" name="corner-up-right" size={12} color={mine ? colors.bubbleOutMuted : colors.primary} />
-              <Text className={`ml-1 text-[11px] font-semibold ${mine ? 'text-bubble-out-muted' : 'text-primary'}`}>Forwarded</Text>
-            </View>
-          ) : null}
+          {forwardedNode}
           {!deleted && attachment ? (
             inlineMeta && isValidElement<{ trailing?: React.ReactNode }>(attachment) ? (
               // the voice note draws the time at the end of its duration line, so the waveform keeps the full width
@@ -218,7 +315,10 @@ export default function MessageBubble({
           {deleted ? (
             <Text className={`text-[15px] italic leading-[21px] ${mine ? 'text-bubble-out-muted' : 'text-muted'}`}>This message was deleted</Text>
           ) : text || !attachment ? (
-            <Text className={`text-[15px] leading-[21px] ${messageTextTone}`}>
+            <Text
+              className={messageTextTone}
+              style={{ fontSize: density.messageFontSize, lineHeight: density.messageLineHeight }}
+            >
               {text}
             </Text>
           ) : null}
@@ -229,19 +329,7 @@ export default function MessageBubble({
             </View>
           ) : null}
 
-          {hasReactions ? (
-            <View className="mt-1.5 flex-row flex-wrap gap-1">
-              {reactions!.map((r) => (
-                <View
-                  key={r.emoji}
-                  className={`flex-row items-center rounded-full px-2 py-0.5 ${r.mine ? (mine ? 'bg-bubble-out-text/25' : 'bg-primary/20') : mine ? 'bg-bubble-out-text/12' : 'bg-text/10'}`}
-                >
-                  <Text className="text-[13px]">{r.emoji}</Text>
-                  {r.count > 1 ? <Text className={`ml-1 text-[11px] font-semibold ${messageTextTone}`}>{r.count}</Text> : null}
-                </View>
-              ))}
-            </View>
-          ) : null}
+          {reactionsNode}
         </>
       )}
     </Pressable>
