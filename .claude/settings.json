@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "deny": [
+      "Read(**/node_modules/**)",
+      "Read(**/package-lock.json)",
+      "Read(chats-server/dist/**)",
+      "Read(chats-server/data/**)",
+      "Read(packages/protocol/coverage/**)",
+      "Read(chats-client/android/build/**)",
+      "Read(chats-client/android/app/build/**)",
+      "Read(chats-client/android/.gradle/**)"
+    ]
+  }
+}
