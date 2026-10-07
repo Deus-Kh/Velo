@@ -61,6 +61,7 @@ export default function ChatListScreen({
   onNewChat,
   recentlyClosedChatPeerUserId,
   onHandledClosedChat,
+  active = true,
 }: {
   onOpenChat: ChatOpenHandler;
   onOpenGroup: GroupOpenHandler;
@@ -68,6 +69,8 @@ export default function ChatListScreen({
   onNewChat: () => void;
   recentlyClosedChatPeerUserId: string | null;
   onHandledClosedChat: () => void;
+  /** this tab is the one on screen (all tabs stay mounted in MainTabsScreen's pager) */
+  active?: boolean;
 }) {
   const insets = useSafeAreaInsets();
   const colors = useThemeColors();
@@ -144,14 +147,14 @@ export default function ChatListScreen({
 
   // Back closes the search field, then the archived view; otherwise it is not ours (A7).
   useEffect(() => {
-    if (!searchOpen && !showArchivedView) return undefined;
+    if (!active || (!searchOpen && !showArchivedView)) return undefined;
     const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
       if (searchOpen) closeSearch();
       else setShowArchivedView(false);
       return true;
     });
     return () => subscription.remove();
-  }, [closeSearch, searchOpen, showArchivedView]);
+  }, [active, closeSearch, searchOpen, showArchivedView]);
   // B1: flat rows span the full width; only the section labels carry side padding
   const listContentContainerStyle = useMemo(
     () => ({

@@ -1,5 +1,6 @@
 import { ComponentProps, useCallback, useEffect, useRef, useState } from 'react';
-import { Keyboard, View, Text, Pressable, ScrollView, NativeSyntheticEvent, NativeScrollEvent } from 'react-native';
+import { BackHandler, Keyboard, View, Text, Pressable, ScrollView, NativeSyntheticEvent, NativeScrollEvent } from 'react-native';
+import { tabAfterBack } from '../shared/ui/tabBack';
 import { useSafeAreaInsets, useSafeAreaFrame } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -107,6 +108,21 @@ export default function MainTabsScreen() {
   const [activeChat, setActiveChat] = useState<ActiveChat | null>(null);
   const [recentlyClosedChatPeerUserId, setRecentlyClosedChatPeerUserId] = useState<string | null>(null);
   const [keyboardVisible, setKeyboardVisible] = useState(false);
+
+  // Back on New Chat or Settings returns to Chats; only on Chats does Android leave the app. Registered
+  // once, on mount, so it stays the oldest listener: the open chat, sheets, subpages and search
+  // register later and close first.
+  const backStateRef = useRef({ tab, chatOpen: false });
+  backStateRef.current = { tab, chatOpen: Boolean(activeChat) };
+  useEffect(() => {
+    const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
+      const target = tabAfterBack<TabKey>(backStateRef.current.tab, 'chats', backStateRef.current.chatOpen);
+      if (!target) return false;
+      setTab(target);
+      return true;
+    });
+    return () => subscription.remove();
+  }, []);
 
   useEffect(() => {
     const show = Keyboard.addListener('keyboardDidShow', () => setKeyboardVisible(true));
@@ -324,6 +340,7 @@ export default function MainTabsScreen() {
         >
           <View style={{ width: frame.width }}>
             <ChatListScreen
+              active={tab === 'chats'}
               onOpenChat={openChat}
               onOpenGroup={openGroup}
               onNewChat={() => setTab('new-chat')}
