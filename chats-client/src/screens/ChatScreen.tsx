@@ -28,11 +28,11 @@ import Avatar from '../components/Avatar';
 import SearchInChatSheet from '../components/SearchInChatSheet';
 import ImageViewer from '../components/ImageViewer';
 import type { ViewerImage } from '../components/ImageViewer';
-import { pickImages, sendAttachmentMessage, sendPhotos } from '../shared/media/attachments';
+import { pickImages, sendPhotos } from '../shared/media/attachments';
 import { describeMessageForQuote } from '../shared/chat/describeMessage';
 import { useLayeredBackHandler } from '../shared/ui/layeredBack';
 import { prewarmSafetyNumber } from '../shared/chat/safetyNumber';
-import { uploadVoiceNote, type Recording } from '../shared/media/voiceNotes';
+import { sendVoiceNote, type Recording } from '../shared/media/voiceNotes';
 import { useProfilesStore } from '../store/profiles.store';
 import StatusChip from '../components/StatusChip';
 import { toStored, useChatE2EE } from '../shared/chat/useChatE2EE';
@@ -48,7 +48,6 @@ import MessageList from '../components/chat/MessageList';
 import ChatActionsSheet from '../components/chat/ChatActionsSheet';
 import AttachmentSheet from '../components/chat/AttachmentSheet';
 import ChatComposer from '../components/chat/ChatComposer';
-import type { UploadState } from '../components/chat/UploadProgressBar';
 import { buildMessageListItems, type MessageListItem } from '../shared/chat/messageListItems';
 import { getHeaderPresenceMeta } from '../shared/chat/presence';
 import { usePeerPresence } from '../shared/chat/usePeerPresence';
@@ -117,7 +116,6 @@ export default function ChatScreen({
   const [showSearchSheet, setShowSearchSheet] = useState(false);
   const [viewerImages, setViewerImages] = useState<ViewerImage[]>([]);
   const [viewerIndex, setViewerIndex] = useState(0);
-  const [uploadState, setUploadState] = useState<UploadState | null>(null);
   const [peerTrusted, setPeerTrusted] = useState(false);
 
   // A10: with a pinned contact, compute the safety number in the background now, so the
@@ -242,47 +240,33 @@ export default function ChatScreen({
 
   // T8.3: pick a photo, strip its metadata, encrypt, upload, send; the caption is the composer text.
   const handleSendPhoto = useCallback(async () => {
-    if (!myUserId || uploadState) return;
+    if (!myUserId) return;
     try {
       const picked = await pickImages();
       if (picked.length === 0) return;
       const caption = text.trim();
       if (caption) setText('');
-      // B18: the photos appear in the chat at once (one album when several), each with its own progress
-      const label = picked.length > 1 ? `Sending ${picked.length} photos…` : 'Sending photo…';
-      setUploadState({ label, progress: 0 });
-      const result = await sendPhotos({
-        myUserId: String(myUserId),
-        target: { kind: 'peer', peerUserId },
-        images: picked,
-        caption,
-        onProgress: (fraction) => setUploadState({ label, progress: fraction }),
-      });
+      // B18/B19: the photos appear in the chat at once (one album when several), each tile with its
+      // own progress ring; the composer stays free while they upload
+      const result = await sendPhotos({ myUserId: String(myUserId), target: { kind: 'peer', peerUserId }, images: picked, caption });
       if (result.failed > 0 && Platform.OS === 'android') {
         ToastAndroid.show(result.failed === 1 ? 'One photo could not be sent' : `${result.failed} photos could not be sent`, ToastAndroid.SHORT);
       }
     } catch (e: any) {
       console.warn('[ChatScreen] photo send failed:', e);
       if (Platform.OS === 'android') ToastAndroid.show(e?.message || 'Could not send the photo', ToastAndroid.SHORT);
-    } finally {
-      setUploadState(null);
     }
-  }, [myUserId, peerUserId, text, uploadState]);
+  }, [myUserId, peerUserId, text]);
 
-  // T8.4: a finished recording is encrypted, uploaded and sent like a photo.
+  // T8.4/B19: a finished recording appears at once as a sending voice bubble, then is sent like a photo.
   const handleVoiceNote = useCallback(
     async (recording: Recording) => {
       if (!myUserId) return;
       try {
-        setUploadState({ label: 'Encrypting voice message…', progress: null });
-        const content = await uploadVoiceNote({ myUserId: String(myUserId), recording, onProgress: (l, t) => setUploadState({ label: 'Uploading encrypted voice message…', progress: t > 0 ? l / t : null }) });
-        setUploadState({ label: 'Sending…', progress: null });
-        await sendAttachmentMessage({ myUserId: String(myUserId), target: { kind: 'peer', peerUserId }, content });
+        await sendVoiceNote({ myUserId: String(myUserId), target: { kind: 'peer', peerUserId }, recording });
       } catch (e: any) {
         console.warn('[ChatScreen] voice note failed:', e);
         if (Platform.OS === 'android') ToastAndroid.show(e?.message || 'Could not send the voice message', ToastAndroid.SHORT);
-      } finally {
-        setUploadState(null);
       }
     },
     [myUserId, peerUserId],
@@ -667,7 +651,6 @@ export default function ChatScreen({
             setEditTarget(null);
             setText('');
           }}
-          uploadState={uploadState}
           disabledReason={composerDisabledReason}
           onOpenActions={handleOpenComposerActions}
           onRecorded={handleVoiceNote}

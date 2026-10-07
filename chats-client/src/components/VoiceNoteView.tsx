@@ -15,6 +15,8 @@ import {
   downloadAttachment,
 } from '../shared/media/attachments';
 import { hasMedia, isKnownLocal } from '../shared/media/mediaStore';
+import { useUploadProgress } from '../shared/media/uploadProgress';
+import UploadRing from './chat/UploadRing';
 import {
   currentPlayback,
   formatDuration,
@@ -112,7 +114,12 @@ export default function VoiceNoteView({
   const duration =
     playback.durationMs > 0 ? playback.durationMs : meta.durationMs ?? 0;
 
+  // B19: a recording still uploading shows a progress ring instead of the play button
+  const uploading = useUploadProgress(meta.blobId);
+  const isLocal = meta.blobId.startsWith('local-');
+
   useEffect(() => {
+    if (meta.blobId.startsWith('local-')) return undefined; // a placeholder: nothing to check or fetch yet
     let cancelled = false;
     hasMedia(myUserId, meta.blobId).then(v => {
       if (cancelled) return;
@@ -230,7 +237,7 @@ export default function VoiceNoteView({
     : mine
     ? 'text-bubble-out-muted'
     : 'text-muted';
-  const checking = local === null && downloading === null;
+  const checking = !isLocal && local === null && downloading === null;
   const icon = local === false
     ? 'download'
     : playback.state === 'playing'
@@ -242,7 +249,9 @@ export default function VoiceNoteView({
       <Pressable
         onPress={onMainPress}
         accessibilityLabel={
-          local === false
+          isLocal
+            ? 'Sending the voice message'
+            : local === false
             ? 'Download the voice message'
             : checking
             ? 'Checking the voice message'
@@ -250,14 +259,16 @@ export default function VoiceNoteView({
             ? 'Pause'
             : 'Play the voice message'
         }
-        disabled={checking}
+        disabled={checking || isLocal}
         hitSlop={6}
       >
         <View
           className="h-11 w-11 items-center justify-center rounded-full bg-primary"
           style={checking ? styles.checking : undefined}
         >
-          {downloading !== null ? (
+          {isLocal ? (
+            <UploadRing progress={uploading ?? 0} disc={false} color={mine ? colors.bubbleOut : colors.background} />
+          ) : downloading !== null ? (
             <Text
               className={`text-[14px] font-semibold ${
                 mine ? 'text-bubble-out' : 'text-background'

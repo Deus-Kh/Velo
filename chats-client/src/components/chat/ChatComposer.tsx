@@ -5,7 +5,6 @@ import ComposerFrame from './ComposerFrame';
 import EditBar from './EditBar';
 import ReplyBar from './ReplyBar';
 import SendIcon from './SendIcon';
-import UploadProgressBar, { type UploadState } from './UploadProgressBar';
 import VoiceComposer from '../VoiceComposer';
 import type { Recording } from '../../shared/media/voiceNotes';
 import type { DescribableMessage } from '../../shared/chat/describeMessage';
@@ -30,7 +29,6 @@ export default function ChatComposer({
   onCancelReply,
   editTarget,
   onCancelEdit,
-  uploadState,
   disabledReason,
   onOpenActions,
   onRecorded,
@@ -47,7 +45,6 @@ export default function ChatComposer({
   onCancelReply: () => void;
   editTarget: DescribableMessage | null;
   onCancelEdit: () => void;
-  uploadState: UploadState | null;
   disabledReason: string | null;
   onOpenActions: () => void;
   onRecorded: (recording: Recording) => void;
@@ -69,8 +66,6 @@ export default function ChatComposer({
     <ComposerFrame>
       {replyTarget ? <ReplyBar target={replyTarget} conversationName={conversationName} onCancel={onCancelReply} /> : null}
 
-      {uploadState ? <UploadProgressBar state={uploadState} /> : null}
-
       {editTarget ? <EditBar message={editTarget} onCancel={onCancelEdit} /> : null}
 
       {disabledReason ? (
@@ -81,7 +76,6 @@ export default function ChatComposer({
 
       <VoiceComposer
         active={showMic}
-        disabled={Boolean(uploadState)}
         sizeClass={composerButtonSizeClass}
         surfaceClass={composerSurfaceClass}
         onRecorded={onRecorded}

@@ -146,6 +146,31 @@ export function contentOf(meta: AttachmentMeta, caption?: string | null): Attach
 
 const genId = () => `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 
+/** A fresh client message id, for a placeholder that the sent message will replace. */
+export const newClientMessageId = genId;
+
+/**
+ * An outgoing message that is still uploading: shown at once with the
+ * attachment from this phone (a `local-` blob id), status "sending". The
+ * sent message keeps its id and time and replaces it in place.
+ */
+export function outgoingPlaceholder(p: { clientMessageId: string; attachment: AttachmentMeta; text: string; createdAt: number }): StoredMessage {
+  return {
+    id: p.clientMessageId,
+    clientMessageId: p.clientMessageId,
+    serverMessageId: null,
+    direction: 'out',
+    text: p.text,
+    createdAt: p.createdAt,
+    seq: null,
+    status: 'sending',
+    deliveredAt: null,
+    readAt: null,
+    replyTo: null,
+    attachment: p.attachment,
+  };
+}
+
 /** Send an attachment message (1:1 or group) and store it locally; the UI learns of it through the patch bus. */
 export async function sendAttachmentMessage(p: {
   myUserId: string;
@@ -225,20 +250,8 @@ export async function sendPhotos(p: {
     if (image.width) meta.width = image.width;
     if (image.height) meta.height = image.height;
     if (albums[index]) meta.album = { ...albums[index]! };
-    const placeholder: StoredMessage = {
-      id: clientMessageId,
-      clientMessageId,
-      serverMessageId: null,
-      direction: 'out',
-      text: caption ?? '',
-      createdAt: startedAt + index, // keeps the album order in the list
-      seq: null,
-      status: 'sending',
-      deliveredAt: null,
-      readAt: null,
-      replyTo: null,
-      attachment: meta,
-    };
+    // createdAt + index keeps the album order in the list
+    const placeholder = outgoingPlaceholder({ clientMessageId, attachment: meta, text: caption ?? '', createdAt: startedAt + index });
     setUploadProgress(localBlobId, 0);
     publishMessagePatch({ myUserId, peerKey, id: clientMessageId, message: placeholder });
     return { image, index, caption, localBlobId, placeholder };
