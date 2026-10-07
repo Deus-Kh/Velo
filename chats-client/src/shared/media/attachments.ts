@@ -39,26 +39,32 @@ export const IMAGE_MAX_EDGE = 1600;
 export type PickedImage = { bytes: Uint8Array; contentType: string; width?: number; height?: number; name?: string };
 
 /** The photo picker, downscaled by the library; metadata is stripped here before anything else happens. */
-export async function pickImages(): Promise<PickedImage[]> {
-  const res = await launchImageLibrary({ mediaType: 'photo', maxWidth: IMAGE_MAX_EDGE, maxHeight: IMAGE_MAX_EDGE, quality: 0.8, includeBase64: true, selectionLimit: 0 });
-  if (res.didCancel || !res.assets || res.assets.length === 0) return [];
+/**
+ * The photos picked, ready to send. C5: a photo still over the size limit after
+ * the picker's resize is left out and counted, so one huge file no longer stops
+ * the others from being sent.
+ */
+export type PickResult = { images: PickedImage[]; tooLarge: number };
 
-  return res.assets.map((asset) => {
+export async function pickImages(): Promise<PickResult> {
+  const res = await launchImageLibrary({ mediaType: 'photo', maxWidth: IMAGE_MAX_EDGE, maxHeight: IMAGE_MAX_EDGE, quality: 0.8, includeBase64: true, selectionLimit: 0 });
+  if (res.didCancel || !res.assets || res.assets.length === 0) return { images: [], tooLarge: 0 };
+
+  let tooLarge = 0;
+  const images = res.assets.flatMap((asset): PickedImage[] => {
     if (!asset.base64) throw new Error(res.errorMessage || 'The picker returned no image data');
     const raw = decodeBase64(asset.base64);
     const stripped = stripImageMetadata(raw);
     const contentType = (asset.type && /^image\//i.test(asset.type) ? asset.type : stripped.kind === 'png' ? 'image/png' : 'image/jpeg').toLowerCase();
-    if (stripped.bytes.length > MAX_ATTACHMENT_BYTES) throw new Error('This image is too large to send (8 MB max)');
+    if (stripped.bytes.length > MAX_ATTACHMENT_BYTES) {
+      tooLarge += 1;
+      return [];
+    }
     // The picker already reports upright sizes for the common rotations; see displayDimensions.
     const { width, height } = displayDimensions(asset.width, asset.height, jpegOrientation(raw));
-    return {
-      bytes: stripped.bytes,
-      contentType,
-      width,
-      height,
-      name: asset.fileName,
-    };
+    return [{ bytes: stripped.bytes, contentType, width, height, name: asset.fileName }];
   });
+  return { images, tooLarge };
 }
 
 export type UploadParams = {

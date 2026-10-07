@@ -81,8 +81,9 @@ describe('T8.3 media store', () => {
       ],
     });
 
-    const picked = await pickImages();
+    const { images: picked, tooLarge } = await pickImages();
 
+    expect(tooLarge).toBe(0);
     expect(picked).toHaveLength(2);
     expect(picked.map((image) => image.name)).toEqual(['one.png', 'two.png']);
     expect(picker).toHaveBeenCalledWith(expect.objectContaining({ selectionLimit: 0 }));
@@ -153,6 +154,25 @@ describe('T8.3 upload and download', () => {
     const dead: BlobTransport = { ...fakeTransport, put: jest.fn(async () => { throw new Error('network'); }) };
     await expect(uploadAttachment({ myUserId: ME, bytes: bytes(1000), contentType: 'image/jpeg', transport: dead })).rejects.toThrow('network');
     expect(mockServer.completed).toEqual([c.blobId]);
+  });
+});
+
+describe('C5 one oversized photo', () => {
+  it('is left out and counted; the other photos are still returned', async () => {
+    const { MAX_ATTACHMENT_BYTES } = jest.requireActual('@velo/protocol') as typeof import('@velo/protocol');
+    const picker = jest.requireMock('react-native-image-picker').launchImageLibrary as jest.Mock;
+    const small = Buffer.from(bytes(2000, 5)).toString('base64');
+    const huge = Buffer.alloc(MAX_ATTACHMENT_BYTES + 1, 1).toString('base64');
+    picker.mockResolvedValueOnce({
+      assets: [
+        { base64: small, type: 'image/jpeg', width: 10, height: 10, fileName: 'a.jpg' },
+        { base64: huge, type: 'image/jpeg', width: 10, height: 10, fileName: 'huge.jpg' },
+        { base64: small, type: 'image/jpeg', width: 10, height: 10, fileName: 'c.jpg' },
+      ],
+    });
+    const { images, tooLarge } = await pickImages();
+    expect(tooLarge).toBe(1);
+    expect(images.map((i) => i.name)).toEqual(['a.jpg', 'c.jpg']);
   });
 });
 

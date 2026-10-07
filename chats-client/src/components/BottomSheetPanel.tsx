@@ -4,6 +4,7 @@ import { Pressable, ScrollView, Text, View } from 'react-native';
 import SectionEyebrow from './SectionEyebrow';
 import { Icon } from './Icon';
 import type { LucideIconName } from '../shared/chat/describeMessage';
+import { useThemeColors } from '../theme/useThemeColors';
 
 export default function BottomSheetPanel({
   title,
@@ -46,7 +47,9 @@ export function BottomSheetAction({
   tone?: 'default' | 'warning' | 'danger';
 }) {
   const textTone = tone === 'danger' ? 'text-danger' : tone === 'warning' ? 'text-warning' : 'text-text';
-  const iconColor = tone === 'danger' ? '#F87171' : tone === 'warning' ? '#FBBF24' : '#94A3B8';
+  // C5: the icon follows the theme like the label (it was fixed to the dark theme's values)
+  const colors = useThemeColors();
+  const iconColor = tone === 'danger' ? colors.danger : tone === 'warning' ? colors.warning : colors.muted;
 
   return (
     <Pressable

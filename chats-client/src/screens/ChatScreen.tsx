@@ -242,7 +242,10 @@ export default function ChatScreen({
   const handleSendPhoto = useCallback(async () => {
     if (!myUserId) return;
     try {
-      const picked = await pickImages();
+      const { images: picked, tooLarge } = await pickImages();
+      if (tooLarge > 0 && Platform.OS === 'android') {
+        ToastAndroid.show(tooLarge === 1 ? 'One photo is over 8 MB and was left out' : `${tooLarge} photos are over 8 MB and were left out`, ToastAndroid.LONG);
+      }
       if (picked.length === 0) return;
       const caption = text.trim();
       if (caption) setText('');
