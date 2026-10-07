@@ -1,0 +1,24 @@
+# Weekly dependency updates. Minor and patch bumps arrive as one grouped PR per
+# package; major bumps (React Native, libsignal) come alone so they can be
+# reviewed and device-tested on their own.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directories:
+      - /chats-client
+      - /chats-server
+      - /packages/protocol
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      minor-and-patch:
+        update-types: [minor, patch]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ['*']

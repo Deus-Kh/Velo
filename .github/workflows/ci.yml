@@ -1,4 +1,4 @@
-# CI (T4.7). Every job must be green before a merge to dev or main.
+# CI (T4.7). Every job must be green before a merge to dev or master.
 # Jobs: secrets (scan + gitleaks), protocol (typecheck, lint, tests with a
 # coverage gate), server (typecheck, tests against an in-memory MongoDB,
 # build), client (typecheck, lint, jest, Metro bundle), android (debug APK).
@@ -6,7 +6,7 @@ name: ci
 
 on:
   push:
-    branches: [main, dev]
+    branches: [master, dev]
   pull_request:
   workflow_dispatch:
 
