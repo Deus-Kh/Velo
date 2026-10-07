@@ -44,7 +44,7 @@ export default function TrustedContactsSheet({ myUserId, onClose }: { myUserId: 
   );
 
   return (
-    <BottomSheetPanel title="Trusted contacts" onClose={onClose}>
+    <BottomSheetPanel title="Trusted contacts" onClose={onClose} scroll={false}>
       <Text className="px-3 pb-2 text-[13px] leading-5 text-muted">Contacts whose safety number you compared and marked as verified on this phone.</Text>
       <View className="max-h-72">
         <FlatList

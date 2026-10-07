@@ -430,7 +430,7 @@ export default function GroupChatScreen({ groupId, initialName, jumpToMessageId,
       ) : null}
 
       {sheet === 'members' && group ? (
-        <BottomSheetPanel title={`${group.members.length} members`} onClose={() => setSheet(null)}>
+        <BottomSheetPanel title={`${group.members.length} members`} onClose={() => setSheet(null)} scroll={false}>
           <View className="max-h-72">
             <FlatList
               data={group.members}
@@ -512,7 +512,7 @@ export default function GroupChatScreen({ groupId, initialName, jumpToMessageId,
       ) : null}
 
       {sheet === 'add' ? (
-        <BottomSheetPanel title="Add members" onClose={() => setSheet('members')}>
+        <BottomSheetPanel title="Add members" onClose={() => setSheet('members')} scroll={false}>
           <View className="rounded-[16px] border border-border bg-surface/92 px-4">
             <TextInput
               value={memberQuery}

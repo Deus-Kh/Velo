@@ -59,7 +59,7 @@ export default function CreateGroupPanel({ onClose, onCreated }: { onClose: () =
   };
 
   return (
-    <BottomSheetPanel title="New group" onClose={onClose}>
+    <BottomSheetPanel title="New group" onClose={onClose} scroll={false}>
       <View className="rounded-[16px] border border-border bg-surface/92 px-4">
         <TextInput
           value={name}

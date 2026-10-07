@@ -10,10 +10,13 @@ export default function BottomSheetPanel({
   title,
   onClose,
   children,
+  scroll = true,
 }: {
   title: string;
   onClose: () => void;
   children: ReactNode;
+  /** false when the content brings its own FlatList: a VirtualizedList must not sit inside a same-direction ScrollView. */
+  scroll?: boolean;
 }) {
   return (
     <>
@@ -22,13 +25,17 @@ export default function BottomSheetPanel({
       <View className="absolute inset-x-3 bottom-24">
         <View className="rounded-[28px] border border-border bg-surface-elevated p-3">
           <SectionEyebrow title={title} compact />
-          <ScrollView
-            showsVerticalScrollIndicator={false}
-            style={{ maxHeight: 460 }}
-            contentContainerStyle={{ paddingBottom: 2 }}
-          >
-            {children}
-          </ScrollView>
+          {scroll ? (
+            <ScrollView
+              showsVerticalScrollIndicator={false}
+              style={{ maxHeight: 460 }}
+              contentContainerStyle={{ paddingBottom: 2 }}
+            >
+              {children}
+            </ScrollView>
+          ) : (
+            <View style={{ maxHeight: 460, paddingBottom: 2 }}>{children}</View>
+          )}
         </View>
       </View>
     </>

@@ -46,7 +46,7 @@ export default function SearchInChatSheet({ myUserId, peerKey, senderName, onJum
   }, [myUserId, peerKey, query]);
 
   return (
-    <BottomSheetPanel title="Search in chat" onClose={onClose}>
+    <BottomSheetPanel title="Search in chat" onClose={onClose} scroll={false}>
       <View className="rounded-[16px] border border-border bg-surface/92 px-4">
         <TextInput ref={inputRef} onLayout={focusOnFirstLayout} value={query} onChangeText={setQuery} placeholder="Search messages on this device" placeholderTextColor="#94A3B8" autoCapitalize="none" returnKeyType="search" className="py-3 text-[15px] text-text" />
       </View>

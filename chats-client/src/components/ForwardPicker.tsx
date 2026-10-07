@@ -62,7 +62,7 @@ export default function ForwardPicker({ myUserId, excludePeerKey, onClose, onPic
   }, [conversations, excludePeerKey, groups, myUserId, profiles, query, savedContactsByUser]);
 
   return (
-    <BottomSheetPanel title="Forward to" onClose={onClose}>
+    <BottomSheetPanel title="Forward to" onClose={onClose} scroll={false}>
       <View className="rounded-[16px] border border-border bg-surface/92 px-4">
         <TextInput value={query} onChangeText={setQuery} placeholder="Search chats and groups" placeholderTextColor="#94A3B8" autoCapitalize="none" className="py-3 text-[15px] text-text" />
       </View>

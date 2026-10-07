@@ -44,7 +44,7 @@ export default function BlockedContactsSheet({ myUserId, onClose }: { myUserId: 
   };
 
   return (
-    <BottomSheetPanel title="Blocked contacts" onClose={onClose}>
+    <BottomSheetPanel title="Blocked contacts" onClose={onClose} scroll={false}>
       <Text className="px-3 pb-2 text-[13px] leading-5 text-muted">Blocked contacts cannot message you, see your presence or typing, or reach you in groups. They are not told.</Text>
       <View className="max-h-72">
         <FlatList
