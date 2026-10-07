@@ -1,8 +1,8 @@
 import type { ReactNode } from 'react';
 import { Pressable, Switch, Text, View } from 'react-native';
+import { useThemeColors } from '../../theme/useThemeColors';
 
 import { Icon } from '../Icon';
-import { useThemeColors } from '../../theme/useThemeColors';
 import type { ThemePreference } from '../../store/appearance.store';
 
 /** C1: the building blocks of the Settings screen: a group card, a row, a note, selectors, a toggle. */
@@ -147,14 +147,16 @@ export function SettingsToggle({
   onValueChange: (value: boolean) => void;
   disabled?: boolean;
 }) {
+  const colors = useThemeColors();
+
   return (
     <Switch
       value={value}
       onValueChange={onValueChange}
       disabled={disabled}
-      trackColor={{ false: '#CBD5E1', true: '#67E8F9' }}
-      thumbColor={value ? '#0F172A' : '#FFFFFF'}
-      ios_backgroundColor="#CBD5E1"
+      trackColor={{ false: colors.toggleTrackOff, true: colors.toggleTrackOn }}
+      thumbColor={value ? colors.toggleThumbOn : colors.toggleThumbOff}
+      ios_backgroundColor={colors.toggleTrackOff}
     />
   );
 }

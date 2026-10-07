@@ -3,7 +3,9 @@ import ReactNativeBlobUtil from 'react-native-blob-util';
 import { decodeBase64 } from 'tweetnacl-util';
 import { MAX_ATTACHMENT_BYTES, type AttachmentContent } from '@velo/protocol';
 import type { AttachmentMeta } from '../storage/messageStore';
-import { uploadAttachment } from './attachments';
+import { newClientMessageId, outgoingPlaceholder, sendAttachmentMessage, uploadAttachment } from './attachments';
+import { peerKeyOf, publishMessagePatch, type ConversationTarget } from '../chat/actions';
+import { clearUploadProgress, setUploadProgress } from './uploadProgress';
 import { deleteTempFile, loadMedia, writeTempPlaintext } from './mediaStore';
 import { nativeAudio } from './nativeAudio';
 import type { BlobTransport, ProgressFn } from './transport';
@@ -198,6 +200,37 @@ export async function uploadVoiceNote(p: { myUserId: string; recording: Recordin
     transport: p.transport,
     onProgress: p.onProgress,
   });
+}
+
+/**
+ * Send a recording the way photos are sent (B19): the voice bubble appears
+ * at once as a "sending" placeholder with its duration and waveform and a
+ * progress ring instead of the play button; when the upload is done the
+ * sent message replaces it in place. On failure the bubble stays, marked
+ * failed, and the error is rethrown for a toast.
+ */
+export async function sendVoiceNote(p: { myUserId: string; target: ConversationTarget; recording: Recording; transport?: BlobTransport }): Promise<void> {
+  const { myUserId, target, recording } = p;
+  const peerKey = peerKeyOf(target);
+  const clientMessageId = newClientMessageId();
+  const localBlobId = `local-${clientMessageId}`;
+  const attachment: AttachmentMeta = { blobId: localBlobId, key: '', digest: '', size: recording.bytes.length, contentType: VOICE_NOTE_CONTENT_TYPE, durationMs: Math.round(recording.durationMs) };
+  if (recording.waveform.length > 0) attachment.waveform = encodeWaveform(recording.waveform);
+  const placeholder = outgoingPlaceholder({ clientMessageId, attachment, text: '', createdAt: Date.now() });
+  setUploadProgress(localBlobId, 0);
+  publishMessagePatch({ myUserId, peerKey, id: clientMessageId, message: placeholder });
+  let content: AttachmentContent | null = null;
+  try {
+    content = await uploadVoiceNote({ myUserId, recording, transport: p.transport, onProgress: (loaded, total) => setUploadProgress(localBlobId, total > 0 ? loaded / total : 0) });
+    await sendAttachmentMessage({ myUserId, target, content, clientMessageId, createdAt: placeholder.createdAt });
+  } catch (e) {
+    // uploaded but not sent: keep the real blob so the bubble can still play from this phone
+    const failedAttachment = content ? { ...attachment, blobId: content.blobId, key: content.key, digest: content.digest, size: content.size } : attachment;
+    publishMessagePatch({ myUserId, peerKey, id: clientMessageId, message: { ...placeholder, attachment: failedAttachment, status: 'failed' } });
+    throw e;
+  } finally {
+    clearUploadProgress(localBlobId);
+  }
 }
 
 // ───────── playback ─────────

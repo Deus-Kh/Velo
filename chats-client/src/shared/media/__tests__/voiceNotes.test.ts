@@ -21,9 +21,13 @@ import {
   stopVoiceRecording,
   subscribeToPlayback,
   togglePlayback,
+  sendVoiceNote,
   uploadVoiceNote,
   type PlaybackEvent,
 } from '../voiceNotes';
+import { subscribeToMessagePatches, type MessagePatch } from '../../chat/actions';
+import { getUploadProgress } from '../uploadProgress';
+import { sendContentMessage } from '../../socket/messaging';
 import { WAVEFORM_BARS } from '../waveform';
 
 /**
@@ -237,5 +241,46 @@ describe('T8.4 voice notes: playback', () => {
     expect(await fs.exists(first)).toBe(false);
     expect(currentPlayback()).toMatchObject({ blobId: other.blobId, state: 'playing' });
     await stopPlayback();
+  });
+});
+
+describe('B19 sending a voice message', () => {
+  const recording = () => ({ bytes: new Uint8Array(600).fill(7), durationMs: 2300.4, waveform: new Uint8Array([10, 200, 90, 30]) });
+
+  it('the bubble appears at once as a placeholder with its duration and waveform, then the sent message replaces it', async () => {
+    const patches: MessagePatch[] = [];
+    const unsubscribe = subscribeToMessagePatches((p) => patches.push(p));
+    (sendContentMessage as jest.Mock).mockReset().mockResolvedValueOnce({ serverMessageId: 'v1', seq: 4 });
+
+    await sendVoiceNote({ myUserId: 'me', target: { kind: 'peer', peerUserId: 'peer' }, recording: recording(), transport: fakeTransport });
+    unsubscribe();
+
+    const first = patches[0]!.message!;
+    expect(first.status).toBe('sending');
+    expect(first.attachment!.blobId.startsWith('local-')).toBe(true);
+    expect(first.attachment!.durationMs).toBe(2300);
+    expect(first.attachment!.waveform).toBe(encodeBase64(new Uint8Array([10, 200, 90, 30])));
+    const last = patches[patches.length - 1]!;
+    expect(last.id).toBe(first.id);
+    expect(last.message!.status).toBe('sent');
+    expect(last.message!.attachment!.blobId.startsWith('local-')).toBe(false);
+    expect((sendContentMessage as jest.Mock).mock.calls[0][0].clientMessageId).toBe(first.id);
+    expect(getUploadProgress(first.attachment!.blobId)).toBeUndefined();
+  });
+
+  it('a failed send leaves the bubble marked failed and reports the error', async () => {
+    const patches: MessagePatch[] = [];
+    const unsubscribe = subscribeToMessagePatches((p) => patches.push(p));
+    (sendContentMessage as jest.Mock).mockReset().mockRejectedValueOnce(new Error('socket closed'));
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+    await expect(sendVoiceNote({ myUserId: 'me', target: { kind: 'peer', peerUserId: 'peer' }, recording: recording(), transport: fakeTransport })).rejects.toThrow('socket closed');
+    unsubscribe();
+    warn.mockRestore();
+
+    const last = patches[patches.length - 1]!.message!;
+    expect(last.status).toBe('failed');
+    expect(last.id).toBe(patches[0]!.message!.id);
+    expect(last.attachment!.blobId.startsWith('local-')).toBe(false); // uploaded: the real blob, playable from this phone
   });
 });

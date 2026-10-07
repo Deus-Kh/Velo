@@ -1,9 +1,12 @@
-import { useCallback, useState } from 'react';
-import { ScrollView, View } from 'react-native';
+import { useCallback, useEffect, useState } from 'react';
+import { resolveBackPress } from '../shared/ui/layeredBack';
+import { settingsBackLayers } from '../shared/settings/settingsBack';
+import { BackHandler, ScrollView, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 
 import ScreenHeader from '../components/ScreenHeader';
+import { HeaderIconButton } from '../components/ScreenHeader';
 import { useAuthStore } from '../store/auth.store';
 import BlockedContactsSheet from '../components/BlockedContactsSheet';
 import DeleteAccountSheet from '../components/DeleteAccountSheet';
@@ -23,6 +26,18 @@ import TrustedContactsSheet from '../components/settings/TrustedContactsSheet';
 import VerificationExplainerSheet from '../components/settings/VerificationExplainerSheet';
 import { useOwnAccount } from '../shared/settings/useOwnAccount';
 import { useSecurityDiagnostics } from '../shared/settings/useSecurityDiagnostics';
+import { SettingsGroup, SettingsRow } from '../components/settings/primitives';
+
+type SettingsPage = 'main' | 'profile' | 'privacy' | 'notifications' | 'appearance' | 'account' | 'advanced';
+
+const PAGE_TITLES: Record<Exclude<SettingsPage, 'main'>, string> = {
+  profile: 'Profile',
+  privacy: 'Privacy',
+  notifications: 'Notifications',
+  appearance: 'Appearance',
+  account: 'Account',
+  advanced: 'Advanced',
+};
 
 /**
  * Settings. Each section is a component under `components/settings`; the
@@ -30,7 +45,8 @@ import { useSecurityDiagnostics } from '../shared/settings/useSecurityDiagnostic
  * `shared/settings` because several sections read them. The sheets stay
  * here, outside the scroll view, because they are absolute overlays (C1).
  */
-export default function SettingsScreen() {
+/** `active`: this tab is the one on screen (all tabs stay mounted in MainTabsScreen's pager). */
+export default function SettingsScreen({ active = true }: { active?: boolean }) {
   const insets = useSafeAreaInsets();
   const userId = useAuthStore((s) => s.userId);
   const deleteAccount = useAuthStore((s) => s.deleteAccount);
@@ -49,6 +65,38 @@ export default function SettingsScreen() {
   const [profileSheetError, setProfileSheetError] = useState<string | null>(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [page, setPage] = useState<SettingsPage>('main');
+
+  // C4: hardware Back closes the open sheet, then the subpage; on the Settings list it is Android's
+  useEffect(() => {
+    if (!active) return undefined;
+    const layers = settingsBackLayers(
+      {
+        onSubpage: page !== 'main',
+        blocked: showBlocked,
+        trusted: showTrusted,
+        verificationHelp: showVerificationHelp,
+        profileSheet: showProfileSheet,
+        profileBusy: profileSheetBusy,
+        deleteAccount: showDeleteAccount,
+        deleteBusy,
+      },
+      {
+        subpage: () => setPage('main'),
+        blocked: () => setShowBlocked(false),
+        trusted: () => setShowTrusted(false),
+        verificationHelp: () => setShowVerificationHelp(false),
+        profileSheet: () => setShowProfileSheet(false),
+        deleteAccount: () => setShowDeleteAccount(false),
+      },
+    );
+    if (!layers.some((l) => l.open)) return undefined;
+    const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
+      resolveBackPress(layers, () => undefined);
+      return true;
+    });
+    return () => subscription.remove();
+  }, [active, page, showBlocked, showTrusted, showVerificationHelp, showProfileSheet, profileSheetBusy, showDeleteAccount, deleteBusy]);
 
   useFocusEffect(
     useCallback(() => {
@@ -67,56 +115,83 @@ export default function SettingsScreen() {
         showsVerticalScrollIndicator={false}
       >
         <View className="px-4">
-          <ScreenHeader title="Settings" />
-          <AccountHero
-            profile={profile}
-            userId={userId}
-            keyStateValue={keyStateValue}
-            encryptionValue={encryptionValue}
+          <ScreenHeader
+            title={page === 'main' ? 'Settings' : PAGE_TITLES[page]}
+            leading={
+              page !== 'main' ? (
+                <HeaderIconButton icon="chevron-left" label="Back to Settings" onPress={() => setPage('main')} />
+              ) : undefined
+            }
           />
 
-          <ProfileSection account={account} userId={userId} />
+          {page === 'main' ? (
+            <>
+              <AccountHero
+                profile={profile}
+                userId={userId}
+                keyStateValue={keyStateValue}
+                encryptionValue={encryptionValue}
+              />
+              <SettingsGroup>
+                <SettingsRow title="Profile" subtitle="Name, email and account identity." onPress={() => setPage('profile')} />
+                <SettingsRow title="Privacy" subtitle="Presence, receipts, blocked and trusted contacts." onPress={() => setPage('privacy')} />
+                <SettingsRow title="Notifications" subtitle="Push notifications and in-app alerts." onPress={() => setPage('notifications')} />
+                <SettingsRow title="Appearance" subtitle="Theme, density and surface style." onPress={() => setPage('appearance')} />
+                <SettingsRow title="Account" subtitle="Password, logout and account deletion." onPress={() => setPage('account')} />
+                <SettingsRow title="Advanced" subtitle="Encryption diagnostics and this phone." onPress={() => setPage('advanced')} last />
+              </SettingsGroup>
+            </>
+          ) : null}
 
-          <SharedProfileSection
-            fallbackName={profile?.username}
-            onOpen={() => {
-              setProfileSheetError(null);
-              setShowProfileSheet(true);
-            }}
-          />
+          {page === 'profile' ? (
+            <>
+              <ProfileSection account={account} userId={userId} />
+              <SharedProfileSection
+                fallbackName={profile?.username}
+                onOpen={() => {
+                  setProfileSheetError(null);
+                  setShowProfileSheet(true);
+                }}
+              />
+            </>
+          ) : null}
 
-          <PrivacySection
-            userId={userId}
-            privacy={privacy}
-            privacyError={privacyError}
-            onToggle={handlePrivacyToggle}
-            diagnostics={diagnostics}
-            diagnosticsLoading={diagnosticsLoading}
-            onOpenBlocked={() => setShowBlocked(true)}
-            onOpenTrusted={() => setShowTrusted(true)}
-            onOpenVerificationHelp={() => setShowVerificationHelp(true)}
-          />
+          {page === 'privacy' ? (
+            <PrivacySection
+              userId={userId}
+              privacy={privacy}
+              privacyError={privacyError}
+              onToggle={handlePrivacyToggle}
+              diagnostics={diagnostics}
+              diagnosticsLoading={diagnosticsLoading}
+              onOpenBlocked={() => setShowBlocked(true)}
+              onOpenTrusted={() => setShowTrusted(true)}
+              onOpenVerificationHelp={() => setShowVerificationHelp(true)}
+            />
+          ) : null}
 
-          <EncryptionSection
-            diagnostics={diagnostics}
-            diagnosticsLoading={diagnosticsLoading}
-            keyStateValue={keyStateValue}
-            encryptionValue={encryptionValue}
-          />
-
-          <ThisPhoneSection userId={userId} diagnosticsLoading={diagnosticsLoading} loadDiagnostics={loadDiagnostics} />
-
-          <NotificationsSection userId={userId} />
-
-          <AppearanceSection />
-
-          <AccountSection
-            userId={userId}
-            onOpenDeleteAccount={() => {
-              setDeleteError(null);
-              setShowDeleteAccount(true);
-            }}
-          />
+          {page === 'notifications' ? <NotificationsSection userId={userId} /> : null}
+          {page === 'appearance' ? <AppearanceSection /> : null}
+          {page === 'account' ? (
+            <AccountSection
+              userId={userId}
+              onOpenDeleteAccount={() => {
+                setDeleteError(null);
+                setShowDeleteAccount(true);
+              }}
+            />
+          ) : null}
+          {page === 'advanced' ? (
+            <>
+              <EncryptionSection
+                diagnostics={diagnostics}
+                diagnosticsLoading={diagnosticsLoading}
+                keyStateValue={keyStateValue}
+                encryptionValue={encryptionValue}
+              />
+              <ThisPhoneSection userId={userId} diagnosticsLoading={diagnosticsLoading} loadDiagnostics={loadDiagnostics} />
+            </>
+          ) : null}
         </View>
       </ScrollView>
 

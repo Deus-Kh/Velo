@@ -60,6 +60,8 @@ export type AttachmentMeta = {
   durationMs?: number;
   /** voice notes: base64 loudness per bar (T8.4) */
   waveform?: string;
+  /** photos sent together: drawn as one album bubble */
+  album?: { id: string; index: number; count: number };
 };
 
 const PREFIX = 'msg:v1';

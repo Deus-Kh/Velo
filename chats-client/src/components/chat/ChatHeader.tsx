@@ -15,6 +15,7 @@ export default function ChatHeader({
   onClose,
   avatar,
   title,
+  titleAccessory,
   titleNumberOfLines,
   subtitle,
   children,
@@ -23,6 +24,8 @@ export default function ChatHeader({
   onClose: () => void;
   avatar: ReactNode;
   title: string;
+  /** Small status mark displayed beside the contact name. */
+  titleAccessory?: ReactNode;
   titleNumberOfLines?: number;
   subtitle: string;
   /** Status chips under the subtitle. */
@@ -54,9 +57,12 @@ export default function ChatHeader({
           {avatar}
 
           <View className="flex-1 pr-2">
-            <Text className="text-[20px] font-semibold text-text" numberOfLines={titleNumberOfLines}>
-              {title}
-            </Text>
+            <View className="flex-row items-center">
+              <Text className="text-[20px] font-semibold text-text" numberOfLines={titleNumberOfLines}>
+                {title}
+              </Text>
+              {titleAccessory}
+            </View>
             <Text className="mt-1 text-sm leading-5 text-muted">{subtitle}</Text>
             {children}
           </View>

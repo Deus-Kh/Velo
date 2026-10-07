@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import Clipboard from '@react-native-clipboard/clipboard';
 import {
   ActivityIndicator,
+  Alert,
   FlatList,
   KeyboardAvoidingView,
   Platform,
@@ -13,6 +14,7 @@ import {
   Keyboard,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useFocusEffect } from '@react-navigation/native';
 
 import ForwardPicker from '../components/ForwardPicker';
 import MessageActionsSheet from '../components/MessageActionsSheet';
@@ -25,11 +27,12 @@ import { blockPeer, reportPeer, unblockPeer } from '../shared/chat/blocks';
 import Avatar from '../components/Avatar';
 import SearchInChatSheet from '../components/SearchInChatSheet';
 import ImageViewer from '../components/ImageViewer';
-import { pickImage, sendAttachmentMessage, uploadAttachment } from '../shared/media/attachments';
+import type { ViewerImage } from '../components/ImageViewer';
+import { pickImages, sendPhotos } from '../shared/media/attachments';
 import { describeMessageForQuote } from '../shared/chat/describeMessage';
 import { useLayeredBackHandler } from '../shared/ui/layeredBack';
 import { prewarmSafetyNumber } from '../shared/chat/safetyNumber';
-import { uploadVoiceNote, type Recording } from '../shared/media/voiceNotes';
+import { sendVoiceNote, type Recording } from '../shared/media/voiceNotes';
 import { useProfilesStore } from '../store/profiles.store';
 import StatusChip from '../components/StatusChip';
 import { toStored, useChatE2EE } from '../shared/chat/useChatE2EE';
@@ -37,12 +40,14 @@ import type { ReplyReference, UIMessage } from '../shared/chat/types';
 import { useAuthStore } from '../store/auth.store';
 import { describeSessionHealth } from '../shared/chat/sessionHealthPresentation';
 import ChatHeader, { HeaderAction } from '../components/chat/ChatHeader';
+import { Icon } from '../components/Icon';
+import { useThemeColors } from '../theme/useThemeColors';
 import PresencePill from '../components/chat/PresencePill';
 import InlineChatNotice from '../components/chat/InlineChatNotice';
 import MessageList from '../components/chat/MessageList';
 import ChatActionsSheet from '../components/chat/ChatActionsSheet';
+import AttachmentSheet from '../components/chat/AttachmentSheet';
 import ChatComposer from '../components/chat/ChatComposer';
-import type { UploadState } from '../components/chat/UploadProgressBar';
 import { buildMessageListItems, type MessageListItem } from '../shared/chat/messageListItems';
 import { getHeaderPresenceMeta } from '../shared/chat/presence';
 import { usePeerPresence } from '../shared/chat/usePeerPresence';
@@ -50,6 +55,7 @@ import { useOutgoingTyping } from '../shared/chat/useOutgoingTyping';
 import { useScrollToLatest } from '../shared/chat/useScrollToLatest';
 import { useJumpToMessage } from '../shared/chat/useJumpToMessage';
 import { makeConversationId, useMarkConversationRead } from '../shared/chat/useMarkConversationRead';
+import { isIdentityVerified } from '../shared/storage/trustedIdentities';
 
 type SelectedMessageAction = {
   id: string;
@@ -83,6 +89,7 @@ export default function ChatScreen({
 }) {
   const myUserId = useAuthStore((s) => s.userId);
   const insets = useSafeAreaInsets();
+  const colors = useThemeColors();
 
   const {
     socketReady,
@@ -107,8 +114,9 @@ export default function ChatScreen({
   const [showTimerSheet, setShowTimerSheet] = useState(false);
   const [showReportSheet, setShowReportSheet] = useState(false);
   const [showSearchSheet, setShowSearchSheet] = useState(false);
-  const [viewerUri, setViewerUri] = useState<string | null>(null);
-  const [uploadState, setUploadState] = useState<UploadState | null>(null);
+  const [viewerImages, setViewerImages] = useState<ViewerImage[]>([]);
+  const [viewerIndex, setViewerIndex] = useState(0);
+  const [peerTrusted, setPeerTrusted] = useState(false);
 
   // A10: with a pinned contact, compute the safety number in the background now, so the
   // Verify screen opens with it ready instead of spending seconds of SHA-512 on first use.
@@ -116,6 +124,28 @@ export default function ChatScreen({
     if (!myUserId) return;
     prewarmSafetyNumber({ myUserId: String(myUserId), peerUserId });
   }, [myUserId, peerUserId]);
+
+  useFocusEffect(
+    useCallback(() => {
+      let active = true;
+      if (!myUserId) {
+        setPeerTrusted(false);
+        return undefined;
+      }
+      // C2: only a contact the user marked as verified counts, not the silent first-contact pin.
+      isIdentityVerified({ myUserId: String(myUserId), peerUserId })
+        .then((verified) => {
+          if (active) setPeerTrusted(verified);
+        })
+        .catch((error) => {
+          if (active) setPeerTrusted(false);
+          console.warn('[ChatScreen] Failed to read trusted contact:', error);
+        });
+      return () => {
+        active = false;
+      };
+    }, [myUserId, peerUserId]),
+  );
   const [reportBusy, setReportBusy] = useState(false);
   const peerBlocked = useBlocksStore((s) => (myUserId ? s.blockedByUser[String(myUserId)] : undefined)?.includes(peerUserId) ?? false);
 
@@ -123,6 +153,7 @@ export default function ChatScreen({
   const [editTarget, setEditTarget] = useState<UIMessage | null>(null);
   const [forwardTarget, setForwardTarget] = useState<UIMessage | null>(null);
   const [showComposerActions, setShowComposerActions] = useState(false);
+  const [showChatActions, setShowChatActions] = useState(false);
   const [selectedMessageAction, setSelectedMessageAction] = useState<SelectedMessageAction | null>(null);
   const [replyTarget, setReplyTarget] = useState<SelectedMessageAction | null>(null);
   const flatListRef = useRef<FlatList<MessageListItem>>(null);
@@ -160,6 +191,7 @@ export default function ChatScreen({
         },
       },
       { open: showComposerActions, close: () => setShowComposerActions(false) },
+      { open: showChatActions, close: () => setShowChatActions(false) },
       { open: showTimerSheet, close: () => setShowTimerSheet(false) },
       { open: showReportSheet, close: () => setShowReportSheet(false) },
       { open: showSearchSheet, close: () => setShowSearchSheet(false) },
@@ -183,6 +215,7 @@ export default function ChatScreen({
     socketReady,
     sessionHealth,
   });
+  const peerVerified = peerTrusted && sessionHealth.status !== 'identity_changed';
 
   const onSend = async () => {
     if (!trimmedText) return;
@@ -207,47 +240,36 @@ export default function ChatScreen({
 
   // T8.3: pick a photo, strip its metadata, encrypt, upload, send; the caption is the composer text.
   const handleSendPhoto = useCallback(async () => {
-    if (!myUserId || uploadState) return;
+    if (!myUserId) return;
     try {
-      const picked = await pickImage();
-      if (!picked) return;
-      setUploadState({ label: 'Encrypting photo…', progress: null });
+      const { images: picked, tooLarge } = await pickImages();
+      if (tooLarge > 0 && Platform.OS === 'android') {
+        ToastAndroid.show(tooLarge === 1 ? 'One photo is over 8 MB and was left out' : `${tooLarge} photos are over 8 MB and were left out`, ToastAndroid.LONG);
+      }
+      if (picked.length === 0) return;
       const caption = text.trim();
-      const content = await uploadAttachment({
-        myUserId: String(myUserId),
-        bytes: picked.bytes,
-        contentType: picked.contentType,
-        width: picked.width,
-        height: picked.height,
-        name: picked.name,
-        caption,
-        onProgress: (loaded, total) => setUploadState({ label: 'Uploading encrypted photo…', progress: total > 0 ? loaded / total : null }),
-      });
-      setUploadState({ label: 'Sending…', progress: null });
-      await sendAttachmentMessage({ myUserId: String(myUserId), target: { kind: 'peer', peerUserId }, content });
       if (caption) setText('');
+      // B18/B19: the photos appear in the chat at once (one album when several), each tile with its
+      // own progress ring; the composer stays free while they upload
+      const result = await sendPhotos({ myUserId: String(myUserId), target: { kind: 'peer', peerUserId }, images: picked, caption });
+      if (result.failed > 0 && Platform.OS === 'android') {
+        ToastAndroid.show(result.failed === 1 ? 'One photo could not be sent' : `${result.failed} photos could not be sent`, ToastAndroid.SHORT);
+      }
     } catch (e: any) {
       console.warn('[ChatScreen] photo send failed:', e);
       if (Platform.OS === 'android') ToastAndroid.show(e?.message || 'Could not send the photo', ToastAndroid.SHORT);
-    } finally {
-      setUploadState(null);
     }
-  }, [myUserId, peerUserId, text, uploadState]);
+  }, [myUserId, peerUserId, text]);
 
-  // T8.4: a finished recording is encrypted, uploaded and sent like a photo.
+  // T8.4/B19: a finished recording appears at once as a sending voice bubble, then is sent like a photo.
   const handleVoiceNote = useCallback(
     async (recording: Recording) => {
       if (!myUserId) return;
       try {
-        setUploadState({ label: 'Encrypting voice message…', progress: null });
-        const content = await uploadVoiceNote({ myUserId: String(myUserId), recording, onProgress: (l, t) => setUploadState({ label: 'Uploading encrypted voice message…', progress: t > 0 ? l / t : null }) });
-        setUploadState({ label: 'Sending…', progress: null });
-        await sendAttachmentMessage({ myUserId: String(myUserId), target: { kind: 'peer', peerUserId }, content });
+        await sendVoiceNote({ myUserId: String(myUserId), target: { kind: 'peer', peerUserId }, recording });
       } catch (e: any) {
         console.warn('[ChatScreen] voice note failed:', e);
         if (Platform.OS === 'android') ToastAndroid.show(e?.message || 'Could not send the voice message', ToastAndroid.SHORT);
-      } finally {
-        setUploadState(null);
       }
     },
     [myUserId, peerUserId],
@@ -259,6 +281,9 @@ export default function ChatScreen({
 
   const handleCloseComposerActions = useCallback(() => {
     setShowComposerActions(false);
+  }, []);
+  const handleCloseChatActions = useCallback(() => {
+    setShowChatActions(false);
   }, []);
 
   const handleToggleBlock = useCallback(() => {
@@ -347,11 +372,25 @@ export default function ChatScreen({
         onClose={onClose}
         avatar={<Avatar name={conversationName} profile={peerProfile} size="md" className="mr-3" />}
         title={conversationName}
+        titleAccessory={
+          peerVerified ? (
+            <View className="ml-1.5">
+              <Icon lib="Ionicons" name="checkmark-circle" size={18} color={colors.primary} />
+            </View>
+          ) : null
+        }
         subtitle={presenceMeta.subtitle}
         actions={
-          <HeaderAction onPress={onVerify}>
-            <Text className="text-sm font-semibold text-text">Verify</Text>
-          </HeaderAction>
+          <View className="flex-row items-center gap-2">
+            {!peerVerified ? (
+              <HeaderAction onPress={onVerify}>
+                <Text className="text-sm font-semibold text-text">Verify</Text>
+              </HeaderAction>
+            ) : null}
+            <HeaderAction onPress={() => setShowChatActions(true)} horizontalPadding="px-3">
+              <Icon lib="Lucide" name="ellipsis-vertical" size={20} color={colors.text} />
+            </HeaderAction>
+          </View>
         }
       >
         {presenceMeta.pillLabel ? (
@@ -425,7 +464,10 @@ export default function ChatScreen({
             onEndReached={handleEndReached}
             onOpenMessageActions={handleOpenMessageActions}
             onSwipeReply={handleReplyToSpecificMessage}
-            onOpenImage={setViewerUri}
+            onOpenImage={(images, initialIndex) => {
+              setViewerImages(images);
+              setViewerIndex(initialIndex);
+            }}
           />
 
           {showScrollToBottom ? (
@@ -444,16 +486,23 @@ export default function ChatScreen({
       )}
 
       {showComposerActions ? (
+        <AttachmentSheet
+          onClose={handleCloseComposerActions}
+          onSendPhoto={handleSendPhoto}
+        />
+      ) : null}
+
+      {showChatActions ? (
         <ChatActionsSheet
           peerBlocked={peerBlocked}
+          verified={peerVerified}
           timerSeconds={timer.timerSeconds}
           sessionResetRequired={sessionHealth.status === 'reset_required'}
-          onClose={handleCloseComposerActions}
+          onClose={handleCloseChatActions}
           onVerify={onVerify}
           onToggleBlock={handleToggleBlock}
           onReport={() => setShowReportSheet(true)}
           onJumpToLatest={scrollToBottom}
-          onSendPhoto={handleSendPhoto}
           onSearch={() => setShowSearchSheet(true)}
           onTimer={() => setShowTimerSheet(true)}
           onResetSession={resetSession}
@@ -490,11 +539,31 @@ export default function ChatScreen({
                 }}
                 onDeleteForMe={() => {
                   handleCloseMessageActions();
-                  if (full) deleteLocally(full).catch((e) => console.warn('[ChatScreen] delete failed:', e));
+                  if (!full) return;
+                  Alert.alert('Delete for me?', 'This removes the message from this device only.', [
+                    { text: 'Cancel', style: 'cancel' },
+                    {
+                      text: 'Delete',
+                      style: 'destructive',
+                      onPress: () => deleteLocally(full).catch((e) => console.warn('[ChatScreen] delete failed:', e)),
+                    },
+                  ]);
                 }}
                 onDeleteForEveryone={() => {
                   handleCloseMessageActions();
-                  if (full) deleteEverywhere(full).catch((e) => console.warn('[ChatScreen] delete for everyone failed:', e));
+                  if (!full) return;
+                  Alert.alert(
+                    'Delete for everyone?',
+                    'This asks the other side’s devices to remove it, but it may already have been read.',
+                    [
+                      { text: 'Cancel', style: 'cancel' },
+                      {
+                        text: 'Delete',
+                        style: 'destructive',
+                        onPress: () => deleteEverywhere(full).catch((e) => console.warn('[ChatScreen] delete for everyone failed:', e)),
+                      },
+                    ],
+                  );
                 }}
                 onRetry={() => {
                   handleCloseMessageActions();
@@ -506,7 +575,7 @@ export default function ChatScreen({
           })()
         : null}
 
-      <ImageViewer uri={viewerUri} onClose={() => setViewerUri(null)} />
+      <ImageViewer images={viewerImages} initialIndex={viewerIndex} onClose={() => setViewerImages([])} />
 
       {showSearchSheet && myUserId ? (
         <SearchInChatSheet
@@ -585,7 +654,6 @@ export default function ChatScreen({
             setEditTarget(null);
             setText('');
           }}
-          uploadState={uploadState}
           disabledReason={composerDisabledReason}
           onOpenActions={handleOpenComposerActions}
           onRecorded={handleVoiceNote}

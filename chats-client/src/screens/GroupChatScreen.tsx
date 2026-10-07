@@ -9,6 +9,7 @@ import {
   TextInput,
   ToastAndroid,
   View,
+  useWindowDimensions,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Clipboard from '@react-native-clipboard/clipboard';
@@ -22,14 +23,18 @@ import { formatTimer } from '../shared/chat/disappearing';
 import Avatar from '../components/Avatar';
 import SearchInChatSheet from '../components/SearchInChatSheet';
 import AttachmentView from '../components/AttachmentView';
-import ImageViewer from '../components/ImageViewer';
-import { isAudio, pickImage, sendAttachmentMessage, uploadAttachment } from '../shared/media/attachments';
+import ImageViewer, { type ViewerImage } from '../components/ImageViewer';
+import { isAudio, isImage, pickImages, sendPhotos } from '../shared/media/attachments';
+import { albumKeyOf, albumStatus, groupAlbumRuns, mergeReactionSummaries } from '../shared/media/albums';
+import { photoMaxWidth } from '../shared/media/photoFrame';
+import PhotoAlbum, { albumFrame } from '../components/chat/PhotoAlbum';
+import { cachedMediaDataUri } from '../shared/media/mediaStore';
 import { describeMessageForQuote } from '../shared/chat/describeMessage';
 import { Icon } from '../components/Icon';
 import { useLayeredBackHandler } from '../shared/ui/layeredBack';
 import { useThemeColors } from '../theme/useThemeColors';
 import VoiceComposer from '../components/VoiceComposer';
-import { uploadVoiceNote, type Recording } from '../shared/media/voiceNotes';
+import { sendVoiceNote, type Recording } from '../shared/media/voiceNotes';
 import { useProfilesStore } from '../store/profiles.store';
 import TimerSheet from '../components/TimerSheet';
 import StatusChip from '../components/StatusChip';
@@ -43,7 +48,6 @@ import { formatHandle } from '../shared/utils/identity';
 import ChatHeader, { HeaderAction } from '../components/chat/ChatHeader';
 import ComposerFrame from '../components/chat/ComposerFrame';
 import SystemMessagePill from '../components/chat/SystemMessagePill';
-import UploadProgressBar, { type UploadState } from '../components/chat/UploadProgressBar';
 
 /**
  * T6.4: one group conversation. Messages are Sender-Key encrypted (T6.1);
@@ -64,6 +68,9 @@ function SenderLabel({ name }: { name: string }) {
   return <Text className="mb-0.5 ml-3 text-[11px] font-semibold text-primary">{name}</Text>;
 }
 
+/** A list row: one message, or the photos of an album in album order. */
+type GroupRow = GroupUIMessage | GroupUIMessage[];
+
 export default function GroupChatScreen({ groupId, initialName, jumpToMessageId, onClose }: { groupId: string; initialName?: string; jumpToMessageId?: string; onClose: () => void }) {
   const myUserId = useAuthStore((s) => s.userId);
   const insets = useSafeAreaInsets();
@@ -76,8 +83,8 @@ export default function GroupChatScreen({ groupId, initialName, jumpToMessageId,
   const [sheet, setSheet] = useState<MemberSheet>(null);
   const [selected, setSelected] = useState<GroupUIMessage | null>(null);
   const [jumpTarget, setJumpTarget] = useState<string | null>(jumpToMessageId ?? null);
-  const [viewerUri, setViewerUri] = useState<string | null>(null);
-  const [uploadState, setUploadState] = useState<UploadState | null>(null);
+  const [viewerImages, setViewerImages] = useState<ViewerImage[]>([]);
+  const [viewerIndex, setViewerIndex] = useState(0);
   const colors = useThemeColors();
   const [editTarget, setEditTarget] = useState<GroupUIMessage | null>(null);
   const [forwardTarget, setForwardTarget] = useState<GroupUIMessage | null>(null);
@@ -85,19 +92,37 @@ export default function GroupChatScreen({ groupId, initialName, jumpToMessageId,
   const [candidates, setCandidates] = useState<UserListItem[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
-  const flatListRef = useRef<FlatList<GroupUIMessage>>(null);
+  const flatListRef = useRef<FlatList<GroupRow>>(null);
+  const { width: windowWidth } = useWindowDimensions();
 
   const name = group?.name ?? initialName ?? 'Group';
   const membersById = useMemo(() => new Map((group?.members ?? []).map((m) => [m.userId, m])), [group]);
   const me = myUserId ? membersById.get(String(myUserId)) : undefined;
   const isAdmin = me?.role === 'admin';
   const canSend = text.trim().length > 0 && Boolean(group);
-  const reversed = useMemo(() => [...messages].reverse(), [messages]);
+  // newest first for the inverted list; photos sent together by one member become one album row
+  const reversed = useMemo(
+    () => groupAlbumRuns(messages, (m) => albumKeyOf({ ...m, senderKey: m.senderUserId }), (m) => m.attachment?.album?.index ?? 0).reverse(),
+    [messages],
+  );
+  const openImage = useCallback(
+    (uri: string) => {
+      const images = messages.flatMap<ViewerImage>((message) => {
+        if (!message.attachment || !isImage(message.attachment)) return [];
+        const cached = cachedMediaDataUri(message.attachment.blobId);
+        return cached ? [{ uri: cached, caption: message.text || undefined }] : [];
+      });
+      const initialIndex = images.findIndex((image) => image.uri === uri);
+      setViewerImages(initialIndex >= 0 ? images : [{ uri }]);
+      setViewerIndex(initialIndex >= 0 ? initialIndex : 0);
+    },
+    [messages],
+  );
 
   // T7.8: jump to a message from search once it is in the list (the group list holds the newest page).
   useEffect(() => {
     if (!jumpTarget || loading) return;
-    const idx = reversed.findIndex((m) => m.id === jumpTarget);
+    const idx = reversed.findIndex((row) => (Array.isArray(row) ? row.some((m) => m.id === jumpTarget) : row.id === jumpTarget));
     if (idx >= 0) setTimeout(() => flatListRef.current?.scrollToIndex({ index: idx, animated: true, viewPosition: 0.5 }), 80);
     setJumpTarget(null);
   }, [jumpTarget, loading, reversed]);
@@ -139,38 +164,36 @@ export default function GroupChatScreen({ groupId, initialName, jumpToMessageId,
 
   // T8.3: a photo on the group chain; the composer text is the caption.
   const onSendPhoto = useCallback(async () => {
-    if (!myUserId || !group || uploadState) return;
+    if (!myUserId || !group) return;
     try {
-      const picked = await pickImage();
-      if (!picked) return;
-      setUploadState({ label: 'Encrypting photo…', progress: null });
+      const { images: picked, tooLarge } = await pickImages();
+      if (tooLarge > 0 && Platform.OS === 'android') {
+        ToastAndroid.show(tooLarge === 1 ? 'One photo is over 8 MB and was left out' : `${tooLarge} photos are over 8 MB and were left out`, ToastAndroid.LONG);
+      }
+      if (picked.length === 0) return;
       const caption = text.trim();
-      const content = await uploadAttachment({ myUserId: String(myUserId), bytes: picked.bytes, contentType: picked.contentType, width: picked.width, height: picked.height, name: picked.name, caption, onProgress: (l, t) => setUploadState({ label: 'Uploading encrypted photo…', progress: t > 0 ? l / t : null }) });
-      setUploadState({ label: 'Sending…', progress: null });
-      await sendAttachmentMessage({ myUserId: String(myUserId), target: { kind: 'group', group }, content });
       if (caption) setText('');
+      // B18/B19: the photos appear in the chat at once (one album when several), each tile with its
+      // own progress ring; the composer stays free while they upload
+      const result = await sendPhotos({ myUserId: String(myUserId), target: { kind: 'group', group }, images: picked, caption });
+      if (result.failed > 0 && Platform.OS === 'android') {
+        ToastAndroid.show(result.failed === 1 ? 'One photo could not be sent' : `${result.failed} photos could not be sent`, ToastAndroid.SHORT);
+      }
     } catch (e: any) {
       console.warn('[groups] photo send failed:', e);
       if (Platform.OS === 'android') ToastAndroid.show(e?.message || 'Could not send the photo', ToastAndroid.SHORT);
-    } finally {
-      setUploadState(null);
     }
-  }, [group, myUserId, text, uploadState]);
+  }, [group, myUserId, text]);
 
   // T8.4: voice note on the group chain.
   const onVoiceNote = useCallback(
     async (recording: Recording) => {
       if (!myUserId || !group) return;
       try {
-        setUploadState({ label: 'Encrypting voice message…', progress: null });
-        const content = await uploadVoiceNote({ myUserId: String(myUserId), recording, onProgress: (l, t) => setUploadState({ label: 'Uploading encrypted voice message…', progress: t > 0 ? l / t : null }) });
-        setUploadState({ label: 'Sending…', progress: null });
-        await sendAttachmentMessage({ myUserId: String(myUserId), target: { kind: 'group', group }, content });
+        await sendVoiceNote({ myUserId: String(myUserId), target: { kind: 'group', group }, recording });
       } catch (e: any) {
         console.warn('[groups] voice note failed:', e);
         if (Platform.OS === 'android') ToastAndroid.show(e?.message || 'Could not send the voice message', ToastAndroid.SHORT);
-      } finally {
-        setUploadState(null);
       }
     },
     [group, myUserId],
@@ -289,13 +312,37 @@ export default function GroupChatScreen({ groupId, initialName, jumpToMessageId,
             ref={flatListRef}
             inverted
             data={reversed}
-            keyExtractor={(item) => item.id}
-            renderItem={({ item, index }) => {
+            keyExtractor={(row) => (Array.isArray(row) ? `album-${row[0]!.id}` : row.id)}
+            renderItem={({ item: row, index }) => {
+              const item = Array.isArray(row) ? row[0]! : row;
               if (item.system) {
                 return <SystemMessagePill text={item.text} />;
               }
-              const newer = reversed[index - 1];
+              const newerRow = reversed[index - 1];
+              const newer = Array.isArray(newerRow) ? newerRow[0] : newerRow;
               const showSender = !item.mine && (!newer || newer.senderUserId !== item.senderUserId);
+              if (Array.isArray(row)) {
+                // photos sent together: one bubble; each tile is still its own message
+                const captioned = row.find((m) => m.text) ?? null;
+                const width = photoMaxWidth(windowWidth);
+                return (
+                  <View>
+                    {showSender ? <SenderLabel name={memberName(membersById.get(item.senderUserId ?? ''), item.senderUserId ?? '', profiles)} /> : null}
+                    <MessageBubble
+                      text={captioned?.text ?? ''}
+                      mine={item.mine}
+                      status={albumStatus(row.map((m) => m.status))}
+                      timestamp={Math.max(...row.map((m) => m.createdAt))}
+                      reactions={mergeReactionSummaries(row.map((m) => summarizeReactions(m.reactions, String(myUserId ?? ''))))}
+                      edited={Boolean(captioned?.editedAt)}
+                      forwarded={Boolean(item.forwardedFrom)}
+                      attachment={myUserId ? <PhotoAlbum myUserId={String(myUserId)} photos={row} mine={item.mine} width={width} onOpen={openImage} onLongPressPhoto={setSelected} /> : undefined}
+                      mediaFrame={albumFrame(row, width)}
+                      onPress={() => setSelected(captioned ?? item)}
+                    />
+                  </View>
+                );
+              }
               return (
                 <View>
                   {showSender ? <SenderLabel name={memberName(membersById.get(item.senderUserId ?? ''), item.senderUserId ?? '', profiles)} /> : null}
@@ -308,8 +355,9 @@ export default function GroupChatScreen({ groupId, initialName, jumpToMessageId,
                     edited={Boolean(item.editedAt)}
                     deleted={Boolean(item.deletedAt)}
                     forwarded={Boolean(item.forwardedFrom)}
-                    attachment={item.attachment && myUserId ? <AttachmentView myUserId={String(myUserId)} meta={item.attachment} mine={item.mine} onOpen={setViewerUri} /> : undefined}
+                    attachment={item.attachment && myUserId ? <AttachmentView myUserId={String(myUserId)} meta={item.attachment} mine={item.mine} onOpen={openImage} onLongPress={() => setSelected(item)} /> : undefined}
                     attachmentMetaInline={Boolean(item.attachment && isAudio(item.attachment))}
+                    photoSize={item.attachment && isImage(item.attachment) ? item.attachment : null}
                     onPress={() => setSelected(item)}
                   />
                 </View>
@@ -436,7 +484,7 @@ export default function GroupChatScreen({ groupId, initialName, jumpToMessageId,
         </BottomSheetPanel>
       ) : null}
 
-      <ImageViewer uri={viewerUri} onClose={() => setViewerUri(null)} />
+      <ImageViewer images={viewerImages} initialIndex={viewerIndex} onClose={() => setViewerImages([])} />
 
       {sheet === 'search' && myUserId ? (
         <SearchInChatSheet
@@ -529,10 +577,8 @@ export default function GroupChatScreen({ groupId, initialName, jumpToMessageId,
             </Pressable>
           </View>
         ) : null}
-        {uploadState ? <UploadProgressBar state={uploadState} /> : null}
         <VoiceComposer
           active={showMic}
-          disabled={Boolean(uploadState)}
           sizeClass={buttonSizeClass}
           surfaceClass={composerSurfaceClass}
           onRecorded={onVoiceNote}
@@ -542,7 +588,7 @@ export default function GroupChatScreen({ groupId, initialName, jumpToMessageId,
         >
           <Pressable
             onPress={onSendPhoto}
-            disabled={!group || removed || Boolean(uploadState)}
+            disabled={!group || removed}
             className={`${buttonSizeClass} items-center justify-center rounded-full border border-border ${composerSurfaceClass} active:opacity-80`}
           >
             <Icon lib="Lucide" name="camera" size={20} color={colors.text} />

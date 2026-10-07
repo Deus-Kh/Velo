@@ -35,3 +35,23 @@ describe('buildMessageListItems', () => {
     expect(buildMessageListItems([])).toEqual([]);
   });
 });
+
+describe('buildMessageListItems: albums', () => {
+  const t = new Date(2026, 9, 6, 12, 0).getTime();
+  const photo = (id: string, index: number, albumId = 'A', extra: Partial<UIMessage> = {}): UIMessage =>
+    msg(id, t + index, { mine: true, text: '', attachment: { blobId: id, key: 'k', digest: 'd', size: 1, contentType: 'image/jpeg', album: { id: albumId, index, count: 3 } }, ...extra });
+
+  it('photos of one album become one item in album order, and a jump target inside it finds the item', () => {
+    const items = buildMessageListItems([msg('before', t - 1), photo('p0', 0), photo('p2', 2), photo('p1', 1), msg('after', t + 10)]);
+    const album = items.find((i) => i.type === 'album');
+    expect(album && album.type === 'album' ? album.messages.map((m) => m.id) : null).toEqual(['p0', 'p1', 'p2']);
+    expect(items.map((i) => i.type)).toEqual(['message', 'album', 'message', 'separator']);
+    const { itemHoldsMessage } = require('../messageListItems') as typeof import('../messageListItems');
+    expect(items.findIndex((i) => itemHoldsMessage(i, 'p2'))).toBe(1);
+  });
+
+  it('a deleted photo leaves the album; a lone survivor is an ordinary message', () => {
+    const items = buildMessageListItems([photo('p0', 0), photo('p1', 1, 'A', { deletedAt: t })]);
+    expect(items.map((i) => i.type)).toEqual(['message', 'message', 'separator']);
+  });
+});
