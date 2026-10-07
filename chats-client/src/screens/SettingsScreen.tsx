@@ -1,5 +1,7 @@
-import { useCallback, useState } from 'react';
-import { ScrollView, View } from 'react-native';
+import { useCallback, useEffect, useState } from 'react';
+import { resolveBackPress } from '../shared/ui/layeredBack';
+import { settingsBackLayers } from '../shared/settings/settingsBack';
+import { BackHandler, ScrollView, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 
@@ -43,7 +45,8 @@ const PAGE_TITLES: Record<Exclude<SettingsPage, 'main'>, string> = {
  * `shared/settings` because several sections read them. The sheets stay
  * here, outside the scroll view, because they are absolute overlays (C1).
  */
-export default function SettingsScreen() {
+/** `active`: this tab is the one on screen (all tabs stay mounted in MainTabsScreen's pager). */
+export default function SettingsScreen({ active = true }: { active?: boolean }) {
   const insets = useSafeAreaInsets();
   const userId = useAuthStore((s) => s.userId);
   const deleteAccount = useAuthStore((s) => s.deleteAccount);
@@ -63,6 +66,37 @@ export default function SettingsScreen() {
   const [deleteBusy, setDeleteBusy] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [page, setPage] = useState<SettingsPage>('main');
+
+  // C4: hardware Back closes the open sheet, then the subpage; on the Settings list it is Android's
+  useEffect(() => {
+    if (!active) return undefined;
+    const layers = settingsBackLayers(
+      {
+        onSubpage: page !== 'main',
+        blocked: showBlocked,
+        trusted: showTrusted,
+        verificationHelp: showVerificationHelp,
+        profileSheet: showProfileSheet,
+        profileBusy: profileSheetBusy,
+        deleteAccount: showDeleteAccount,
+        deleteBusy,
+      },
+      {
+        subpage: () => setPage('main'),
+        blocked: () => setShowBlocked(false),
+        trusted: () => setShowTrusted(false),
+        verificationHelp: () => setShowVerificationHelp(false),
+        profileSheet: () => setShowProfileSheet(false),
+        deleteAccount: () => setShowDeleteAccount(false),
+      },
+    );
+    if (!layers.some((l) => l.open)) return undefined;
+    const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
+      resolveBackPress(layers, () => undefined);
+      return true;
+    });
+    return () => subscription.remove();
+  }, [active, page, showBlocked, showTrusted, showVerificationHelp, showProfileSheet, profileSheetBusy, showDeleteAccount, deleteBusy]);
 
   useFocusEffect(
     useCallback(() => {

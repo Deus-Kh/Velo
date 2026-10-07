@@ -346,7 +346,7 @@ export default function MainTabsScreen() {
             />
           </View>
           <View style={{ width: frame.width }}>
-            <SettingsScreen />
+            <SettingsScreen active={tab === 'settings'} />
           </View>
         </ScrollView>
 
