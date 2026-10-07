@@ -4,7 +4,10 @@ import ReactNativeBlobUtil from 'react-native-blob-util';
 import { decodeBase64 } from 'tweetnacl-util';
 import { attachmentDecrypt } from '@velo/protocol';
 import type { BlobTarget } from '../../api/attachments.api';
-import { downloadAttachment, metaOf, pickImages, uploadAttachment } from '../attachments';
+import { downloadAttachment, metaOf, pickImages, sendPhotos, uploadAttachment } from '../attachments';
+import { subscribeToMessagePatches, type MessagePatch } from '../../chat/actions';
+import { getUploadProgress } from '../uploadProgress';
+import { sendContentMessage } from '../../socket/messaging';
 import { deleteAllMediaForUser, deleteMedia, hasMedia, loadMedia, mediaDataUri, mediaPath, saveMedia } from '../mediaStore';
 import type { BlobTransport } from '../transport';
 
@@ -150,5 +153,45 @@ describe('T8.3 upload and download', () => {
     const dead: BlobTransport = { ...fakeTransport, put: jest.fn(async () => { throw new Error('network'); }) };
     await expect(uploadAttachment({ myUserId: ME, bytes: bytes(1000), contentType: 'image/jpeg', transport: dead })).rejects.toThrow('network');
     expect(mockServer.completed).toEqual([c.blobId]);
+  });
+});
+
+describe('B18 sending several photos', () => {
+  it('shows every photo at once as one album, sends them in order, and a failure in the middle does not stop the rest', async () => {
+    const patches: MessagePatch[] = [];
+    const unsubscribe = subscribeToMessagePatches((p) => patches.push(p));
+    const send = sendContentMessage as jest.Mock;
+    send.mockReset();
+    send
+      .mockResolvedValueOnce({ serverMessageId: 's1', seq: 1 })
+      .mockRejectedValueOnce(new Error('socket closed'))
+      .mockResolvedValueOnce({ serverMessageId: 's3', seq: 3 });
+    const images = [bytes(3000, 1), bytes(4000, 2), bytes(5000, 3)].map((b, i) => ({ bytes: b, contentType: 'image/jpeg', width: 1200, height: 1600, name: `p${i}.jpg` }));
+    const progress: number[] = [];
+
+    const result = await sendPhotos({ myUserId: ME, target: { kind: 'peer', peerUserId: 'peer' }, images, caption: ' hello ', transport: fakeTransport, onProgress: (f) => progress.push(f) });
+    unsubscribe();
+
+    // the three placeholders come first, before any upload finished: one album, local previews, in order
+    const placeholders = patches.slice(0, 3).map((p) => p.message!);
+    expect(placeholders.map((m) => m.status)).toEqual(['sending', 'sending', 'sending']);
+    expect(placeholders.every((m) => m.attachment!.blobId.startsWith('local-'))).toBe(true);
+    const albumId = placeholders[0]!.attachment!.album!.id;
+    expect(placeholders.map((m) => m.attachment!.album)).toEqual([0, 1, 2].map((index) => ({ id: albumId, index, count: 3 })));
+    expect(placeholders.map((m) => m.text)).toEqual(['hello', '', '']);
+    expect(placeholders[0]!.createdAt).toBeLessThan(placeholders[1]!.createdAt);
+
+    // sent in album order, each replacing its own placeholder (same id), the failed one marked failed
+    expect(send.mock.calls.map((c) => c[0].content.album.index)).toEqual([0, 1, 2]);
+    expect(send.mock.calls.map((c) => c[0].clientMessageId)).toEqual(placeholders.map((m) => m.id));
+    const last = new Map(patches.map((p) => [p.id, p.message!]));
+    expect(placeholders.map((m) => last.get(m.id)!.status)).toEqual(['sent', 'failed', 'sent']);
+    expect(last.get(placeholders[0]!.id)!.attachment!.blobId.startsWith('local-')).toBe(false);
+    expect(last.get(placeholders[0]!.id)!.attachment!.album).toEqual({ id: albumId, index: 0, count: 3 });
+    expect(result).toEqual({ sent: 2, failed: 1 });
+
+    // progress ends complete and nothing is left in the progress store
+    expect(progress[progress.length - 1]).toBe(1);
+    expect(placeholders.map((m) => getUploadProgress(m.attachment!.blobId))).toEqual([undefined, undefined, undefined]);
   });
 });

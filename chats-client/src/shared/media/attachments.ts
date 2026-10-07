@@ -12,7 +12,7 @@ import {
 } from '@velo/protocol';
 import { attachmentsApi } from '../api/attachments.api';
 import { groupPeerKey, type GroupView } from '../api/groups.api';
-import { publishMessagePatch, type ConversationTarget } from '../chat/actions';
+import { peerKeyOf, publishMessagePatch, type ConversationTarget } from '../chat/actions';
 import { sendGroupContentMessage } from '../chat/groupMessaging';
 import { ensureV2Session } from '../crypto/sessionBootstrap';
 import { sendContentMessage } from '../socket/messaging';
@@ -20,6 +20,9 @@ import { upsertStoredMessage, type AttachmentMeta, type StoredMessage } from '..
 import { dataUriFor, rememberDataUri, saveMedia } from './mediaStore';
 import { displayDimensions } from './photoDimensions';
 import { attachmentMetaOf } from './attachmentMeta';
+import { albumPlan } from './albums';
+import { runLimited } from './limited';
+import { clearUploadProgress, setUploadProgress } from './uploadProgress';
 import { xhrTransport, type BlobTransport, type ProgressFn } from './transport';
 
 /**
@@ -144,10 +147,17 @@ export function contentOf(meta: AttachmentMeta, caption?: string | null): Attach
 const genId = () => `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 
 /** Send an attachment message (1:1 or group) and store it locally; the UI learns of it through the patch bus. */
-export async function sendAttachmentMessage(p: { myUserId: string; target: ConversationTarget; content: AttachmentContent }): Promise<StoredMessage> {
+export async function sendAttachmentMessage(p: {
+  myUserId: string;
+  target: ConversationTarget;
+  content: AttachmentContent;
+  /** the placeholder's id and time (sendPhotos), so the sent message replaces it in place */
+  clientMessageId?: string;
+  createdAt?: number;
+}): Promise<StoredMessage> {
   const { myUserId, target, content } = p;
-  const clientMessageId = genId();
-  const createdAt = Date.now();
+  const clientMessageId = p.clientMessageId ?? genId();
+  const createdAt = p.createdAt ?? Date.now();
   const meta = metaOf(content);
   const text = content.caption ?? '';
   if (target.kind === 'group') {
@@ -170,6 +180,111 @@ export async function sendAttachmentMessage(p: { myUserId: string; target: Conve
   await upsertStoredMessage({ myUserId, peerUserId: target.peerUserId, message: stored });
   publishMessagePatch({ myUserId, peerKey: target.peerUserId, id: stored.id, message: stored });
   return stored;
+}
+
+/** How many photos upload at once; encryption itself runs one at a time on the JS thread. */
+const PARALLEL_UPLOADS = 3;
+
+/** True for the placeholder of a photo that is still uploading (its blob id is local). */
+export function isLocalPhoto(meta: AttachmentMeta): boolean {
+  return meta.blobId.startsWith('local-');
+}
+
+/**
+ * Send picked photos the way Telegram does (B18). Every photo appears in
+ * the chat at once as a "sending" placeholder that shows the picture from
+ * this phone, tagged with its album, so several photos show up as one album
+ * immediately. Uploads then run in parallel (each tile shows its progress),
+ * and each photo is sent, in album order, as soon as its upload is done;
+ * the sent message keeps the placeholder's id and time, so it replaces it
+ * in place. A photo whose upload or send fails stays in the album as
+ * failed; the others go on. The caption goes with the first photo.
+ */
+export async function sendPhotos(p: {
+  myUserId: string;
+  target: ConversationTarget;
+  images: PickedImage[];
+  caption?: string;
+  /** 0..1 over all photos, for the bar above the composer */
+  onProgress?: (fraction: number) => void;
+  transport?: BlobTransport;
+}): Promise<{ sent: number; failed: number }> {
+  const { myUserId, target, images } = p;
+  const peerKey = peerKeyOf(target);
+  const albums = albumPlan(images.length);
+  const startedAt = Date.now();
+  const fractions = images.map(() => 0);
+  const report = () => p.onProgress?.(fractions.reduce((a, b) => a + b, 0) / Math.max(1, images.length));
+
+  const items = images.map((image, index) => {
+    const clientMessageId = genId();
+    const localBlobId = `local-${clientMessageId}`;
+    const caption = index === 0 && p.caption?.trim() ? p.caption.trim() : undefined;
+    rememberDataUri(localBlobId, dataUriFor(image.contentType, image.bytes));
+    const meta: AttachmentMeta = { blobId: localBlobId, key: '', digest: '', size: image.bytes.length, contentType: image.contentType };
+    if (image.width) meta.width = image.width;
+    if (image.height) meta.height = image.height;
+    if (albums[index]) meta.album = { ...albums[index]! };
+    const placeholder: StoredMessage = {
+      id: clientMessageId,
+      clientMessageId,
+      serverMessageId: null,
+      direction: 'out',
+      text: caption ?? '',
+      createdAt: startedAt + index, // keeps the album order in the list
+      seq: null,
+      status: 'sending',
+      deliveredAt: null,
+      readAt: null,
+      replyTo: null,
+      attachment: meta,
+    };
+    setUploadProgress(localBlobId, 0);
+    publishMessagePatch({ myUserId, peerKey, id: clientMessageId, message: placeholder });
+    return { image, index, caption, localBlobId, placeholder };
+  });
+
+  const uploads = runLimited(items, PARALLEL_UPLOADS, (it) =>
+    uploadAttachment({
+      myUserId,
+      bytes: it.image.bytes,
+      contentType: it.image.contentType,
+      width: it.image.width,
+      height: it.image.height,
+      name: it.image.name,
+      caption: it.caption,
+      album: albums[it.index],
+      transport: p.transport,
+      onProgress: (loaded, total) => {
+        const f = total > 0 ? loaded / total : 0;
+        fractions[it.index] = f;
+        setUploadProgress(it.localBlobId, f);
+        report();
+      },
+    }),
+  );
+  uploads.forEach((u) => u.catch(() => undefined)); // each failure is handled below, in order
+
+  let sent = 0;
+  let failed = 0;
+  for (const it of items) {
+    let content: AttachmentContent | null = null;
+    try {
+      content = await uploads[it.index]!;
+      await sendAttachmentMessage({ myUserId, target, content, clientMessageId: it.placeholder.clientMessageId!, createdAt: it.placeholder.createdAt });
+      sent += 1;
+    } catch (e) {
+      failed += 1;
+      console.warn('[attachments] photo send failed:', (e as Error)?.message || e);
+      const attachment = content ? metaOf(content) : it.placeholder.attachment;
+      publishMessagePatch({ myUserId, peerKey, id: it.placeholder.id, message: { ...it.placeholder, attachment, status: 'failed' } });
+    } finally {
+      clearUploadProgress(it.localBlobId);
+      fractions[it.index] = 1;
+      report();
+    }
+  }
+  return { sent, failed };
 }
 
 export function isImage(meta: AttachmentMeta): boolean {

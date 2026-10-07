@@ -28,8 +28,7 @@ import Avatar from '../components/Avatar';
 import SearchInChatSheet from '../components/SearchInChatSheet';
 import ImageViewer from '../components/ImageViewer';
 import type { ViewerImage } from '../components/ImageViewer';
-import { pickImages, sendAttachmentMessage, uploadAttachment } from '../shared/media/attachments';
-import { albumPlan } from '../shared/media/albums';
+import { pickImages, sendAttachmentMessage, sendPhotos } from '../shared/media/attachments';
 import { describeMessageForQuote } from '../shared/chat/describeMessage';
 import { useLayeredBackHandler } from '../shared/ui/layeredBack';
 import { prewarmSafetyNumber } from '../shared/chat/safetyNumber';
@@ -248,26 +247,20 @@ export default function ChatScreen({
       const picked = await pickImages();
       if (picked.length === 0) return;
       const caption = text.trim();
-      // photos picked together are tagged as albums and drawn as one bubble
-      const albums = albumPlan(picked.length);
-      for (let index = 0; index < picked.length; index += 1) {
-        const image = picked[index]!;
-        setUploadState({ label: `Encrypting photo ${index + 1} of ${picked.length}…`, progress: null });
-        const content = await uploadAttachment({
-          myUserId: String(myUserId),
-          bytes: image.bytes,
-          contentType: image.contentType,
-          width: image.width,
-          height: image.height,
-          name: image.name,
-          caption: index === 0 ? caption : undefined,
-          album: albums[index],
-          onProgress: (loaded, total) => setUploadState({ label: `Uploading photo ${index + 1} of ${picked.length}…`, progress: total > 0 ? loaded / total : null }),
-        });
-        setUploadState({ label: `Sending photo ${index + 1} of ${picked.length}…`, progress: null });
-        await sendAttachmentMessage({ myUserId: String(myUserId), target: { kind: 'peer', peerUserId }, content });
-      }
       if (caption) setText('');
+      // B18: the photos appear in the chat at once (one album when several), each with its own progress
+      const label = picked.length > 1 ? `Sending ${picked.length} photos…` : 'Sending photo…';
+      setUploadState({ label, progress: 0 });
+      const result = await sendPhotos({
+        myUserId: String(myUserId),
+        target: { kind: 'peer', peerUserId },
+        images: picked,
+        caption,
+        onProgress: (fraction) => setUploadState({ label, progress: fraction }),
+      });
+      if (result.failed > 0 && Platform.OS === 'android') {
+        ToastAndroid.show(result.failed === 1 ? 'One photo could not be sent' : `${result.failed} photos could not be sent`, ToastAndroid.SHORT);
+      }
     } catch (e: any) {
       console.warn('[ChatScreen] photo send failed:', e);
       if (Platform.OS === 'android') ToastAndroid.show(e?.message || 'Could not send the photo', ToastAndroid.SHORT);

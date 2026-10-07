@@ -24,8 +24,8 @@ import Avatar from '../components/Avatar';
 import SearchInChatSheet from '../components/SearchInChatSheet';
 import AttachmentView from '../components/AttachmentView';
 import ImageViewer, { type ViewerImage } from '../components/ImageViewer';
-import { isAudio, isImage, pickImages, sendAttachmentMessage, uploadAttachment } from '../shared/media/attachments';
-import { albumKeyOf, albumPlan, albumStatus, groupAlbumRuns, mergeReactionSummaries } from '../shared/media/albums';
+import { isAudio, isImage, pickImages, sendAttachmentMessage, sendPhotos } from '../shared/media/attachments';
+import { albumKeyOf, albumStatus, groupAlbumRuns, mergeReactionSummaries } from '../shared/media/albums';
 import { photoMaxWidth } from '../shared/media/photoFrame';
 import PhotoAlbum, { albumFrame } from '../components/chat/PhotoAlbum';
 import { cachedMediaDataUri } from '../shared/media/mediaStore';
@@ -171,16 +171,14 @@ export default function GroupChatScreen({ groupId, initialName, jumpToMessageId,
       const picked = await pickImages();
       if (picked.length === 0) return;
       const caption = text.trim();
-      // photos picked together are tagged as albums and drawn as one bubble
-      const albums = albumPlan(picked.length);
-      for (let index = 0; index < picked.length; index += 1) {
-        const image = picked[index]!;
-        setUploadState({ label: `Encrypting photo ${index + 1} of ${picked.length}…`, progress: null });
-        const content = await uploadAttachment({ myUserId: String(myUserId), bytes: image.bytes, contentType: image.contentType, width: image.width, height: image.height, name: image.name, caption: index === 0 ? caption : undefined, album: albums[index], onProgress: (l, t) => setUploadState({ label: `Uploading photo ${index + 1} of ${picked.length}…`, progress: t > 0 ? l / t : null }) });
-        setUploadState({ label: `Sending photo ${index + 1} of ${picked.length}…`, progress: null });
-        await sendAttachmentMessage({ myUserId: String(myUserId), target: { kind: 'group', group }, content });
-      }
       if (caption) setText('');
+      // B18: the photos appear in the chat at once (one album when several), each with its own progress
+      const label = picked.length > 1 ? `Sending ${picked.length} photos…` : 'Sending photo…';
+      setUploadState({ label, progress: 0 });
+      const result = await sendPhotos({ myUserId: String(myUserId), target: { kind: 'group', group }, images: picked, caption, onProgress: (fraction) => setUploadState({ label, progress: fraction }) });
+      if (result.failed > 0 && Platform.OS === 'android') {
+        ToastAndroid.show(result.failed === 1 ? 'One photo could not be sent' : `${result.failed} photos could not be sent`, ToastAndroid.SHORT);
+      }
     } catch (e: any) {
       console.warn('[groups] photo send failed:', e);
       if (Platform.OS === 'android') ToastAndroid.show(e?.message || 'Could not send the photo', ToastAndroid.SHORT);

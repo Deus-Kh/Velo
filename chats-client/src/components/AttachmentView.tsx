@@ -5,6 +5,8 @@ import { photoFrame } from '../shared/media/photoFrame';
 import { protocolErrorCode } from '@velo/protocol';
 import { AUTO_DOWNLOAD_BYTES, downloadAttachment, isImage } from '../shared/media/attachments';
 import { cachedMediaDataUri, mediaDataUri } from '../shared/media/mediaStore';
+import { useUploadProgress } from '../shared/media/uploadProgress';
+import UploadRing from './chat/UploadRing';
 import type { AttachmentMeta } from '../shared/storage/messageStore';
 import { presentProtocolError } from '../shared/chat/protocolErrors';
 import VoiceNoteView from './VoiceNoteView';
@@ -53,6 +55,9 @@ function ImageAttachment({ myUserId, meta, mine, onOpen, onLongPress, frame: til
   const startedRef = useRef(false);
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   const frame = tileFrame ?? photoFrame(meta, windowWidth, windowHeight);
+  // B18: a photo still uploading shows the picture from this phone with a progress ring
+  const uploading = useUploadProgress(meta.blobId);
+  const isLocal = meta.blobId.startsWith('local-');
 
   const download = async () => {
     if (startedRef.current) return;
@@ -76,6 +81,7 @@ function ImageAttachment({ myUserId, meta, mine, onOpen, onLongPress, frame: til
   useEffect(() => {
     let cancelled = false;
     (async () => {
+      if (meta.blobId.startsWith('local-')) return; // a placeholder: the preview is in memory, nothing to fetch
       const local = await mediaDataUri(myUserId, meta.blobId, meta.contentType);
       if (cancelled) return;
       setChecked(true);
@@ -90,8 +96,13 @@ function ImageAttachment({ myUserId, meta, mine, onOpen, onLongPress, frame: til
 
   if (uri && isImage(meta)) {
     return (
-      <Pressable onPress={() => onOpen?.(uri)} onLongPress={onLongPress} delayLongPress={350} accessibilityLabel="Open the photo" style={{ width: frame.width, height: frame.height }}>
+      <Pressable onPress={() => onOpen?.(uri)} onLongPress={isLocal ? undefined : onLongPress} delayLongPress={350} accessibilityLabel="Open the photo" style={{ width: frame.width, height: frame.height }}>
         <Image source={{ uri }} style={{ width: frame.width, height: frame.height }} resizeMode="cover" accessibilityLabel="Photo" />
+        {uploading !== undefined ? (
+          <View pointerEvents="none" className="absolute inset-0 items-center justify-center bg-black/20">
+            <UploadRing progress={uploading} />
+          </View>
+        ) : null}
       </Pressable>
     );
   }
